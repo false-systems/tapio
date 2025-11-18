@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
@@ -15,6 +16,10 @@ import (
 // OTLPEmitter exports observer events to OpenTelemetry Collector using OTLP/HTTP.
 // Uses OpenTelemetry Logs API to export ObserverEvents as structured log records.
 // This is the PRIMARY emitter for Simple Mode deployments (no NATS dependency).
+//
+// Thread-Safety: This implementation is thread-safe. The Emit() method can be called
+// concurrently from multiple goroutines. The underlying OTEL SDK (LoggerProvider and
+// Logger) provides internal synchronization for concurrent access.
 type OTLPEmitter struct {
 	endpoint    string
 	logExporter *otlploghttp.Exporter
@@ -23,6 +28,10 @@ type OTLPEmitter struct {
 	// Prometheus metrics
 	logsExported prometheus.Counter
 	exportErrors prometheus.Counter
+
+	// Close synchronization
+	mu     sync.Mutex
+	closed bool
 }
 
 // NewOTLPEmitter creates an OTLP emitter that exports to the given endpoint.
@@ -171,12 +180,24 @@ func (e *OTLPEmitter) IsCritical() bool {
 }
 
 // Close shuts down the OTLP exporter and flushes any pending log records.
+// This method is idempotent - multiple calls are safe and will not cause errors.
 func (e *OTLPEmitter) Close() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Already closed - safe to return
+	if e.closed {
+		return nil
+	}
+
+	// Shutdown log provider
 	if e.logProvider != nil {
 		ctx := context.Background()
 		if err := e.logProvider.Shutdown(ctx); err != nil {
 			return fmt.Errorf("failed to shutdown log provider: %w", err)
 		}
 	}
+
+	e.closed = true
 	return nil
 }
