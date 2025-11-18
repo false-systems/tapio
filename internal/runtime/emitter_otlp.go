@@ -72,9 +72,9 @@ func NewOTLPEmitter(endpoint string, insecure bool) (*OTLPEmitter, error) {
 	// We recover from the panic since duplicate registration is non-critical.
 	func() {
 		defer func() {
-			if r := recover(); r != nil {
-				// Metric already registered - safe to continue
-			}
+			// Recover from any panic (expected on duplicate registration)
+			// We don't need to check or use the panic value - just recovering is enough
+			recover()
 		}()
 		prometheus.MustRegister(logsExported, exportErrors)
 	}()
