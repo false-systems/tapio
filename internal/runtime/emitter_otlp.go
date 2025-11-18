@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -18,6 +19,10 @@ type OTLPEmitter struct {
 	endpoint    string
 	logExporter *otlploghttp.Exporter
 	logProvider *sdklog.LoggerProvider
+
+	// Prometheus metrics
+	logsExported prometheus.Counter
+	exportErrors prometheus.Counter
 }
 
 // NewOTLPEmitter creates an OTLP emitter that exports to the given endpoint.
@@ -42,21 +47,44 @@ func NewOTLPEmitter(endpoint string, insecure bool) (*OTLPEmitter, error) {
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(exporter)),
 	)
 
+	// Initialize Prometheus metrics
+	logsExported := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "tapio_otlp_logs_exported_total",
+		Help: "Total number of log records exported to OTLP collector",
+	})
+
+	exportErrors := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "tapio_otlp_export_errors_total",
+		Help: "Total number of OTLP export errors",
+	})
+
+	// Register metrics (log error if already registered - safe for tests)
+	if err := prometheus.Register(logsExported); err != nil {
+		// Metric already registered - this is expected in tests
+	}
+	if err := prometheus.Register(exportErrors); err != nil {
+		// Metric already registered - this is expected in tests
+	}
+
 	return &OTLPEmitter{
-		endpoint:    endpoint,
-		logExporter: exporter,
-		logProvider: provider,
+		endpoint:     endpoint,
+		logExporter:  exporter,
+		logProvider:  provider,
+		logsExported: logsExported,
+		exportErrors: exportErrors,
 	}, nil
 }
 
 // Emit sends an observer event to OTLP collector as a structured log record.
 func (e *OTLPEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
 	if event == nil {
+		e.exportErrors.Inc()
 		return fmt.Errorf("event is nil")
 	}
 
 	// Check context cancellation first
 	if ctx.Err() != nil {
+		e.exportErrors.Inc()
 		return ctx.Err()
 	}
 
