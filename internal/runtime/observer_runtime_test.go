@@ -545,7 +545,7 @@ func TestObserverRuntime_MultipleEmitters_OneFailure(t *testing.T) {
 
 	// Working emitter should still succeed
 	assert.Equal(t, 1, emitter2.EmittedCount(), "Working emitter should receive event")
-	assert.Greater(t, emitter1.attemptCount, 0, "Failing emitter should have tried")
+	assert.Greater(t, emitter1.AttemptCount(), 0, "Failing emitter should have tried")
 }
 
 // RED: Test critical emitter failure blocks processing
@@ -580,5 +580,5 @@ func TestObserverRuntime_MultipleEmitters_CriticalFailure(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Critical emitter failure should cause retries
-	assert.Greater(t, emitter1.attemptCount, 1, "Should have retried critical emitter")
+	assert.Greater(t, emitter1.AttemptCount(), 1, "Should have retried critical emitter")
 }
