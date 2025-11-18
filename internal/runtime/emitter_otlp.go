@@ -99,7 +99,10 @@ func (e *OTLPEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) err
 	}
 
 	// Create span for this event
-	spanName := fmt.Sprintf("%s.%s", event.Type, event.Subtype)
+	spanName := event.Type
+	if event.Subtype != "" {
+		spanName = fmt.Sprintf("%s.%s", event.Type, event.Subtype)
+	}
 	ctx, span := e.tracer.Start(ctx, spanName)
 	defer span.End()
 
