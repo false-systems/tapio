@@ -73,9 +73,10 @@ func NewOTLPEmitter(endpoint string, insecure bool) (*OTLPEmitter, error) {
 	func() {
 		defer func() {
 			// Recover from any panic (expected on duplicate registration)
-			// We don't need to log or handle the panic - duplicate metric registration is non-critical
+			// Duplicate metric registration is non-critical - we silently ignore the panic
+			//nolint:staticcheck // SA9003: empty branch is intentional for panic recovery
 			if recover() != nil {
-				// Silently ignore duplicate registration panic
+				// Intentionally empty - just recovering from panic is sufficient
 			}
 		}()
 		prometheus.MustRegister(logsExported, exportErrors)
