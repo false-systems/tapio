@@ -7,7 +7,7 @@ import (
 )
 
 // CausalityTracker tracks span IDs for causality chain propagation.
-// Enables Edgar pattern: "this event caused that event" (Netflix-style correlation).
+// Enables root cause analysis: "this event caused that event".
 //
 // Thread-safe for concurrent access from multiple observers.
 type CausalityTracker struct {

@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// RED: Test ObserverEvent has Edgar correlation fields
-func TestObserverEvent_EdgarFields(t *testing.T) {
+// RED: Test ObserverEvent has causality correlation fields
+func TestObserverEvent_CausalityFields(t *testing.T) {
 	duration := uint64(5000000) // 5 seconds in microseconds
 
 	event := &ObserverEvent{
@@ -19,26 +19,26 @@ func TestObserverEvent_EdgarFields(t *testing.T) {
 		Source:    "container-observer",
 		Timestamp: time.Now(),
 
-		// Edgar correlation fields
-		TraceID:      "abc123",     // ❌ Already exists
-		SpanID:       "span-oom-1", // ❌ Already exists
-		ParentSpanID: "span-pod-1", // ❌ Doesn't exist yet - test will FAIL
-		Duration:     &duration,    // ❌ Doesn't exist yet - test will FAIL
-		TraceFlags:   0x01,         // ❌ Already exists
+		// Causality correlation fields
+		TraceID:      "abc123",
+		SpanID:       "span-oom-1",
+		ParentSpanID: "span-pod-1",
+		Duration:     &duration,
+		TraceFlags:   0x01,
 
 		// Event classification
-		Severity: SeverityCritical, // ❌ Doesn't exist yet - test will FAIL
-		Outcome:  OutcomeFailure,   // ❌ Doesn't exist yet - test will FAIL
+		Severity: SeverityCritical,
+		Outcome:  OutcomeFailure,
 
 		// Structured error
-		Error: &EventError{ // ❌ Doesn't exist yet - test will FAIL
+		Error: &EventError{
 			Code:    "OOM_KILL",
 			Message: "Container killed: out of memory",
 			Cause:   "Memory limit: 512Mi, Requested: 2Gi",
 		},
 	}
 
-	// Verify Edgar fields are populated
+	// Verify causality fields are populated
 	require.NotNil(t, event)
 	assert.Equal(t, "span-pod-1", event.ParentSpanID)
 	assert.NotNil(t, event.Duration)
@@ -54,14 +54,14 @@ func TestObserverEvent_EdgarFields(t *testing.T) {
 func TestSeverity_Values(t *testing.T) {
 	tests := []struct {
 		name     string
-		severity Severity // ❌ Doesn't exist yet
+		severity Severity
 		expected string
 	}{
-		{"debug", SeverityDebug, "debug"},          // ❌ Doesn't exist yet
-		{"info", SeverityInfo, "info"},             // ❌ Doesn't exist yet
-		{"warning", SeverityWarning, "warning"},    // ❌ Doesn't exist yet
-		{"error", SeverityError, "error"},          // ❌ Doesn't exist yet
-		{"critical", SeverityCritical, "critical"}, // ❌ Doesn't exist yet
+		{"debug", SeverityDebug, "debug"},
+		{"info", SeverityInfo, "info"},
+		{"warning", SeverityWarning, "warning"},
+		{"error", SeverityError, "error"},
+		{"critical", SeverityCritical, "critical"},
 	}
 
 	for _, tt := range tests {
@@ -75,12 +75,12 @@ func TestSeverity_Values(t *testing.T) {
 func TestOutcome_Values(t *testing.T) {
 	tests := []struct {
 		name     string
-		outcome  Outcome // ❌ Doesn't exist yet
+		outcome  Outcome
 		expected string
 	}{
-		{"success", OutcomeSuccess, "success"}, // ❌ Doesn't exist yet
-		{"failure", OutcomeFailure, "failure"}, // ❌ Doesn't exist yet
-		{"unknown", OutcomeUnknown, "unknown"}, // ❌ Doesn't exist yet
+		{"success", OutcomeSuccess, "success"},
+		{"failure", OutcomeFailure, "failure"},
+		{"unknown", OutcomeUnknown, "unknown"},
 	}
 
 	for _, tt := range tests {
@@ -92,7 +92,7 @@ func TestOutcome_Values(t *testing.T) {
 
 // RED: Test EventError structure
 func TestEventError_Fields(t *testing.T) {
-	err := &EventError{ // ❌ Doesn't exist yet
+	err := &EventError{
 		Code:    "ECONNREFUSED",
 		Message: "Connection refused",
 		Stack:   "stack trace here",
@@ -111,26 +111,26 @@ func TestObserverEvent_CausalityChain(t *testing.T) {
 	deployment := &ObserverEvent{
 		ID:       NewEventID(),
 		SpanID:   "span-dep-1",
-		Severity: SeverityInfo,   // ❌ Doesn't exist yet
-		Outcome:  OutcomeSuccess, // ❌ Doesn't exist yet
+		Severity: SeverityInfo,
+		Outcome:  OutcomeSuccess,
 	}
 
 	// Pod restart (caused by deployment)
 	pod := &ObserverEvent{
 		ID:           NewEventID(),
 		SpanID:       "span-pod-1",
-		ParentSpanID: "span-dep-1",    // ❌ Doesn't exist yet - points to deployment
-		Severity:     SeverityWarning, // ❌ Doesn't exist yet
-		Outcome:      OutcomeFailure,  // ❌ Doesn't exist yet
+		ParentSpanID: "span-dep-1", // Points to deployment
+		Severity:     SeverityWarning,
+		Outcome:      OutcomeFailure,
 	}
 
 	// OOM kill (caused by pod restart)
 	oom := &ObserverEvent{
 		ID:           NewEventID(),
 		SpanID:       "span-oom-1",
-		ParentSpanID: "span-pod-1",     // ❌ Doesn't exist yet - points to pod
-		Severity:     SeverityCritical, // ❌ Doesn't exist yet
-		Outcome:      OutcomeFailure,   // ❌ Doesn't exist yet
+		ParentSpanID: "span-pod-1", // Points to pod
+		Severity:     SeverityCritical,
+		Outcome:      OutcomeFailure,
 	}
 
 	// Verify causality chain
@@ -144,7 +144,7 @@ func TestObserverEvent_DurationOptional(t *testing.T) {
 	// Event without duration (e.g., state change)
 	eventNoDuration := &ObserverEvent{
 		ID:       NewEventID(),
-		Duration: nil, // ❌ Doesn't exist yet - optional
+		Duration: nil, // Optional - nil for instant events
 	}
 	assert.Nil(t, eventNoDuration.Duration)
 
@@ -152,7 +152,7 @@ func TestObserverEvent_DurationOptional(t *testing.T) {
 	duration := uint64(150000) // 150ms in microseconds
 	eventWithDuration := &ObserverEvent{
 		ID:       NewEventID(),
-		Duration: &duration, // ❌ Doesn't exist yet
+		Duration: &duration,
 	}
 	require.NotNil(t, eventWithDuration.Duration)
 	assert.Equal(t, uint64(150000), *eventWithDuration.Duration)
@@ -163,9 +163,9 @@ func TestObserverEvent_ErrorOptional(t *testing.T) {
 	// Success event (no error)
 	success := &ObserverEvent{
 		ID:       NewEventID(),
-		Outcome:  OutcomeSuccess, // ❌ Doesn't exist yet
-		Error:    nil,            // No error for success
-		Severity: SeverityInfo,   // ❌ Doesn't exist yet
+		Outcome:  OutcomeSuccess,
+		Error:    nil, // No error for success
+		Severity: SeverityInfo,
 	}
 	assert.Nil(t, success.Error)
 	assert.Equal(t, OutcomeSuccess, success.Outcome)
@@ -173,9 +173,9 @@ func TestObserverEvent_ErrorOptional(t *testing.T) {
 	// Failure event (with error)
 	failure := &ObserverEvent{
 		ID:       NewEventID(),
-		Outcome:  OutcomeFailure, // ❌ Doesn't exist yet
-		Severity: SeverityError,  // ❌ Doesn't exist yet
-		Error: &EventError{ // ❌ Doesn't exist yet
+		Outcome:  OutcomeFailure,
+		Severity: SeverityError,
+		Error: &EventError{
 			Code:    "ETIMEDOUT",
 			Message: "Connection timed out",
 		},

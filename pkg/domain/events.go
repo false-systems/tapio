@@ -25,7 +25,7 @@ type ObserverEvent struct {
 	SpanID     string `json:"span_id,omitempty"`     // W3C Span ID (16 hex chars)
 	TraceFlags byte   `json:"trace_flags,omitempty"` // W3C trace flags (sampled, etc)
 
-	// Edgar correlation pattern (Netflix-style causality chains)
+	// Causality-driven correlation (root cause analysis)
 	ParentSpanID string  `json:"parent_span_id,omitempty"` // Parent span for causality (deployment → pod → oom)
 	Duration     *uint64 `json:"duration,omitempty"`       // Event duration in microseconds (nil if instant event)
 
@@ -115,7 +115,7 @@ const (
 	OutcomeUnknown Outcome = "unknown"
 )
 
-// EventError contains structured error information for failed events (Edgar pattern).
+// EventError contains structured error information for failed events.
 // Only populated when Outcome == OutcomeFailure.
 type EventError struct {
 	Code    string `json:"code"`            // Error code (ECONNREFUSED, OOM_KILL, ETIMEDOUT, etc.)
