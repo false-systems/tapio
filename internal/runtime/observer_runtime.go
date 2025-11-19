@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/yairfalse/tapio/internal/base"
 )
 
 // ObserverRuntime is the unified infrastructure for all observers.
@@ -16,6 +17,7 @@ type ObserverRuntime struct {
 	emitters    []Emitter
 	sampler     *Sampler
 	queue       *BoundedQueue
+	causality   *base.CausalityTracker // Tracks causality chains across all events
 	mu          sync.RWMutex
 	running     bool
 	retryMu     sync.Mutex
@@ -34,6 +36,7 @@ func NewObserverRuntime(processor EventProcessor, opts ...Option) (*ObserverRunt
 	runtime := &ObserverRuntime{
 		config:      config,
 		processor:   processor,
+		causality:   base.NewCausalityTracker(), // Create causality tracker
 		retryCounts: make(map[string]int),
 	}
 
@@ -145,6 +148,19 @@ func WithSamplingDisabled() Option {
 	return func(r *ObserverRuntime) {
 		r.config.Sampling.Enabled = false
 	}
+}
+
+// CausalityTracker returns the causality tracker for this runtime.
+// Observers can use this to query parent spans and build causality chains.
+func (r *ObserverRuntime) CausalityTracker() *base.CausalityTracker {
+	return r.causality
+}
+
+// GetParentSpanForEntity returns the parent span ID for a given entity.
+// Entity ID format: "namespace/name" for K8s resources, "ip:port" for network endpoints.
+// Returns empty string if no parent span is tracked for this entity.
+func (r *ObserverRuntime) GetParentSpanForEntity(entityID string) string {
+	return r.causality.GetParentSpanForEntity(entityID)
 }
 
 // drainQueue continuously drains events from queue and emits to emitters

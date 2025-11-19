@@ -1,4 +1,33 @@
-# 📋 TAPIO PRODUCTION STANDARDS - ZERO TOLERANCE ENFORCEMENT
+# TAPIO - Kubernetes Observability Platform
+
+## 🚪 Project Overview
+TAPIO is a lean, eBPF + Kubernetes observability platform that generates semantic events from BOTH kernel signals (eBPF) AND Kubernetes API events. Think "Beyla meets Kube-state-metrics" - we observe EVERYTHING happening in your cluster: network flows (eBPF), OOM kills (eBPF), pod scheduling (K8s API), DNS queries (eBPF), deployment changes (K8s API). We combine kernel-level truth with cluster-level context. Named after the Finnish god of forests - he watches over everything growing in the forest.
+
+## 🧠 Hybrid Observer Architecture
+**THE CORE INSIGHT**: Kernel visibility alone is blind to orchestration. K8s API alone is blind to reality. Together, they tell the complete story.
+
+```
+The Observer Runtime IS the engine. Two worlds feed it:
+- eBPF Observers: Kernel/network/container events (what's REALLY happening)
+  └─> Network, Container, Node observers
+- K8s Observers: API server events (what the orchestrator THINKS is happening)
+  └─> Pod, Service, Deployment observers (client-go informers)
+- Runtime: Process + correlate events → semantic ObserverEvents
+- Emitters: Fan out events (OTLP, NATS, File)
+- Intelligence: Correlate eBPF + K8s events → root causes
+```
+
+## 🎯 Core Philosophy
+- **Hybrid observation** - eBPF for reality + K8s API for context = complete picture
+- **Semantic events** - 12 event types (network, kernel, container, pod, service...), typed structs
+- **Dual-source correlation** - Match eBPF events to K8s resources (PodUID, namespace, labels)
+- **Lean runtime** - Single eBPF program per observer, client-go informers for K8s
+- **Multi-tier ready** - SIMPLE (OTLP) → FREE (NATS) → ENTERPRISE (NATS+Intelligence)
+- **Direct OTEL** - No wrappers, pure OpenTelemetry instrumentation
+- **IPv4 + IPv6** - Both address families supported everywhere
+- **TDD mandatory** - Tests first, code second (RED → GREEN → REFACTOR)
+- **Zero dependencies** - Minimal external deps, stdlib-first approach
+- **Prometheus patterns** - oklog/run, promauto.With(reg), no globals
 
 ## 🚨 CRITICAL: ENFORCEMENT STATUS
 
@@ -596,6 +625,24 @@ func Process() error {
     return cleanup()
 }
 ```
+
+## 🎯 SMART DESIGN PRINCIPLES
+
+1. **Hybrid Observer-First** - Every feature starts with "what signal do we need?" (eBPF kernel event OR K8s API event)
+2. **eBPF captures, userspace parses** - eBPF collects raw data, Go processes it (10x faster!)
+3. **K8s informers for context** - Use client-go informers, not polling API server
+4. **Correlate both worlds** - Match eBPF events to K8s resources (PodUID, namespace, labels)
+5. **Small functions** - If you can't understand it in 10 seconds, split it
+6. **Interface-driven** - Define interfaces first, implement later
+7. **Single eBPF program per observer** - Don't add new eBPF programs, enhance existing ones
+8. **IPv4 + IPv6 everywhere** - Every network processor must handle both address families
+9. **Composition over inheritance** - Use interfaces and composition
+10. **Fail fast** - Validate early, return errors immediately
+11. **No magic** - Code should be obvious, not clever
+12. **Brendan Gregg's wisdom** - "eBPF should capture, userspace should parse"
+13. **Typed everything** - Use domain types, not primitives or interface{}
+14. **Test both sources** - Unit tests for eBPF observers AND K8s observers
+15. **Test both families** - Every network test needs IPv4 AND IPv6 variants
 
 ## 🏛️ ARCHITECTURE RULES (IMMUTABLE)
 
