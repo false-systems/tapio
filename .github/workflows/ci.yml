@@ -51,21 +51,21 @@ jobs:
         id: filter
         shell: bash
         run: |
-          # Go files
-          GO_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep '\.go$' || true)
+          # Go files (convert newlines to spaces for single-line output)
+          GO_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep '\.go$' | tr '\n' ' ' || true)
           echo "go-files=$GO_FILES" >> "$GITHUB_OUTPUT"
 
-          # eBPF files
-          EBPF_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep '\.\(c\|h\)$' || true)
+          # eBPF files (convert newlines to spaces)
+          EBPF_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep '\.\(c\|h\)$' | tr '\n' ' ' || true)
           echo "ebpf-files=$EBPF_FILES" >> "$GITHUB_OUTPUT"
 
-          # Docker files
-          DOCKER_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep 'Dockerfile' || true)
+          # Docker files (convert newlines to spaces)
+          DOCKER_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep 'Dockerfile' | tr '\n' ' ' || true)
           echo "docker-files=$DOCKER_FILES" >> "$GITHUB_OUTPUT"
 
           # Extract unique Go packages
           if [ -n "$GO_FILES" ]; then
-            PACKAGES=$(echo "$GO_FILES" | while read -r file; do dirname "$file"; done | sort -u | while read -r dir; do echo "./${dir}/..."; done | tr '\n' ' ')
+            PACKAGES=$(echo "$GO_FILES" | tr ' ' '\n' | xargs -n1 dirname | sort -u | xargs -I {} echo "./{}/..." | tr '\n' ' ')
             echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
             echo "has-go=true" >> "$GITHUB_OUTPUT"
           else
