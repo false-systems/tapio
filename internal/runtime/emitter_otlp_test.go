@@ -16,7 +16,11 @@ func TestOTLPEmitter_BasicEmit(t *testing.T) {
 	emitter, err := NewOTLPEmitter("localhost:4317", true) // insecure=true for test
 	require.NoError(t, err, "NewOTLPEmitter should succeed")
 	require.NotNil(t, emitter, "emitter should not be nil")
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	// Create a basic domain event
 	event := &domain.ObserverEvent{
@@ -37,7 +41,11 @@ func TestOTLPEmitter_BasicEmit(t *testing.T) {
 func TestOTLPEmitter_Interface(t *testing.T) {
 	emitter, err := NewOTLPEmitter("localhost:4317", true)
 	require.NoError(t, err)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	// Verify interface methods
 	assert.Equal(t, "otlp", emitter.Name())
@@ -48,7 +56,11 @@ func TestOTLPEmitter_Interface(t *testing.T) {
 func TestOTLPEmitter_TraceContext(t *testing.T) {
 	emitter, err := NewOTLPEmitter("localhost:4317", true)
 	require.NoError(t, err)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	// Event with trace context
 	event := &domain.ObserverEvent{
@@ -71,7 +83,11 @@ func TestOTLPEmitter_TraceContext(t *testing.T) {
 func TestOTLPEmitter_ContextCancellation(t *testing.T) {
 	emitter, err := NewOTLPEmitter("localhost:4317", true)
 	require.NoError(t, err)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	event := &domain.ObserverEvent{
 		ID:        "test-789",
@@ -101,4 +117,87 @@ func TestOTLPEmitter_Close(t *testing.T) {
 	// Multiple Close() calls should be safe
 	err = emitter.Close()
 	assert.NoError(t, err, "Multiple Close() calls should be safe")
+}
+
+// RED: Test OTLP emitter exports NetworkData as structured attributes
+func TestOTLPEmitter_NetworkDataAttributes(t *testing.T) {
+	emitter, err := NewOTLPEmitter("localhost:4318", true) // HTTP uses 4318
+	require.NoError(t, err)
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
+
+	event := &domain.ObserverEvent{
+		ID:        "net-123",
+		Type:      string(domain.EventTypeNetwork),
+		Subtype:   "connection_established",
+		Source:    "network-observer",
+		Timestamp: time.Now(),
+		NetworkData: &domain.NetworkEventData{
+			SrcIP:    "10.0.0.1",
+			DstIP:    "10.0.0.2",
+			SrcPort:  54321,
+			DstPort:  443,
+			Protocol: "TCP",
+		},
+	}
+
+	ctx := context.Background()
+	err = emitter.Emit(ctx, event)
+	require.NoError(t, err, "Emit with NetworkData should succeed")
+}
+
+// RED: Test OTLP emitter exports SchedulingData as structured attributes
+func TestOTLPEmitter_SchedulingDataAttributes(t *testing.T) {
+	emitter, err := NewOTLPEmitter("localhost:4318", true)
+	require.NoError(t, err)
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
+
+	event := &domain.ObserverEvent{
+		ID:        "sched-456",
+		Type:      string(domain.EventTypePod),
+		Subtype:   "pod_scheduled",
+		Source:    "scheduling-observer",
+		Timestamp: time.Now(),
+		SchedulingData: &domain.SchedulingEventData{
+			PodUID:         "abc-123-def",
+			Attempts:       2,
+			NodesFailed:    3,
+			NodesTotal:     5,
+			FailureReasons: map[string]int{"InsufficientCPU": 2, "Taints": 1},
+		},
+	}
+
+	ctx := context.Background()
+	err = emitter.Emit(ctx, event)
+	require.NoError(t, err, "Emit with SchedulingData should succeed")
+}
+
+// RED: Test OTLP emitter uses HTTP transport (not gRPC)
+func TestOTLPEmitter_HTTPTransport(t *testing.T) {
+	// HTTP endpoint uses port 4318 (not 4317 for gRPC)
+	emitter, err := NewOTLPEmitter("localhost:4318", true)
+	require.NoError(t, err)
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
+
+	event := &domain.ObserverEvent{
+		ID:        "http-789",
+		Type:      string(domain.EventTypeNetwork),
+		Source:    "test-observer",
+		Timestamp: time.Now(),
+	}
+
+	ctx := context.Background()
+	err = emitter.Emit(ctx, event)
+	require.NoError(t, err, "HTTP transport should work")
 }

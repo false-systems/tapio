@@ -18,7 +18,11 @@ func TestNATSEmitter_BasicEmit(t *testing.T) {
 		t.Skipf("Skipping test - NATS server not available: %v", err)
 	}
 	require.NotNil(t, emitter, "emitter should not be nil")
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	// Create a basic domain event
 	event := &domain.ObserverEvent{
@@ -41,7 +45,11 @@ func TestNATSEmitter_Interface(t *testing.T) {
 	if err != nil {
 		t.Skipf("Skipping test - NATS server not available: %v", err)
 	}
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	// Verify interface methods
 	assert.Equal(t, "nats", emitter.Name())
@@ -54,7 +62,11 @@ func TestNATSEmitter_SubjectConstruction(t *testing.T) {
 	if err != nil {
 		t.Skipf("Skipping test - NATS server not available: %v", err)
 	}
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	tests := []struct {
 		name            string
@@ -111,7 +123,11 @@ func TestNATSEmitter_ContextCancellation(t *testing.T) {
 	if err != nil {
 		t.Skipf("Skipping test - NATS server not available: %v", err)
 	}
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	event := &domain.ObserverEvent{
 		ID:        "test-789",
