@@ -25,6 +25,17 @@ type ObserverEvent struct {
 	SpanID     string `json:"span_id,omitempty"`     // W3C Span ID (16 hex chars)
 	TraceFlags byte   `json:"trace_flags,omitempty"` // W3C trace flags (sampled, etc)
 
+	// Causality-driven correlation (root cause analysis)
+	ParentSpanID string  `json:"parent_span_id,omitempty"` // Parent span for causality (deployment → pod → oom)
+	Duration     *uint64 `json:"duration,omitempty"`       // Event duration in microseconds (nil if instant event)
+
+	// Event classification (for correlation and alerting)
+	Severity Severity `json:"severity,omitempty"` // debug, info, warning, error, critical
+	Outcome  Outcome  `json:"outcome,omitempty"`  // success, failure, unknown
+
+	// Structured error details (present when Outcome == Failure)
+	Error *EventError `json:"error,omitempty"`
+
 	// Typed event data - strongly typed structs only
 	NetworkData    *NetworkEventData    `json:"network_data,omitempty"`
 	KernelData     *KernelEventData     `json:"kernel_data,omitempty"`
@@ -103,6 +114,15 @@ const (
 	OutcomeFailure Outcome = "failure"
 	OutcomeUnknown Outcome = "unknown"
 )
+
+// EventError contains structured error information for failed events.
+// Only populated when Outcome == OutcomeFailure.
+type EventError struct {
+	Code    string `json:"code"`            // Error code (ECONNREFUSED, OOM_KILL, ETIMEDOUT, etc.)
+	Message string `json:"message"`         // Human-readable error message
+	Stack   string `json:"stack,omitempty"` // Stack trace if available
+	Cause   string `json:"cause,omitempty"` // Root cause if known
+}
 
 // Entity represents a graph node for correlation
 type Entity struct {
