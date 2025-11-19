@@ -19,7 +19,11 @@ func TestFileEmitter_BasicEmit(t *testing.T) {
 	// Create temp file
 	tmpDir, err := os.MkdirTemp("", "test-file-emitter-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("failed to remove temp dir: %v", err)
+		}
+	}()
 
 	filePath := filepath.Join(tmpDir, "events.json")
 
@@ -27,7 +31,11 @@ func TestFileEmitter_BasicEmit(t *testing.T) {
 	emitter, err := NewFileEmitter(filePath)
 	require.NoError(t, err, "NewFileEmitter should succeed")
 	require.NotNil(t, emitter, "emitter should not be nil")
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	// Create a basic domain event
 	event := &domain.ObserverEvent{
@@ -53,12 +61,20 @@ func TestFileEmitter_BasicEmit(t *testing.T) {
 func TestFileEmitter_Interface(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-file-emitter-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("failed to remove temp dir: %v", err)
+		}
+	}()
 
 	filePath := filepath.Join(tmpDir, "events.json")
 	emitter, err := NewFileEmitter(filePath)
 	require.NoError(t, err)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	// Verify interface methods
 	assert.Equal(t, "file", emitter.Name())
@@ -69,12 +85,20 @@ func TestFileEmitter_Interface(t *testing.T) {
 func TestFileEmitter_JSONLines(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-file-emitter-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("failed to remove temp dir: %v", err)
+		}
+	}()
 
 	filePath := filepath.Join(tmpDir, "events.json")
 	emitter, err := NewFileEmitter(filePath)
 	require.NoError(t, err)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	// Emit multiple events
 	ctx := context.Background()
@@ -120,7 +144,11 @@ func TestFileEmitter_JSONLines(t *testing.T) {
 func TestFileEmitter_CloseFlushes(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-file-emitter-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("failed to remove temp dir: %v", err)
+		}
+	}()
 
 	filePath := filepath.Join(tmpDir, "events.json")
 	emitter, err := NewFileEmitter(filePath)
@@ -155,12 +183,20 @@ func TestFileEmitter_CloseFlushes(t *testing.T) {
 func TestFileEmitter_ContextCancellation(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-file-emitter-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("failed to remove temp dir: %v", err)
+		}
+	}()
 
 	filePath := filepath.Join(tmpDir, "events.json")
 	emitter, err := NewFileEmitter(filePath)
 	require.NoError(t, err)
-	defer emitter.Close()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			t.Logf("failed to close emitter: %v", err)
+		}
+	}()
 
 	event := &domain.ObserverEvent{
 		ID:        "test-cancel",

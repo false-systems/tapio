@@ -471,3 +471,114 @@ func TestObserverRuntime_SamplingKeepsEvents(t *testing.T) {
 	// Emitter SHOULD receive event (100% sampling)
 	assert.Equal(t, 1, emitter.EmittedCount(), "Event should be kept")
 }
+
+// RED: Test multiple emitters fan-out (OTLP + File simultaneously)
+func TestObserverRuntime_MultipleEmitters_FanOut(t *testing.T) {
+	proc := &mockProcessor{name: "test"}
+
+	// Create two emitters
+	emitter1 := &mockEmitter{name: "otlp", critical: true}
+	emitter2 := &mockEmitter{name: "file", critical: false}
+
+	runtime, err := NewObserverRuntime(proc,
+		WithEmitters(emitter1, emitter2),
+		WithSamplingDisabled(), // Disable sampling for predictable tests
+	)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	go func() {
+		err := runtime.Run(ctx)
+		assert.NoError(t, err)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Process one event
+	err = runtime.ProcessEvent(ctx, []byte("test-data"))
+	require.NoError(t, err)
+
+	// Give it time to drain queue and emit to both (default drain interval is 50ms)
+	time.Sleep(500 * time.Millisecond)
+
+	// Both emitters should receive the same event
+	assert.Equal(t, 1, emitter1.EmittedCount(), "OTLP emitter should receive event")
+	assert.Equal(t, 1, emitter2.EmittedCount(), "File emitter should receive event")
+
+	// Verify they got the same event (only if both received it)
+	if emitter1.EmittedCount() > 0 && emitter2.EmittedCount() > 0 {
+		assert.Equal(t, emitter1.EmittedEvents()[0].ID, emitter2.EmittedEvents()[0].ID)
+	}
+}
+
+// RED: Test one emitter failure doesn't block others
+func TestObserverRuntime_MultipleEmitters_OneFailure(t *testing.T) {
+	proc := &mockProcessor{name: "test"}
+
+	// Create emitters (emitter1 will fail)
+	emitter1 := &mockEmitter{name: "failing", critical: false, alwaysFail: true}
+	emitter2 := &mockEmitter{name: "working", critical: false}
+
+	runtime, err := NewObserverRuntime(proc,
+		WithEmitters(emitter1, emitter2),
+		WithSamplingDisabled(),
+	)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	go func() {
+		err := runtime.Run(ctx)
+		assert.NoError(t, err)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Process event
+	err = runtime.ProcessEvent(ctx, []byte("test-data"))
+	require.NoError(t, err)
+
+	time.Sleep(500 * time.Millisecond)
+
+	// Working emitter should still succeed
+	assert.Equal(t, 1, emitter2.EmittedCount(), "Working emitter should receive event")
+	assert.Greater(t, emitter1.AttemptCount(), 0, "Failing emitter should have tried")
+}
+
+// RED: Test critical emitter failure blocks processing
+func TestObserverRuntime_MultipleEmitters_CriticalFailure(t *testing.T) {
+	proc := &mockProcessor{name: "test"}
+
+	// Create emitters (critical one fails)
+	emitter1 := &mockEmitter{name: "critical-failing", critical: true, alwaysFail: true}
+	emitter2 := &mockEmitter{name: "non-critical", critical: false}
+
+	runtime, err := NewObserverRuntime(proc,
+		WithEmitters(emitter1, emitter2),
+		WithSamplingDisabled(),
+	)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	go func() {
+		err := runtime.Run(ctx)
+		assert.NoError(t, err)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Process event
+	err = runtime.ProcessEvent(ctx, []byte("test-data"))
+	require.NoError(t, err)
+
+	// Give it time to retry and fail
+	time.Sleep(500 * time.Millisecond)
+
+	// Critical emitter failure should cause retries
+	assert.Greater(t, emitter1.AttemptCount(), 1, "Should have retried critical emitter")
+}
