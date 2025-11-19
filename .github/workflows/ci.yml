@@ -65,7 +65,7 @@ jobs:
 
           # Extract unique Go packages
           if [ -n "$GO_FILES" ]; then
-            PACKAGES=$(echo "$GO_FILES" | xargs -n1 dirname | sort -u | xargs -I {} echo "./{}/..." | tr '\n' ' ')
+            PACKAGES=$(echo "$GO_FILES" | while read -r file; do dirname "$file"; done | sort -u | while read -r dir; do echo "./${dir}/..."; done | tr '\n' ' ')
             echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
             echo "has-go=true" >> "$GITHUB_OUTPUT"
           else
