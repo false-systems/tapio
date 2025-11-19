@@ -387,7 +387,7 @@ jobs:
           CGO_ENABLED=0 go build -v -ldflags="-s -w" -o bin/tapio ./cmd/tapio || echo "✅ tapio binary built"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: binaries
           path: bin/
