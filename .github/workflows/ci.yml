@@ -147,12 +147,19 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has-go == 'true'
+    needs: [detect-changes, build-ebpf]
+    if: always() && needs.detect-changes.outputs.has-go == 'true'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Download eBPF artifacts
+        if: always() && needs.build-ebpf.result == 'success'
+        uses: actions/download-artifact@v6
+        with:
+          name: ebpf-generated
+          path: .
 
       - name: Set up Go
         uses: actions/setup-go@v5
