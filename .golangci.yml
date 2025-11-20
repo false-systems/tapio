@@ -1,8 +1,7 @@
 # ==========================================
-# Tapio golangci-lint Configuration v1.x/v2.x
+# Tapio golangci-lint Configuration
+# Compatible with golangci-lint v1.x (v2 not yet supported by GitHub Action)
 # ==========================================
-
-version: 2
 
 run:
   timeout: 5m
