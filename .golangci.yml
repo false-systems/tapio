@@ -37,9 +37,3 @@ issues:
   exclude-dirs:
     - internal/observers/network/bpf
     - internal/observers/node/bpf
-
-  # Skip packages that require eBPF-generated Go code
-  # These are checked when eBPF files change
-  skip-dirs:
-    - internal/observers/network
-    - internal/observers/node
