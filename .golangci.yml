@@ -33,7 +33,9 @@ issues:
   # Fix found issues (if it's supported by the linter)
   fix: false
 
-  # Exclude generated eBPF code
+  # Exclude packages that need eBPF-generated code
   exclude-dirs:
     - internal/observers/network/bpf
+    - internal/observers/network
     - internal/observers/node/bpf
+    - internal/observers/node
