@@ -33,9 +33,17 @@ type CausalityTracker struct {
 }
 
 // NewCausalityTracker creates a new causality tracker with LRU caches.
+// Panics if cache initialization fails (programming error, should never happen).
 func NewCausalityTracker() *CausalityTracker {
-	entityCache, _ := lru.New[string, string](maxCachedEntities)
-	spanCache, _ := lru.New[string, string](maxCachedSpans)
+	entityCache, err := lru.New[string, string](maxCachedEntities)
+	if err != nil {
+		panic("failed to create entity LRU cache: " + err.Error())
+	}
+
+	spanCache, err := lru.New[string, string](maxCachedSpans)
+	if err != nil {
+		panic("failed to create span LRU cache: " + err.Error())
+	}
 
 	return &CausalityTracker{
 		entitySpans: entityCache,
