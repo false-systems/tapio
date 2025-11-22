@@ -206,7 +206,7 @@ func TestCausalityTracker_BuildCausalityChain_UnknownSpan(t *testing.T) {
 
 // RED: Test LRU eviction - entity cache evicts old entries when full
 func TestCausalityTracker_LRUEviction_EntityCache(t *testing.T) {
-	tracker := NewCausalityTracker() // ❌ Will fail - no LRU yet
+	tracker := NewCausalityTracker() // Test LRU eviction behavior
 
 	// Add 10,001 entities (exceeds 10K cache limit)
 	for i := 0; i < 10001; i++ {
