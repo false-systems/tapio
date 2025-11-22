@@ -228,7 +228,7 @@ func TestCausalityTracker_LRUEviction_EntityCache(t *testing.T) {
 
 // RED: Test LRU eviction - span parent cache evicts old entries
 func TestCausalityTracker_LRUEviction_SpanCache(t *testing.T) {
-	tracker := NewCausalityTracker() // ❌ Will fail - no LRU yet
+	tracker := NewCausalityTracker() // LRU eviction should occur
 
 	// Add 10,001 span parent relationships
 	for i := 0; i < 10001; i++ {
