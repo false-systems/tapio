@@ -206,7 +206,7 @@ func TestCausalityTracker_BuildCausalityChain_UnknownSpan(t *testing.T) {
 
 // Test LRU eviction - entity cache evicts old entries when full
 func TestCausalityTracker_LRUEviction_EntityCache(t *testing.T) {
-	tracker := NewCausalityTracker()
+	tracker := NewCausalityTracker() // Test LRU eviction behavior
 
 	// Add 10,001 entities (exceeds 10K cache limit)
 	for i := 0; i < 10001; i++ {
@@ -228,7 +228,7 @@ func TestCausalityTracker_LRUEviction_EntityCache(t *testing.T) {
 
 // Test LRU eviction - span parent cache evicts old entries
 func TestCausalityTracker_LRUEviction_SpanCache(t *testing.T) {
-	tracker := NewCausalityTracker()
+	tracker := NewCausalityTracker() // LRU eviction should occur
 
 	// Add 10,001 span parent relationships
 	for i := 0; i < 10001; i++ {
@@ -252,7 +252,7 @@ func TestCausalityTracker_LRUEviction_SpanCache(t *testing.T) {
 
 // Test cache doesn't grow unbounded
 func TestCausalityTracker_BoundedMemory(t *testing.T) {
-	tracker := NewCausalityTracker()
+	tracker := NewCausalityTracker() // Verifies cache bounds are enforced
 
 	// Add 20K entities (2x cache limit)
 	for i := 0; i < 20000; i++ {
