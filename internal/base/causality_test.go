@@ -252,7 +252,7 @@ func TestCausalityTracker_LRUEviction_SpanCache(t *testing.T) {
 
 // RED: Test cache doesn't grow unbounded
 func TestCausalityTracker_BoundedMemory(t *testing.T) {
-	tracker := NewCausalityTracker() // ❌ Will fail - no bounds yet
+	tracker := NewCausalityTracker() // Verifies cache bounds are enforced
 
 	// Add 20K entities (2x cache limit)
 	for i := 0; i < 20000; i++ {
