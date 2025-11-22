@@ -204,7 +204,7 @@ func TestCausalityTracker_BuildCausalityChain_UnknownSpan(t *testing.T) {
 	assert.Equal(t, "unknown-span-id", chain[0])
 }
 
-// RED: Test LRU eviction - entity cache evicts old entries when full
+// Test LRU eviction - entity cache evicts old entries when full
 func TestCausalityTracker_LRUEviction_EntityCache(t *testing.T) {
 	tracker := NewCausalityTracker() // Test LRU eviction behavior
 
@@ -226,7 +226,7 @@ func TestCausalityTracker_LRUEviction_EntityCache(t *testing.T) {
 	assert.Equal(t, formatSpanID(10000), lastEntity, "Last entity should still be in cache")
 }
 
-// RED: Test LRU eviction - span parent cache evicts old entries
+// Test LRU eviction - span parent cache evicts old entries
 func TestCausalityTracker_LRUEviction_SpanCache(t *testing.T) {
 	tracker := NewCausalityTracker() // LRU eviction should occur
 
@@ -250,7 +250,7 @@ func TestCausalityTracker_LRUEviction_SpanCache(t *testing.T) {
 	assert.Equal(t, formatParentID(10000), lastChain[0])
 }
 
-// RED: Test cache doesn't grow unbounded
+// Test cache doesn't grow unbounded
 func TestCausalityTracker_BoundedMemory(t *testing.T) {
 	tracker := NewCausalityTracker() // Verifies cache bounds are enforced
 

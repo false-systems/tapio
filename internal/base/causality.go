@@ -79,11 +79,12 @@ func (c *CausalityTracker) RecordEvent(event *domain.ObserverEvent, primaryEntit
 //
 // Thread-safe for concurrent reads.
 // Returns empty string if entity not in cache (evicted or never recorded).
+// Uses Peek() to avoid mutating LRU cache (no access time update).
 func (c *CausalityTracker) GetParentSpanForEntity(entityID string) string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	spanID, ok := c.entitySpans.Get(entityID)
+	spanID, ok := c.entitySpans.Peek(entityID)
 	if !ok {
 		return "" // Not found (evicted or never recorded)
 	}
@@ -102,6 +103,7 @@ func (c *CausalityTracker) GetParentSpanForEntity(entityID string) string {
 //
 // Thread-safe for concurrent reads.
 // Chain may be incomplete if parent spans evicted from LRU cache.
+// Uses Peek() to avoid mutating LRU cache (no access time update).
 func (c *CausalityTracker) BuildCausalityChain(spanID string) []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -111,7 +113,7 @@ func (c *CausalityTracker) BuildCausalityChain(spanID string) []string {
 
 	// Walk up parent chain (max 10 hops to prevent infinite loops)
 	for i := 0; i < 10; i++ {
-		parent, exists := c.spanParents.Get(current)
+		parent, exists := c.spanParents.Peek(current)
 		if !exists {
 			break // Reached root (or parent evicted from cache)
 		}
