@@ -1,6 +1,7 @@
 package base
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -201,4 +202,90 @@ func TestCausalityTracker_BuildCausalityChain_UnknownSpan(t *testing.T) {
 	// Should return single-element chain with unknown span
 	require.Len(t, chain, 1)
 	assert.Equal(t, "unknown-span-id", chain[0])
+}
+
+// RED: Test LRU eviction - entity cache evicts old entries when full
+func TestCausalityTracker_LRUEviction_EntityCache(t *testing.T) {
+	tracker := NewCausalityTracker() // ❌ Will fail - no LRU yet
+
+	// Add 10,001 entities (exceeds 10K cache limit)
+	for i := 0; i < 10001; i++ {
+		event := &domain.ObserverEvent{
+			ID:     domain.NewEventID(),
+			SpanID: formatSpanID(i),
+		}
+		tracker.RecordEvent(event, formatEntityID(i))
+	}
+
+	// First entity should be evicted (LRU)
+	firstEntity := tracker.GetParentSpanForEntity(formatEntityID(0))
+	assert.Empty(t, firstEntity, "First entity should be evicted from LRU cache")
+
+	// Most recent entity should still exist
+	lastEntity := tracker.GetParentSpanForEntity(formatEntityID(10000))
+	assert.Equal(t, formatSpanID(10000), lastEntity, "Last entity should still be in cache")
+}
+
+// RED: Test LRU eviction - span parent cache evicts old entries
+func TestCausalityTracker_LRUEviction_SpanCache(t *testing.T) {
+	tracker := NewCausalityTracker() // ❌ Will fail - no LRU yet
+
+	// Add 10,001 span parent relationships
+	for i := 0; i < 10001; i++ {
+		event := &domain.ObserverEvent{
+			ID:           domain.NewEventID(),
+			SpanID:       formatSpanID(i),
+			ParentSpanID: formatParentID(i),
+		}
+		tracker.RecordEvent(event, formatEntityID(i))
+	}
+
+	// First span parent should be evicted
+	firstChain := tracker.BuildCausalityChain(formatSpanID(0))
+	require.Len(t, firstChain, 1, "First span parent evicted, chain is just current span")
+
+	// Most recent span parent should exist
+	lastChain := tracker.BuildCausalityChain(formatSpanID(10000))
+	require.Len(t, lastChain, 2, "Last span parent exists, chain has 2 elements")
+	assert.Equal(t, formatParentID(10000), lastChain[0])
+}
+
+// RED: Test cache doesn't grow unbounded
+func TestCausalityTracker_BoundedMemory(t *testing.T) {
+	tracker := NewCausalityTracker() // ❌ Will fail - no bounds yet
+
+	// Add 20K entities (2x cache limit)
+	for i := 0; i < 20000; i++ {
+		event := &domain.ObserverEvent{
+			ID:     domain.NewEventID(),
+			SpanID: formatSpanID(i),
+		}
+		tracker.RecordEvent(event, formatEntityID(i))
+	}
+
+	// Cache should not exceed 10K entries
+	// We can't directly test cache size without exposing internals,
+	// but we can verify LRU behavior (oldest entries evicted)
+	firstHalfGone := 0
+	for i := 0; i < 10000; i++ {
+		if tracker.GetParentSpanForEntity(formatEntityID(i)) == "" {
+			firstHalfGone++
+		}
+	}
+
+	// At least 50% of first half should be evicted
+	assert.Greater(t, firstHalfGone, 5000, "Oldest entries should be evicted")
+}
+
+// Helper functions for test ID formatting
+func formatEntityID(i int) string {
+	return "entity-" + strconv.Itoa(i)
+}
+
+func formatSpanID(i int) string {
+	return "span-" + strconv.Itoa(i)
+}
+
+func formatParentID(i int) string {
+	return "parent-" + strconv.Itoa(i)
 }
