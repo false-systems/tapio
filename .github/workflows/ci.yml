@@ -413,17 +413,12 @@ jobs:
             go build -v ./...
           fi
 
-      - name: Build binaries
-        run: |
-          mkdir -p bin/
-          CGO_ENABLED=0 go build -v -ldflags="-s -w" -o bin/tapio ./cmd/tapio
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: binaries
-          path: bin/
-          retention-days: 7
+      # Binary build skipped - no cmd/tapio directory (library project)
+      # Re-enable when binary is added:
+      # - name: Build binaries
+      #   run: |
+      #     mkdir -p bin/
+      #     CGO_ENABLED=0 go build -v -ldflags="-s -w" -o bin/tapio ./cmd/tapio
 
   # ========================================
   # CI Status Summary
