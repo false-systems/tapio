@@ -204,9 +204,9 @@ func TestCausalityTracker_BuildCausalityChain_UnknownSpan(t *testing.T) {
 	assert.Equal(t, "unknown-span-id", chain[0])
 }
 
-// RED: Test LRU eviction - entity cache evicts old entries when full
+// Test LRU eviction - entity cache evicts old entries when full
 func TestCausalityTracker_LRUEviction_EntityCache(t *testing.T) {
-	tracker := NewCausalityTracker() // ❌ Will fail - no LRU yet
+	tracker := NewCausalityTracker()
 
 	// Add 10,001 entities (exceeds 10K cache limit)
 	for i := 0; i < 10001; i++ {
@@ -226,9 +226,9 @@ func TestCausalityTracker_LRUEviction_EntityCache(t *testing.T) {
 	assert.Equal(t, formatSpanID(10000), lastEntity, "Last entity should still be in cache")
 }
 
-// RED: Test LRU eviction - span parent cache evicts old entries
+// Test LRU eviction - span parent cache evicts old entries
 func TestCausalityTracker_LRUEviction_SpanCache(t *testing.T) {
-	tracker := NewCausalityTracker() // ❌ Will fail - no LRU yet
+	tracker := NewCausalityTracker()
 
 	// Add 10,001 span parent relationships
 	for i := 0; i < 10001; i++ {
@@ -250,9 +250,9 @@ func TestCausalityTracker_LRUEviction_SpanCache(t *testing.T) {
 	assert.Equal(t, formatParentID(10000), lastChain[0])
 }
 
-// RED: Test cache doesn't grow unbounded
+// Test cache doesn't grow unbounded
 func TestCausalityTracker_BoundedMemory(t *testing.T) {
-	tracker := NewCausalityTracker() // ❌ Will fail - no bounds yet
+	tracker := NewCausalityTracker()
 
 	// Add 20K entities (2x cache limit)
 	for i := 0; i < 20000; i++ {
