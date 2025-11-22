@@ -51,21 +51,21 @@ jobs:
         id: filter
         shell: bash
         run: |
-          # Go files
-          GO_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep '\.go$' || true)
+          # Go files (convert newlines to spaces for single-line output)
+          GO_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep '\.go$' | tr '\n' ' ' || true)
           echo "go-files=$GO_FILES" >> "$GITHUB_OUTPUT"
 
-          # eBPF files
-          EBPF_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep '\.\(c\|h\)$' || true)
+          # eBPF files (convert newlines to spaces)
+          EBPF_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep '\.\(c\|h\)$' | tr '\n' ' ' || true)
           echo "ebpf-files=$EBPF_FILES" >> "$GITHUB_OUTPUT"
 
-          # Docker files
-          DOCKER_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep 'Dockerfile' || true)
+          # Docker files (convert newlines to spaces)
+          DOCKER_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep 'Dockerfile' | tr '\n' ' ' || true)
           echo "docker-files=$DOCKER_FILES" >> "$GITHUB_OUTPUT"
 
           # Extract unique Go packages
           if [ -n "$GO_FILES" ]; then
-            PACKAGES=$(echo "$GO_FILES" | while read -r file; do dirname "$file"; done | sort -u | while read -r dir; do echo "./${dir}/..."; done | tr '\n' ' ')
+            PACKAGES=$(echo "$GO_FILES" | tr ' ' '\n' | xargs -n1 dirname | sort -u | xargs -I {} echo "./{}/..." | tr '\n' ' ')
             echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
             echo "has-go=true" >> "$GITHUB_OUTPUT"
           else
@@ -147,24 +147,55 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has-go == 'true'
+    needs: [detect-changes, build-ebpf]
+    if: always() && needs.detect-changes.outputs.has-go == 'true'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Download eBPF artifacts
+        if: always() && needs.build-ebpf.result == 'success'
+        uses: actions/download-artifact@v6
+        with:
+          name: ebpf-generated
+          path: .
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: golangci-lint
+      - name: Install golangci-lint
+        if: needs.build-ebpf.result != 'success'
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.8
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: golangci-lint (all packages - with eBPF)
+        if: needs.build-ebpf.result == 'success'
         uses: golangci/golangci-lint-action@v4
         with:
-          version: latest
-          args: --timeout=10m
+          version: latest  # v1.64.8 (v2 not yet supported by action)
+          args: --timeout=10m ./...
           only-new-issues: true
+
+      - name: golangci-lint (changed packages only - no eBPF)
+        if: needs.build-ebpf.result != 'success'
+        run: |
+          PACKAGES="${{ needs.detect-changes.outputs.packages }}"
+          if [ -n "$PACKAGES" ]; then
+            # Filter out eBPF-dependent packages
+            FILTERED_PACKAGES=$(echo "$PACKAGES" | tr ' ' '\n' | grep -v "internal/observers/network" | grep -v "internal/observers/node" | tr '\n' ' ' || true)
+            if [ -n "$FILTERED_PACKAGES" ]; then
+              echo "Linting packages: $FILTERED_PACKAGES"
+              golangci-lint run --timeout=10m --new-from-rev=HEAD~1 $FILTERED_PACKAGES
+            else
+              echo "No non-eBPF packages to lint"
+            fi
+          else
+            echo "No changed packages detected"
+          fi
 
   # ========================================
   # CLAUDE.md Verification
@@ -382,17 +413,12 @@ jobs:
             go build -v ./...
           fi
 
-      - name: Build binaries
-        run: |
-          mkdir -p bin/
-          CGO_ENABLED=0 go build -v -ldflags="-s -w" -o bin/tapio ./cmd/tapio
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: binaries
-          path: bin/
-          retention-days: 7
+      # Binary build skipped - no cmd/tapio directory (library project)
+      # Re-enable when binary is added:
+      # - name: Build binaries
+      #   run: |
+      #     mkdir -p bin/
+      #     CGO_ENABLED=0 go build -v -ldflags="-s -w" -o bin/tapio ./cmd/tapio
 
   # ========================================
   # CI Status Summary

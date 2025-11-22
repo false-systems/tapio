@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // ObserverRuntime is the unified infrastructure for all observers.
@@ -107,6 +108,12 @@ func (r *ObserverRuntime) ProcessEvent(ctx context.Context, rawEvent []byte) err
 	// Processor can return nil (ignore event)
 	if event == nil {
 		return nil
+	}
+
+	// AUTO-TRACK: Extract entity ID and record in causality tracker
+	entityID := extractEntityID(event)
+	if entityID != "" && event.SpanID != "" {
+		r.causality.RecordEvent(event, entityID)
 	}
 
 	// Apply sampling if enabled
@@ -246,4 +253,40 @@ func (r *ObserverRuntime) drainQueue(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// extractEntityID extracts a unique entity identifier from an event for causality tracking.
+// Entity ID format:
+//   - K8s resources: "namespace/name" (e.g., "default/nginx-pod")
+//   - Network endpoints: "ip:port" or just "ip" (e.g., "10.0.0.1:8080")
+//   - Empty string if no entity can be identified
+//
+// Priority:
+//  1. K8s resource (if K8sData present with namespace and name)
+//  2. Network source endpoint (if NetworkData present with IP)
+//  3. Empty (no trackable entity)
+func extractEntityID(event *domain.ObserverEvent) string {
+	if event == nil {
+		return ""
+	}
+
+	// Priority 1: K8s resource (most specific)
+	if event.K8sData != nil {
+		if event.K8sData.ResourceNamespace != "" && event.K8sData.ResourceName != "" {
+			return fmt.Sprintf("%s/%s", event.K8sData.ResourceNamespace, event.K8sData.ResourceName)
+		}
+	}
+
+	// Priority 2: Network source endpoint
+	if event.NetworkData != nil {
+		if event.NetworkData.SrcIP != "" {
+			if event.NetworkData.SrcPort > 0 {
+				return fmt.Sprintf("%s:%d", event.NetworkData.SrcIP, event.NetworkData.SrcPort)
+			}
+			return event.NetworkData.SrcIP
+		}
+	}
+
+	// No trackable entity
+	return ""
 }
