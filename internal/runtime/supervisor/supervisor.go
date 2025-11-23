@@ -111,10 +111,10 @@ func (s *Supervisor) SuperviseFunc(name string, fn func(context.Context) error, 
 
 	// Create observer config
 	cfg := observerConfig{
-		maxRestarts:   5,                  // Default: max 5 restarts
-		restartWindow: 1 * time.Minute,    // Default: in 1 minute window
-		minWorkers:    1,                  // Default: 1 worker min
-		maxWorkers:    10,                 // Default: 10 workers max
+		maxRestarts:   5,               // Default: max 5 restarts
+		restartWindow: 1 * time.Minute, // Default: in 1 minute window
+		minWorkers:    1,               // Default: 1 worker min
+		maxWorkers:    10,              // Default: 10 workers max
 	}
 
 	// Apply options
