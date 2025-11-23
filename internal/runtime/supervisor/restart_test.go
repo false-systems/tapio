@@ -146,8 +146,10 @@ func TestRestart_CircuitBreaker(t *testing.T) {
 		errCh <- sup.Run(ctx)
 	}()
 
-	// Wait a bit for restarts
-	time.Sleep(10 * time.Second)
+	// Wait until attempts stop increasing (should reach 4: initial + 3 restarts)
+	require.Eventually(t, func() bool {
+		return attempts.Load() >= 4
+	}, 2*time.Second, 10*time.Millisecond, "observer should stop after max restarts")
 
 	cancel()
 	<-errCh
