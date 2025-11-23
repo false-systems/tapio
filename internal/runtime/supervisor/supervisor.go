@@ -199,7 +199,7 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 
 		// Update restart tracking
 		now := time.Now()
-		if now.Sub(obs.config.lastRestartTime) > obs.config.restartWindow {
+		if !obs.config.lastRestartTime.IsZero() && now.Sub(obs.config.lastRestartTime) > obs.config.restartWindow {
 			// Outside restart window - reset counter
 			obs.config.restartCount = 0
 		}
