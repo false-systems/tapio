@@ -9,16 +9,24 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const (
+	// maxBackoff is the maximum backoff duration for exponential backoff
+	// Prevents unbounded growth (2^30 seconds ≈ 34 years)
+	maxBackoff = 5 * time.Minute
+)
+
 // Config configures supervisor behavior
 type Config struct {
 	// ShutdownTimeout is max time to wait for all observers to exit
 	ShutdownTimeout time.Duration
 
 	// HealthCheckInterval is how often to check observer health
+	// Reserved for Phase 2 - not yet enforced
 	// Default: 5 seconds
 	HealthCheckInterval time.Duration
 
 	// ResourceCheckInterval is how often to check resource usage
+	// Reserved for Phase 2 - not yet enforced
 	// Default: 1 second
 	ResourceCheckInterval time.Duration
 }
@@ -40,6 +48,7 @@ type Supervisor struct {
 	wg        sync.WaitGroup
 	ctx       context.Context
 	cancel    context.CancelFunc
+	hasRun    bool // Prevents Run() from being called multiple times
 }
 
 // supervisedObserver wraps an observer with supervision metadata
@@ -51,25 +60,25 @@ type supervisedObserver struct {
 
 // observerConfig holds per-observer configuration
 type observerConfig struct {
-	// Auto-restart configuration
+	// Auto-restart configuration (Phase 1 - active)
 	maxRestarts     int           // Max restarts in restart window
 	restartWindow   time.Duration // Time window for restart counting
 	restartCount    int           // Current restart count
 	lastRestartTime time.Time     // Last restart timestamp
 
-	// Resource limits
+	// Resource limits (Phase 2 - reserved, not yet enforced)
 	maxCPU    float64 // Max CPU cores
 	maxMemory uint64  // Max memory bytes
 
-	// Dependencies
+	// Dependencies (Phase 2 - reserved, not yet enforced)
 	dependencies []string // Observer names this one depends on
 	optional     bool     // Can run without dependencies?
 
-	// Worker scaling
+	// Worker scaling (Phase 2 - reserved, not yet enforced)
 	minWorkers int // Minimum workers
 	maxWorkers int // Maximum workers
 
-	// Health check
+	// Health check (Phase 2 - reserved, not yet enforced)
 	healthCheckFn HealthCheckFunc
 }
 
@@ -109,6 +118,13 @@ func (s *Supervisor) SuperviseFunc(name string, fn func(context.Context) error, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Warn if overwriting existing observer
+	if _, exists := s.observers[name]; exists {
+		log.Warn().
+			Str("observer", name).
+			Msg("overwriting existing observer with same name")
+	}
+
 	// Create observer config
 	cfg := observerConfig{
 		maxRestarts:   5,               // Default: max 5 restarts
@@ -136,6 +152,15 @@ func (s *Supervisor) SuperviseFunc(name string, fn func(context.Context) error, 
 
 // Run starts supervising all observers and blocks until context is cancelled
 func (s *Supervisor) Run(ctx context.Context) error {
+	// Check if already run
+	s.mu.Lock()
+	if s.hasRun {
+		s.mu.Unlock()
+		return fmt.Errorf("supervisor has already been run")
+	}
+	s.hasRun = true
+	s.mu.Unlock()
+
 	s.mu.RLock()
 	observers := make([]*supervisedObserver, 0, len(s.observers))
 	for _, obs := range s.observers {
@@ -199,9 +224,10 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 
 		// Update restart tracking
 		now := time.Now()
-		if now.Sub(obs.config.lastRestartTime) > obs.config.restartWindow {
-			// Outside restart window - reset counter
+		if !obs.config.lastRestartTime.IsZero() && now.Sub(obs.config.lastRestartTime) > obs.config.restartWindow {
+			// Outside restart window - reset counter AND attempt
 			obs.config.restartCount = 0
+			attempt = 0 // Reset backoff attempt counter
 		}
 
 		// Check circuit breaker
@@ -219,7 +245,11 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 		obs.config.lastRestartTime = now
 
 		// Calculate exponential backoff: 2^attempt seconds (1s, 2s, 4s, 8s, ...)
+		// Cap at maxBackoff to prevent overflow and unbounded growth
 		backoff := time.Duration(1<<attempt) * time.Second
+		if backoff > maxBackoff || attempt >= 30 {
+			backoff = maxBackoff
+		}
 
 		log.Info().
 			Str("observer", obs.name).
@@ -281,20 +311,34 @@ type Option func(*observerConfig)
 // WithRestartPolicy configures auto-restart behavior
 func WithRestartPolicy(maxRestarts int, window time.Duration) Option {
 	return func(cfg *observerConfig) {
+		// Validate maxRestarts (negative = 0 = no restarts)
+		if maxRestarts < 0 {
+			maxRestarts = 0
+		}
+		// Validate window (zero or negative defaults to 1 minute)
+		if window <= 0 {
+			window = 1 * time.Minute
+		}
 		cfg.maxRestarts = maxRestarts
 		cfg.restartWindow = window
 	}
 }
 
 // WithResourceLimits configures CPU and memory limits
+// Reserved for Phase 2 - not yet enforced
 func WithResourceLimits(cpuCores float64, memoryBytes uint64) Option {
 	return func(cfg *observerConfig) {
+		// Validate cpuCores (negative defaults to 0 = unlimited)
+		if cpuCores < 0 {
+			cpuCores = 0
+		}
 		cfg.maxCPU = cpuCores
 		cfg.maxMemory = memoryBytes
 	}
 }
 
 // WithDependencies configures observer dependencies
+// Reserved for Phase 2 - not yet enforced
 func WithDependencies(deps ...string) Option {
 	return func(cfg *observerConfig) {
 		cfg.dependencies = deps
@@ -302,6 +346,7 @@ func WithDependencies(deps ...string) Option {
 }
 
 // WithOptionalDeps marks dependencies as optional (can run in degraded mode)
+// Reserved for Phase 2 - not yet enforced
 func WithOptionalDeps(optional bool) Option {
 	return func(cfg *observerConfig) {
 		cfg.optional = optional
@@ -309,14 +354,24 @@ func WithOptionalDeps(optional bool) Option {
 }
 
 // WithWorkerScaling configures worker pool scaling
+// Reserved for Phase 2 - not yet enforced
 func WithWorkerScaling(min, max int) Option {
 	return func(cfg *observerConfig) {
+		// Validate min >= 1
+		if min < 1 {
+			min = 1
+		}
+		// Validate max >= min
+		if max < min {
+			max = min
+		}
 		cfg.minWorkers = min
 		cfg.maxWorkers = max
 	}
 }
 
 // WithHealthCheck configures observer health check function
+// Reserved for Phase 2 - not yet enforced
 func WithHealthCheck(fn HealthCheckFunc) Option {
 	return func(cfg *observerConfig) {
 		cfg.healthCheckFn = fn
