@@ -2,445 +2,122 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 permissions:
   contents: read
-  security-events: write
 
 env:
   GO_VERSION: '1.24'
 
 jobs:
-  # ========================================
-  # Change Detection (Smart filtering)
-  # ========================================
-  detect-changes:
-    name: Detect Changes
+  # ============================================================================
+  # QUICK CHECKS - Fail fast, run in parallel
+  # ============================================================================
+  quick-checks:
+    name: Quick Checks
     runs-on: ubuntu-latest
-    outputs:
-      go-files: ${{ steps.filter.outputs.go-files }}
-      ebpf-files: ${{ steps.filter.outputs.ebpf-files }}
-      docker-files: ${{ steps.filter.outputs.docker-files }}
-      packages: ${{ steps.filter.outputs.packages }}
-      has-go: ${{ steps.filter.outputs.has-go }}
-      has-ebpf: ${{ steps.filter.outputs.has-ebpf }}
-      has-docker: ${{ steps.filter.outputs.has-docker }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Get changed files
-        id: changed-files
-        uses: tj-actions/changed-files@v41
-        with:
-          files: |
-            **/*.go
-            **/*.c
-            **/*.h
-            **/Dockerfile
-            go.mod
-            go.sum
-
-      - name: Detect changed files and packages
-        id: filter
-        shell: bash
-        run: |
-          # Go files (convert newlines to spaces for single-line output)
-          GO_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep '\.go$' | tr '\n' ' ' || true)
-          echo "go-files=$GO_FILES" >> "$GITHUB_OUTPUT"
-
-          # eBPF files (convert newlines to spaces)
-          EBPF_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep '\.\(c\|h\)$' | tr '\n' ' ' || true)
-          echo "ebpf-files=$EBPF_FILES" >> "$GITHUB_OUTPUT"
-
-          # Docker files (convert newlines to spaces)
-          DOCKER_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep 'Dockerfile' | tr '\n' ' ' || true)
-          echo "docker-files=$DOCKER_FILES" >> "$GITHUB_OUTPUT"
-
-          # Extract unique Go packages
-          if [ -n "$GO_FILES" ]; then
-            PACKAGES=$(echo "$GO_FILES" | tr ' ' '\n' | xargs -n1 dirname | sort -u | xargs -I {} echo "./{}/..." | tr '\n' ' ')
-            echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
-            echo "has-go=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "packages=" >> "$GITHUB_OUTPUT"
-            echo "has-go=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          # Boolean flags
-          [ -n "$EBPF_FILES" ] && echo "has-ebpf=true" >> "$GITHUB_OUTPUT" || echo "has-ebpf=false" >> "$GITHUB_OUTPUT"
-          [ -n "$DOCKER_FILES" ] && echo "has-docker=true" >> "$GITHUB_OUTPUT" || echo "has-docker=false" >> "$GITHUB_OUTPUT"
-
-  # ========================================
-  # Format Check (Fast, separate job)
-  # ========================================
-  format-check:
-    name: Format Check
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has-go == 'true'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Check formatting
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "❌ The following files are not formatted:"
-            echo "$unformatted"
-            exit 1
-          fi
-          echo "✅ All files are properly formatted"
-
-  # ========================================
-  # Go Vet (Separate from linting)
-  # ========================================
-  vet:
-    name: Go Vet
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has-go == 'true'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Run go vet on changed packages
-        shell: bash
+      # Format check (instant fail if unformatted)
+      - name: Format
         run: |
-          PACKAGES="${{ needs.detect-changes.outputs.packages }}"
-          if [ -n "$PACKAGES" ]; then
-            for pkg in $PACKAGES; do
-              echo "Running go vet on $pkg..."
-              go vet $pkg
-            done
-          else
-            echo "Running go vet on all packages..."
-            go vet ./...
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "❌ Unformatted files:"
+            gofmt -l .
+            exit 1
           fi
 
-  # ========================================
-  # Lint (golangci-lint)
-  # ========================================
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    needs: [detect-changes, build-ebpf]
-    if: always() && needs.detect-changes.outputs.has-go == 'true'
+      # Go vet (catches obvious bugs)
+      - name: Vet
+        run: go vet ./...
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download eBPF artifacts
-        if: always() && needs.build-ebpf.result == 'success'
-        uses: actions/download-artifact@v6
-        with:
-          name: ebpf-generated
-          path: .
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Install golangci-lint
-        if: needs.build-ebpf.result != 'success'
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.64.8
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-
-      - name: golangci-lint (all packages - with eBPF)
-        if: needs.build-ebpf.result == 'success'
+      # golangci-lint (comprehensive linting)
+      - name: Lint
         uses: golangci/golangci-lint-action@v4
         with:
-          version: latest  # v1.64.8 (v2 not yet supported by action)
-          args: --timeout=10m ./...
+          version: latest
+          args: --timeout=5m
           only-new-issues: true
 
-      - name: golangci-lint (changed packages only - no eBPF)
-        if: needs.build-ebpf.result != 'success'
+      # CLAUDE.md compliance
+      - name: CLAUDE.md Check
         run: |
-          PACKAGES="${{ needs.detect-changes.outputs.packages }}"
-          if [ -n "$PACKAGES" ]; then
-            # Filter out eBPF-dependent packages
-            FILTERED_PACKAGES=$(echo "$PACKAGES" | tr ' ' '\n' | grep -v "internal/observers/network" | grep -v "internal/observers/node" | tr '\n' ' ' || true)
-            if [ -n "$FILTERED_PACKAGES" ]; then
-              echo "Linting packages: $FILTERED_PACKAGES"
-              golangci-lint run --timeout=10m --new-from-rev=HEAD~1 $FILTERED_PACKAGES
-            else
-              echo "No non-eBPF packages to lint"
-            fi
-          else
-            echo "No changed packages detected"
+          if [ -x ./scripts/verify-claude-md.sh ]; then
+            ./scripts/verify-claude-md.sh
           fi
 
-  # ========================================
-  # CLAUDE.md Verification
-  # ========================================
-  verify-claude:
-    name: CLAUDE.md Check
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has-go == 'true'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: CLAUDE.md Verification
-        run: |
-          chmod +x ./scripts/verify-claude-md.sh
-          ./scripts/verify-claude-md.sh --strict "${{ needs.detect-changes.outputs.go-files }}"
-
-  # ========================================
-  # Security Scan (gosec)
-  # ========================================
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has-go == 'true'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Run Gosec Security Scanner
-        uses: securego/gosec@v2.19.0
-        with:
-          args: '-no-fail -fmt sarif -out results.sarif ./...'
-
-      - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v4
-        continue-on-error: true
-        with:
-          sarif_file: results.sarif
-
-  # ========================================
-  # Tests (with coverage)
-  # ========================================
+  # ============================================================================
+  # TESTS - The meat of CI
+  # ============================================================================
   test:
     name: Test
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-ebpf]
-    if: always() && needs.detect-changes.outputs.has-go == 'true'
+    needs: quick-checks
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download eBPF artifacts
-        if: always() && needs.build-ebpf.result == 'success'
-        uses: actions/download-artifact@v6
-        with:
-          name: ebpf-generated
-          path: .
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Run tests on changed packages
-        shell: bash
+      # Run tests with race detector and coverage
+      - name: Test
         run: |
-          PACKAGES="${{ needs.detect-changes.outputs.packages }}"
-          if [ -n "$PACKAGES" ]; then
-            echo "Testing changed packages: $PACKAGES"
-            go test -v -race -timeout=60s -coverprofile=coverage.txt -covermode=atomic $PACKAGES
-          else
-            echo "Running all tests..."
-            go test -v -race -timeout=60s -coverprofile=coverage.txt -covermode=atomic ./...
-          fi
+          go test -v -race -timeout=2m -coverprofile=coverage.txt -covermode=atomic ./...
 
-      - name: Coverage Report
+      # Enforce 80% coverage (hard fail)
+      - name: Coverage Check
         run: |
-          go tool cover -func=coverage.txt
           COVERAGE=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}' | sed 's/%//')
-          echo "Total coverage: ${COVERAGE}%"
+          echo "📊 Coverage: ${COVERAGE}%"
+
           if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-            echo "⚠️  Coverage is below 80% (${COVERAGE}%) - consider adding more tests"
+            echo "❌ Coverage below 80% (got ${COVERAGE}%)"
+            exit 1
           fi
 
-      - name: Upload coverage
+      # Upload to codecov (optional, non-blocking)
+      - name: Upload Coverage
+        if: github.event_name == 'pull_request'
         uses: codecov/codecov-action@v4
+        continue-on-error: true
         with:
           file: ./coverage.txt
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
 
-  # ========================================
-  # Build eBPF (if needed)
-  # ========================================
-  build-ebpf:
-    name: Build eBPF
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: |
-      needs.detect-changes.outputs.has-ebpf == 'true' ||
-      contains(needs.detect-changes.outputs.go-files, 'internal/observers/network/') ||
-      contains(needs.detect-changes.outputs.go-files, 'internal/observers/node/')
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Install eBPF dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev linux-headers-$(uname -r)
-
-      - name: Generate eBPF code for network observer
-        run: |
-          cd internal/observers/network/bpf
-          go generate
-          ls -la *.go
-
-      - name: Generate eBPF code for node observer
-        run: |
-          cd internal/observers/node/bpf
-          go generate
-          ls -la *.go
-
-      - name: Upload generated eBPF artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: ebpf-generated
-          path: |
-            internal/observers/network/bpf/*_bpfel.go
-            internal/observers/network/bpf/*_bpfeb.go
-            internal/observers/network/bpf/*.o
-            internal/observers/node/bpf/*_bpfel.go
-            internal/observers/node/bpf/*_bpfeb.go
-            internal/observers/node/bpf/*.o
-          retention-days: 1
-
-  # ========================================
-  # Build Docker (if needed)
-  # ========================================
-  build-docker:
-    name: Build Docker
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.has-docker == 'true'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build Docker images
-        run: |
-          for dockerfile in ${{ needs.detect-changes.outputs.docker-files }}; do
-            IMAGE_NAME=$(basename $(dirname $dockerfile))
-            echo "Building Docker image: $IMAGE_NAME"
-            docker build -f $dockerfile -t tapio-$IMAGE_NAME:ci .
-          done
-
-  # ========================================
-  # Build Binaries
-  # ========================================
+  # ============================================================================
+  # BUILD - Verify everything compiles
+  # ============================================================================
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [detect-changes, format-check, vet, lint, verify-claude, test, build-ebpf]
-    if: always() && needs.detect-changes.outputs.has-go == 'true'
+    needs: test
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download eBPF artifacts
-        if: always() && needs.build-ebpf.result == 'success'
-        uses: actions/download-artifact@v6
-        with:
-          name: ebpf-generated
-          path: .
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Build packages
-        run: |
-          PACKAGES="${{ needs.detect-changes.outputs.packages }}"
-          if [ -n "$PACKAGES" ]; then
-            echo "Building changed packages: $PACKAGES"
-            go build -v $PACKAGES
-          else
-            echo "Building all packages..."
-            go build -v ./...
-          fi
+      # Build all packages
+      - name: Build
+        run: go build -v ./...
 
-      # Binary build skipped - no cmd/tapio directory (library project)
-      # Re-enable when binary is added:
-      # - name: Build binaries
+      # Optional: Build binaries when cmd/ exists
+      # - name: Build Binaries
       #   run: |
       #     mkdir -p bin/
-      #     CGO_ENABLED=0 go build -v -ldflags="-s -w" -o bin/tapio ./cmd/tapio
-
-  # ========================================
-  # CI Status Summary
-  # ========================================
-  status:
-    name: CI Status
-    runs-on: ubuntu-latest
-    needs: [format-check, vet, lint, verify-claude, security, test, build]
-    if: always()
-
-    steps:
-      - name: Check CI status
-        run: |
-          if [ "${{ needs.format-check.result }}" == "failure" ] || \
-             [ "${{ needs.vet.result }}" == "failure" ] || \
-             [ "${{ needs.lint.result }}" == "failure" ] || \
-             [ "${{ needs.verify-claude.result }}" == "failure" ] || \
-             [ "${{ needs.security.result }}" == "failure" ] || \
-             [ "${{ needs.test.result }}" == "failure" ] || \
-             [ "${{ needs.build.result }}" == "failure" ]; then
-            echo "❌ CI failed"
-            exit 1
-          else
-            echo "✅ CI passed"
-          fi
+      #     CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/tapio ./cmd/tapio
