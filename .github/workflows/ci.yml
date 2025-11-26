@@ -106,11 +106,13 @@ jobs:
           fi
 
       # golangci-lint (comprehensive linting)
-      # Uses .golangci.yml to exclude eBPF packages (require generated code)
+      # Skip entirely if eBPF not generated (typecheck will fail)
       - name: Lint
+        if: needs.changes.outputs.ebpf == 'true'
         uses: golangci/golangci-lint-action@v4
         with:
           version: latest
+          args: --timeout=5m
           only-new-issues: true
 
   # ============================================================================

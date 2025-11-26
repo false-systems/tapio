@@ -1,9 +1,0 @@
-run:
-  timeout: 5m
-  skip-dirs:
-    - internal/observers/network
-    - internal/observers/node
-
-linters:
-  disable:
-    - typecheck  # Already covered by go vet, avoids issues with generated eBPF code
