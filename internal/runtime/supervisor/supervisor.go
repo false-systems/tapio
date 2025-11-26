@@ -227,6 +227,7 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 		if !obs.config.lastRestartTime.IsZero() && now.Sub(obs.config.lastRestartTime) > obs.config.restartWindow {
 			// Outside restart window - reset counter AND attempt
 			obs.config.restartCount = 0
+			attempt = 0 // Also reset backoff attempt counter
 			attempt = 0 // Reset backoff attempt counter
 		}
 
