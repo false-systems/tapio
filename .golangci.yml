@@ -1,8 +1,9 @@
 run:
   timeout: 5m
-  
-issues:
-  exclude-dirs:
+  skip-dirs:
     - internal/observers/network
     - internal/observers/node
-  exclude-dirs-use-default: false
+
+linters:
+  disable:
+    - typecheck  # Already covered by go vet, avoids issues with generated eBPF code
