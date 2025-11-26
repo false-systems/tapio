@@ -96,8 +96,14 @@ jobs:
           fi
 
       # Go vet (catches obvious bugs)
+      # Skip eBPF packages if not generated
       - name: Vet
-        run: go vet ./...
+        run: |
+          if [ "${{ needs.changes.outputs.ebpf }}" == "true" ]; then
+            go vet ./...
+          else
+            go vet $(go list ./... | grep -v '/observers/network$' | grep -v '/observers/node$' | grep -v '/bpf$')
+          fi
 
       # golangci-lint (comprehensive linting)
       - name: Lint
@@ -131,8 +137,14 @@ jobs:
           cache: true
 
       # Run tests with race detector and coverage
+      # Skip eBPF packages if not generated
       - name: Test
-        run: go test -v -race -timeout=2m -coverprofile=coverage.txt -covermode=atomic ./...
+        run: |
+          if [ "${{ needs.changes.outputs.ebpf }}" == "true" ]; then
+            go test -v -race -timeout=2m -coverprofile=coverage.txt -covermode=atomic ./...
+          else
+            go test -v -race -timeout=2m -coverprofile=coverage.txt -covermode=atomic $(go list ./... | grep -v '/observers/network$' | grep -v '/observers/node$' | grep -v '/bpf$')
+          fi
 
       # Enforce 80% coverage (hard fail)
       - name: Coverage Check
@@ -177,5 +189,11 @@ jobs:
           cache: true
 
       # Build all packages
+      # Skip eBPF packages if not generated
       - name: Build
-        run: go build -v ./...
+        run: |
+          if [ "${{ needs.changes.outputs.ebpf }}" == "true" ]; then
+            go build -v ./...
+          else
+            go build -v $(go list ./... | grep -v '/observers/network$' | grep -v '/observers/node$' | grep -v '/bpf$')
+          fi
