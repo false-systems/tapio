@@ -1,41 +1,8 @@
-# ==========================================
-# Tapio golangci-lint Configuration
-# Compatible with golangci-lint v1.x (v2 not yet supported by GitHub Action)
-# ==========================================
-
 run:
   timeout: 5m
-  issues-exit-code: 1
-  tests: true
-  build-tags:
-    - ebpf
-  modules-download-mode: readonly
-
-linters:
-  enable:
-    # Essential linters only - no formatters
-    - errcheck          # Check for unchecked errors
-    - govet             # Go vet examination
-    - ineffassign       # Detect ineffectual assignments
-    - staticcheck       # Go static analysis (includes gosimple and unused in v2)
-
-# ==========================================
-# Issues Configuration
-# ==========================================
+  
 issues:
-  # Set to 0 to disable limit
-  max-issues-per-linter: 50
-  max-same-issues: 3
-
-  # Show only new issues if `revive` is enabled
-  new: false
-
-  # Fix found issues (if it's supported by the linter)
-  fix: false
-
-  # Exclude packages that need eBPF-generated code
   exclude-dirs:
-    - internal/observers/network/bpf
     - internal/observers/network
-    - internal/observers/node/bpf
     - internal/observers/node
+  exclude-dirs-use-default: false
