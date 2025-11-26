@@ -162,7 +162,7 @@ jobs:
       # Upload to codecov (optional, non-blocking)
       - name: Upload Coverage
         if: github.event_name == 'pull_request'
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         continue-on-error: true
         with:
           file: ./coverage.txt
