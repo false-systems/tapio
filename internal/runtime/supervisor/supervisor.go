@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -49,6 +51,14 @@ type Supervisor struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	hasRun    bool // Prevents Run() from being called multiple times
+
+	// OTEL metrics (optional - nil = no-op)
+	meter            metric.Meter
+	observerStarts   metric.Int64Counter
+	observerRestarts metric.Int64Counter
+	circuitBreakers  metric.Int64Counter
+	restartLatency   metric.Float64Histogram
+	activeObservers  metric.Int64ObservableGauge
 }
 
 // supervisedObserver wraps an observer with supervision metadata
@@ -94,8 +104,11 @@ const (
 	HealthStatusUnhealthy HealthStatus = "unhealthy" // Needs restart
 )
 
+// SupervisorOption configures supervisor-level settings
+type SupervisorOption func(*Supervisor)
+
 // New creates a new supervisor with given configuration
-func New(cfg Config) *Supervisor {
+func New(cfg Config, opts ...SupervisorOption) *Supervisor {
 	// Apply defaults
 	if cfg.ShutdownTimeout == 0 {
 		cfg.ShutdownTimeout = 2 * time.Second
@@ -107,10 +120,24 @@ func New(cfg Config) *Supervisor {
 		cfg.ResourceCheckInterval = 1 * time.Second
 	}
 
-	return &Supervisor{
+	s := &Supervisor{
 		config:    cfg,
 		observers: make(map[string]*supervisedObserver),
 	}
+
+	// Apply supervisor options
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	// Initialize metrics if meter provided
+	if s.meter != nil {
+		if err := s.initMetrics(); err != nil {
+			log.Error().Err(err).Msg("failed to initialize metrics")
+		}
+	}
+
+	return s
 }
 
 // SuperviseFunc adds an observer function to be supervised
@@ -202,6 +229,14 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 		Str("observer", obs.name).
 		Msg("starting observer")
 
+	// Record observer start
+	if s.observerStarts != nil {
+		s.observerStarts.Add(s.ctx, 1, metric.WithAttributes(
+			attribute.String("observer", obs.name),
+			attribute.String("result", "success"),
+		))
+	}
+
 	attempt := 0
 	for {
 		// Run observer
@@ -232,6 +267,13 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 
 		// Check circuit breaker
 		if obs.config.restartCount >= obs.config.maxRestarts {
+			// Record circuit breaker trigger
+			if s.circuitBreakers != nil {
+				s.circuitBreakers.Add(s.ctx, 1, metric.WithAttributes(
+					attribute.String("observer", obs.name),
+				))
+			}
+
 			log.Error().
 				Str("observer", obs.name).
 				Int("restarts", obs.config.restartCount).
@@ -243,6 +285,9 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 		// Increment restart count
 		obs.config.restartCount++
 		obs.config.lastRestartTime = now
+
+		// Record restart start time for latency measurement
+		restartStart := time.Now()
 
 		// Calculate exponential backoff: 2^attempt seconds (1s, 2s, 4s, 8s, ...)
 		// Cap at maxBackoff to prevent overflow and unbounded growth
@@ -260,6 +305,22 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 		// Wait for backoff (or context cancellation)
 		select {
 		case <-time.After(backoff):
+			// Record restart counter
+			if s.observerRestarts != nil {
+				s.observerRestarts.Add(s.ctx, 1, metric.WithAttributes(
+					attribute.String("observer", obs.name),
+					attribute.String("reason", "crash"),
+				))
+			}
+
+			// Record restart latency
+			if s.restartLatency != nil {
+				latency := time.Since(restartStart).Milliseconds()
+				s.restartLatency.Record(s.ctx, float64(latency), metric.WithAttributes(
+					attribute.String("observer", obs.name),
+				))
+			}
+
 			attempt++
 			// Continue loop to restart
 		case <-s.ctx.Done():
@@ -303,6 +364,72 @@ func (s *Supervisor) ObserverNames() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// WithMeter configures OTEL metrics collection
+func WithMeter(meter metric.Meter) SupervisorOption {
+	return func(s *Supervisor) {
+		s.meter = meter
+	}
+}
+
+// initMetrics initializes all OTEL metrics for the supervisor
+func (s *Supervisor) initMetrics() error {
+	var err error
+
+	// Counter: Observer starts
+	s.observerStarts, err = s.meter.Int64Counter(
+		"supervisor_observer_starts_total",
+		metric.WithDescription("Total number of observer starts"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create observerStarts counter: %w", err)
+	}
+
+	// Counter: Observer restarts
+	s.observerRestarts, err = s.meter.Int64Counter(
+		"supervisor_observer_restarts_total",
+		metric.WithDescription("Total number of observer restarts"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create observerRestarts counter: %w", err)
+	}
+
+	// Counter: Circuit breaker triggers
+	s.circuitBreakers, err = s.meter.Int64Counter(
+		"supervisor_circuit_breaker_triggers_total",
+		metric.WithDescription("Total number of circuit breaker triggers"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create circuitBreakers counter: %w", err)
+	}
+
+	// Histogram: Restart latency
+	s.restartLatency, err = s.meter.Float64Histogram(
+		"supervisor_restart_latency_ms",
+		metric.WithDescription("Observer restart latency in milliseconds"),
+		metric.WithUnit("ms"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create restartLatency histogram: %w", err)
+	}
+
+	// Gauge: Active observers (observable)
+	s.activeObservers, err = s.meter.Int64ObservableGauge(
+		"supervisor_active_observers",
+		metric.WithDescription("Number of currently active observers"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			s.mu.RLock()
+			defer s.mu.RUnlock()
+			o.Observe(int64(len(s.observers)))
+			return nil
+		}),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create activeObservers gauge: %w", err)
+	}
+
+	return nil
 }
 
 // Option is a functional option for configuring observer supervision
