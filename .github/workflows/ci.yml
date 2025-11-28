@@ -23,7 +23,7 @@ jobs:
     outputs:
       ebpf: ${{ steps.filter.outputs.ebpf }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -41,7 +41,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.ebpf == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v5
         with:
@@ -73,7 +73,7 @@ jobs:
     if: always()
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download eBPF (if regenerated)
         if: needs.changes.outputs.ebpf == 'true'
@@ -125,7 +125,7 @@ jobs:
     if: always() && needs.quick-checks.result == 'success'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download eBPF (if regenerated)
         if: needs.changes.outputs.ebpf == 'true'
@@ -204,7 +204,7 @@ jobs:
     if: always() && needs.test.result == 'success'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download eBPF (if regenerated)
         if: needs.changes.outputs.ebpf == 'true'
