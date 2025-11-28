@@ -148,16 +148,43 @@ jobs:
             go test -v -race -timeout=2m -coverprofile=coverage.txt -covermode=atomic $(go list ./... | grep -v '/observers/network$' | grep -v '/observers/node$' | grep -v '/bpf$')
           fi
 
-      # Enforce 80% coverage (hard fail)
+      # Enforce 80% coverage per package (hard fail)
       - name: Coverage Check
         run: |
-          COVERAGE=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}' | sed 's/%//')
-          echo "📊 Coverage: ${COVERAGE}%"
+          echo "📊 Checking per-package coverage..."
 
-          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-            echo "❌ Coverage below 80% (got ${COVERAGE}%)"
+          # Get coverage per package, excluding packages with 0% (no tests)
+          FAILED=0
+          while IFS= read -r line; do
+            PKG=$(echo "$line" | awk '{print $1}')
+            COV=$(echo "$line" | awk '{print $2}' | sed 's/%//')
+
+            # Skip total line and packages with 0% coverage (no tests)
+            if [[ "$PKG" == "total:" ]] || [[ "$COV" == "0.0" ]]; then
+              continue
+            fi
+
+            echo "  $PKG: ${COV}%"
+
+            # Check if coverage is below 80%
+            if (( $(echo "$COV < 80" | bc -l) )); then
+              echo "  ❌ $PKG below 80% (got ${COV}%)"
+              FAILED=1
+            fi
+          done < <(go tool cover -func=coverage.txt | grep -E "^github.com")
+
+          # Also show total for reference
+          TOTAL=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}')
+          echo ""
+          echo "📊 Total coverage: $TOTAL (for reference)"
+
+          if [ $FAILED -eq 1 ]; then
+            echo ""
+            echo "❌ One or more packages below 80% coverage"
             exit 1
           fi
+
+          echo "✅ All packages meet 80% coverage requirement"
 
       # Upload to codecov (optional, non-blocking)
       - name: Upload Coverage
