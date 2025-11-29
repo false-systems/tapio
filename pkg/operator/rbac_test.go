@@ -278,3 +278,112 @@ func TestReconcileClusterRoleBinding_ExistingResource(t *testing.T) {
 	assert.Equal(t, "tapio-system", updated.Subjects[0].Namespace)
 	assert.Equal(t, "tapio-observer-tapio-system-test-observer", updated.RoleRef.Name)
 }
+
+// TestReconcileClusterRole_UpdateRules tests updating an existing ClusterRole
+func TestReconcileClusterRole_UpdateRules(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add clientgo scheme: %v", err)
+	}
+	if err := tapiov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add tapio scheme: %v", err)
+	}
+
+	existing := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "tapio-observer-tapio-system-test-observer",
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"configmaps"}, // Old rules
+				Verbs:     []string{"get"},
+			},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+
+	reconciler := &TapioObserverReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	observer := &tapiov1alpha1.TapioObserver{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-observer",
+			Namespace: "tapio-system",
+		},
+	}
+
+	err := reconciler.reconcileClusterRole(context.Background(), observer)
+	require.NoError(t, err)
+
+	var updatedCR rbacv1.ClusterRole
+	err = fakeClient.Get(context.Background(), types.NamespacedName{
+		Name: "tapio-observer-tapio-system-test-observer",
+	}, &updatedCR)
+	require.NoError(t, err)
+
+	// Verify rules were updated to the expected values
+	assert.Len(t, updatedCR.Rules, 2)
+	assert.Equal(t, []string{"pods"}, updatedCR.Rules[0].Resources)
+	assert.Equal(t, []string{"events"}, updatedCR.Rules[1].Resources)
+}
+
+// TestReconcileClusterRoleBinding_UpdateSubjects tests updating an existing CRB
+func TestReconcileClusterRoleBinding_UpdateSubjects(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add clientgo scheme: %v", err)
+	}
+	if err := tapiov1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add tapio scheme: %v", err)
+	}
+
+	existing := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "tapio-observer-tapio-system-test-observer",
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      "old-name",
+				Namespace: "old-namespace",
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     "old-role",
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(existing).Build()
+
+	reconciler := &TapioObserverReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+	}
+
+	observer := &tapiov1alpha1.TapioObserver{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-observer",
+			Namespace: "tapio-system",
+		},
+	}
+
+	err := reconciler.reconcileClusterRoleBinding(context.Background(), observer)
+	require.NoError(t, err)
+
+	var updatedCRB rbacv1.ClusterRoleBinding
+	err = fakeClient.Get(context.Background(), types.NamespacedName{
+		Name: "tapio-observer-tapio-system-test-observer",
+	}, &updatedCRB)
+	require.NoError(t, err)
+
+	// Verify subjects and roleRef were updated
+	assert.Equal(t, "test-observer", updatedCRB.Subjects[0].Name)
+	assert.Equal(t, "tapio-system", updatedCRB.Subjects[0].Namespace)
+	assert.Equal(t, "tapio-observer-tapio-system-test-observer", updatedCRB.RoleRef.Name)
+}
