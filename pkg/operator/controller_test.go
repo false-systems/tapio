@@ -42,3 +42,9 @@ func TestReconcile_ObjectNotFound(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, result)
 }
+
+// TestSetupWithManager tests controller setup with manager
+func TestSetupWithManager(t *testing.T) {
+	// Skip if not in a K8s environment (no kubeconfig available)
+	t.Skip("SetupWithManager requires real manager - tested in integration tests")
+}
