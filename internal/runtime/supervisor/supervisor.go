@@ -239,20 +239,18 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 	}
 
 	attempt := 0
+	var healthCancel context.CancelFunc
+
 	for {
 		// Create cancelable context for this attempt (allows health check to trigger restart)
 		observerCtx, observerCancel := context.WithCancel(s.ctx)
 
 		// Start health check loop (if health check provided)
 		if obs.config.healthCheckFn != nil {
-			healthCtx, healthCancel := context.WithCancel(s.ctx)
+			healthCtx := context.Background()
+			healthCtx, healthCancel = context.WithCancel(s.ctx)
 
-			s.wg.Add(1)
-			go func() {
-				s.healthCheckLoop(healthCtx, obs, observerCancel)
-				healthCancel()
-			}()
-			defer healthCancel()
+			go s.healthCheckLoop(healthCtx, obs, observerCancel)
 		}
 
 		// Run observer
@@ -260,6 +258,12 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 
 		// Clean up observer context
 		observerCancel()
+
+		// Cancel health check for this attempt before restarting
+		if healthCancel != nil {
+			healthCancel()
+			healthCancel = nil
+		}
 
 		// Check if supervisor is shutting down
 		if s.ctx.Err() != nil {
@@ -359,8 +363,6 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 
 // healthCheckLoop periodically checks observer health and triggers restart if unhealthy
 func (s *Supervisor) healthCheckLoop(ctx context.Context, obs *supervisedObserver, cancelObserver context.CancelFunc) {
-	defer s.wg.Done()
-
 	ticker := time.NewTicker(s.config.HealthCheckInterval)
 	defer ticker.Stop()
 
