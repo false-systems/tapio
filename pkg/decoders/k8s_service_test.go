@@ -72,4 +72,92 @@ func TestK8sService_Decode_NilKV(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// Integration tests will be added when Context Service is ready
+// TestK8sService_Decode_Success tests successful service lookup
+func TestK8sService_Decode_Success(t *testing.T) {
+	serviceInfo := ServiceInfo{
+		Name:      "kubernetes",
+		Namespace: "default",
+		ClusterIP: "10.96.0.1",
+		Type:      "ClusterIP",
+		Labels:    map[string]string{"component": "apiserver"},
+	}
+
+	serviceJSON, err := json.Marshal(serviceInfo)
+	require.NoError(t, err)
+
+	kv := &mockKeyValue{
+		data: map[string][]byte{
+			"service.ip.10.96.0.1": serviceJSON,
+		},
+	}
+
+	decoder := NewK8sService(kv)
+	input := []byte("10.96.0.1")
+	conf := Decoder{}
+
+	result, err := decoder.Decode(context.Background(), input, conf)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("kubernetes"), result)
+}
+
+// TestK8sService_Decode_NotFound_AllowUnknown tests IP not found with AllowUnknown=true
+func TestK8sService_Decode_NotFound_AllowUnknown(t *testing.T) {
+	kv := &mockKeyValue{
+		data: map[string][]byte{},
+	}
+
+	decoder := NewK8sService(kv)
+	input := []byte("10.96.0.100")
+	conf := Decoder{AllowUnknown: true}
+
+	result, err := decoder.Decode(context.Background(), input, conf)
+	require.NoError(t, err)
+	assert.Equal(t, input, result) // Returns original IP
+}
+
+// TestK8sService_Decode_NotFound_DisallowUnknown tests IP not found with AllowUnknown=false
+func TestK8sService_Decode_NotFound_DisallowUnknown(t *testing.T) {
+	kv := &mockKeyValue{
+		data: map[string][]byte{},
+	}
+
+	decoder := NewK8sService(kv)
+	input := []byte("10.96.0.100")
+	conf := Decoder{AllowUnknown: false}
+
+	_, err := decoder.Decode(context.Background(), input, conf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "service not found")
+}
+
+// TestK8sService_Decode_InvalidJSON tests malformed JSON in KV
+func TestK8sService_Decode_InvalidJSON(t *testing.T) {
+	kv := &mockKeyValue{
+		data: map[string][]byte{
+			"service.ip.10.96.0.1": []byte("invalid-json"),
+		},
+	}
+
+	decoder := NewK8sService(kv)
+	input := []byte("10.96.0.1")
+	conf := Decoder{}
+
+	_, err := decoder.Decode(context.Background(), input, conf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse ServiceInfo")
+}
+
+// TestK8sService_Decode_KVError tests NATS KV lookup error
+func TestK8sService_Decode_KVError(t *testing.T) {
+	kv := &mockKeyValue{
+		err: assert.AnError, // Simulated NATS error
+	}
+
+	decoder := NewK8sService(kv)
+	input := []byte("10.96.0.1")
+	conf := Decoder{}
+
+	_, err := decoder.Decode(context.Background(), input, conf)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "NATS KV lookup failed")
+}
