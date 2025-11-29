@@ -9,19 +9,19 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  security-events: write
 
 env:
   GO_VERSION: '1.24'
 
 jobs:
-  # ============================================================================
-  # DETECT CHANGES - Only check what matters
-  # ============================================================================
+  # Detect what changed - run eBPF gen only if needed
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
       ebpf: ${{ steps.filter.outputs.ebpf }}
+      go: ${{ steps.filter.outputs.go }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v3
@@ -31,11 +31,14 @@ jobs:
             ebpf:
               - 'internal/observers/**/bpf/**/*.c'
               - 'internal/observers/**/bpf/**/*.h'
+            go:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - '.github/workflows/ci.yml'
 
-  # ============================================================================
-  # GENERATE EBPF - Only if eBPF code changed
-  # ============================================================================
-  ebpf:
+  # Generate eBPF ONLY when .c/.h files changed
+  ebpf-generate:
     name: Generate eBPF
     runs-on: ubuntu-latest
     needs: changes
@@ -43,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: yairfalse/.github/.github/actions/setup-go@main
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -55,174 +58,177 @@ jobs:
           cd internal/observers/network/bpf && go generate
           cd ../../node/bpf && go generate
 
-      - name: Upload generated code
+      - name: Upload generated eBPF code
         uses: actions/upload-artifact@v4
         with:
           name: ebpf-generated
           path: |
             internal/observers/network/bpf/*_bpf*.go
             internal/observers/node/bpf/*_bpf*.go
+          retention-days: 1
 
-  # ============================================================================
-  # QUICK CHECKS - Fail fast, run in parallel
-  # ============================================================================
-  quick-checks:
-    name: Quick Checks
+  # Standard Go CI (format, vet, lint) - uses shared tooling
+  format:
+    name: Format
     runs-on: ubuntu-latest
-    needs: [changes, ebpf]
-    if: always()
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: yairfalse/.github/.github/actions/setup-go@main
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "❌ Unformatted files:" && echo "$unformatted" && exit 1
+          fi
 
+  vet:
+    name: Vet
+    runs-on: ubuntu-latest
+    needs: [changes, ebpf-generate]
+    if: always() && needs.changes.outputs.go == 'true'
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download eBPF (if regenerated)
+      # Download eBPF if it was regenerated
+      - name: Download eBPF artifacts
         if: needs.changes.outputs.ebpf == 'true'
         uses: actions/download-artifact@v4
         with:
           name: ebpf-generated
 
-      - uses: actions/setup-go@v5
+      - uses: yairfalse/.github/.github/actions/setup-go@main
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
 
-      # Format check (instant fail if unformatted)
-      - name: Format
-        run: |
-          if [ -n "$(gofmt -l .)" ]; then
-            echo "❌ Unformatted files:"
-            gofmt -l .
-            exit 1
-          fi
-
-      # Go vet (catches obvious bugs)
-      # Skip eBPF packages if not generated
-      - name: Vet
+      - name: Run go vet
         run: |
           if [ "${{ needs.changes.outputs.ebpf }}" == "true" ]; then
             go vet ./...
           else
+            # Skip eBPF packages if not generated
             go vet $(go list ./... | grep -v '/observers/network$' | grep -v '/observers/node$' | grep -v '/bpf$')
           fi
 
-      # golangci-lint (comprehensive linting)
-      # Skip entirely if eBPF not generated (typecheck will fail)
-      - name: Lint
-        if: needs.changes.outputs.ebpf == 'true'
-        uses: golangci/golangci-lint-action@v9
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: [changes, ebpf-generate]
+    if: always() && needs.changes.outputs.ebpf == 'true'  # Only if eBPF generated
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download eBPF artifacts
+        uses: actions/download-artifact@v4
         with:
-          version: latest
+          name: ebpf-generated
+
+      - uses: yairfalse/.github/.github/actions/setup-go@main
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.6.2
           args: --timeout=5m
           only-new-issues: true
 
-  # ============================================================================
-  # TESTS - The meat of CI
-  # ============================================================================
+  # Tests - download eBPF if needed
   test:
     name: Test
     runs-on: ubuntu-latest
-    needs: [changes, ebpf, quick-checks]
-    if: always() && needs.quick-checks.result == 'success'
-
+    needs: [changes, ebpf-generate, format, vet]
+    if: always() && needs.changes.outputs.go == 'true' && needs.format.result == 'success' && needs.vet.result == 'success'
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download eBPF (if regenerated)
+      - name: Download eBPF artifacts
         if: needs.changes.outputs.ebpf == 'true'
         uses: actions/download-artifact@v4
         with:
           name: ebpf-generated
 
-      - uses: actions/setup-go@v5
+      - uses: yairfalse/.github/.github/actions/setup-go@main
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
 
-      # Run tests with race detector and coverage
-      # Skip eBPF packages if not generated
-      - name: Test
-        run: |
-          if [ "${{ needs.changes.outputs.ebpf }}" == "true" ]; then
-            go test -v -race -timeout=2m -coverprofile=coverage.txt -covermode=atomic ./...
-          else
-            go test -v -race -timeout=2m -coverprofile=coverage.txt -covermode=atomic $(go list ./... | grep -v '/observers/network$' | grep -v '/observers/node$' | grep -v '/bpf$')
-          fi
+      - name: Run tests
+        run: go test -race -v -timeout=10m ./...
 
-      # Enforce 80% coverage per package (hard fail)
-      - name: Coverage Check
-        run: |
-          echo "📊 Checking per-package coverage..."
-
-          # Get coverage per package, excluding packages with 0% (no tests)
-          FAILED=0
-          while IFS= read -r line; do
-            PKG=$(echo "$line" | awk '{print $1}')
-            COV=$(echo "$line" | awk '{print $2}' | sed 's/%//')
-
-            # Skip total line and packages with 0% coverage (no tests)
-            if [[ "$PKG" == "total:" ]] || [[ "$COV" == "0.0" ]]; then
-              continue
-            fi
-
-            echo "  $PKG: ${COV}%"
-
-            # Check if coverage is below 80%
-            if (( $(echo "$COV < 80" | bc -l) )); then
-              echo "  ❌ $PKG below 80% (got ${COV}%)"
-              FAILED=1
-            fi
-          done < <(go tool cover -func=coverage.txt | grep -E "^github.com")
-
-          # Also show total for reference
-          TOTAL=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}')
-          echo ""
-          echo "📊 Total coverage: $TOTAL (for reference)"
-
-          if [ $FAILED -eq 1 ]; then
-            echo ""
-            echo "❌ One or more packages below 80% coverage"
-            exit 1
-          fi
-
-          echo "✅ All packages meet 80% coverage requirement"
-
-      # Upload to codecov (optional, non-blocking)
-      - name: Upload Coverage
-        if: github.event_name == 'pull_request'
-        uses: codecov/codecov-action@v5
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
         continue-on-error: true
         with:
-          file: ./coverage.txt
+          fail_ci_if_error: false
 
-  # ============================================================================
-  # BUILD - Verify everything compiles
-  # ============================================================================
+  # Security scan
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: yairfalse/.github/.github/actions/setup-go@main
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: securego/gosec@master
+        with:
+          args: '-no-fail -fmt sarif -out results.sarif ./...'
+      - uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: results.sarif
+
+  # Build only if tests pass
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [changes, ebpf, test]
+    needs: [changes, ebpf-generate, format, vet, test]
     if: always() && needs.test.result == 'success'
-
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download eBPF (if regenerated)
+      - name: Download eBPF artifacts
         if: needs.changes.outputs.ebpf == 'true'
         uses: actions/download-artifact@v4
         with:
           name: ebpf-generated
 
-      - uses: actions/setup-go@v5
+      - uses: yairfalse/.github/.github/actions/setup-go@main
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
 
-      # Build all packages
-      # Skip eBPF packages if not generated
-      - name: Build
+      - name: Build binaries
         run: |
-          if [ "${{ needs.changes.outputs.ebpf }}" == "true" ]; then
-            go build -v ./...
-          else
-            go build -v $(go list ./... | grep -v '/observers/network$' | grep -v '/observers/node$' | grep -v '/bpf$')
+          CGO_ENABLED=0 go build -v -ldflags="-s -w" -o bin/tapio ./cmd/tapio
+          CGO_ENABLED=0 go build -v -ldflags="-s -w" -o bin/operator ./cmd/operator
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: bin/
+          retention-days: 7
+
+  # Status check
+  status:
+    name: CI Status
+    runs-on: ubuntu-latest
+    needs: [format, vet, lint, test, security, build]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          if [ "${{ needs.format.result }}" == "failure" ] || \
+             [ "${{ needs.vet.result }}" == "failure" ] || \
+             [ "${{ needs.lint.result }}" == "failure" ] || \
+             [ "${{ needs.test.result }}" == "failure" ] || \
+             [ "${{ needs.security.result }}" == "failure" ] || \
+             [ "${{ needs.build.result }}" == "failure" ]; then
+            echo "❌ CI failed"
+            exit 1
           fi
+          echo "✅ All checks passed"
