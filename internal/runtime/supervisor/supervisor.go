@@ -59,6 +59,7 @@ type Supervisor struct {
 	circuitBreakers  metric.Int64Counter
 	restartLatency   metric.Float64Histogram
 	activeObservers  metric.Int64ObservableGauge
+	healthStatus     metric.Int64Gauge
 }
 
 // supervisedObserver wraps an observer with supervision metadata
@@ -238,16 +239,44 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 	}
 
 	attempt := 0
-	for {
-		// Run observer
-		err := obs.runFn(s.ctx)
+	var healthCancel context.CancelFunc
 
-		// Clean exit (context cancelled)
-		if err == nil || s.ctx.Err() != nil {
+	for {
+		// Create cancelable context for this attempt (allows health check to trigger restart)
+		observerCtx, observerCancel := context.WithCancel(s.ctx)
+
+		// Start health check loop (if health check provided)
+		if obs.config.healthCheckFn != nil {
+			healthCtx := context.Background()
+			healthCtx, healthCancel = context.WithCancel(s.ctx)
+
+			go s.healthCheckLoop(healthCtx, obs, observerCancel)
+		}
+
+		// Run observer
+		err := obs.runFn(observerCtx)
+
+		// Clean up observer context
+		observerCancel()
+
+		// Cancel health check for this attempt before restarting
+		if healthCancel != nil {
+			healthCancel()
+			healthCancel = nil
+		}
+
+		// Check if supervisor is shutting down
+		if s.ctx.Err() != nil {
 			log.Info().
 				Str("observer", obs.name).
 				Msg("observer exited cleanly")
 			return
+		}
+
+		// If observer exited with nil error but supervisor is still running,
+		// it was likely cancelled by health check - treat as failure to trigger restart
+		if err == nil {
+			err = context.Canceled // Treat as cancellation for restart logic
 		}
 
 		// Observer failed - check if we should restart
@@ -327,6 +356,76 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 			log.Info().
 				Str("observer", obs.name).
 				Msg("restart cancelled due to supervisor shutdown")
+			return
+		}
+	}
+}
+
+// healthCheckLoop periodically checks observer health and triggers restart if unhealthy
+func (s *Supervisor) healthCheckLoop(ctx context.Context, obs *supervisedObserver, cancelObserver context.CancelFunc) {
+	ticker := time.NewTicker(s.config.HealthCheckInterval)
+	defer ticker.Stop()
+
+	// Helper to convert health status to int for metrics
+	statusToInt := func(status HealthStatus) int64 {
+		switch status {
+		case HealthStatusHealthy:
+			return 1
+		case HealthStatusDegraded:
+			return 2
+		case HealthStatusUnhealthy:
+			return 3
+		default:
+			return 0
+		}
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			// Call health check with panic recovery
+			var status HealthStatus
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error().
+							Str("observer", obs.name).
+							Interface("panic", r).
+							Msg("health check panicked")
+						status = HealthStatusHealthy // Treat panic as healthy (don't restart)
+					}
+				}()
+				status = obs.config.healthCheckFn(ctx)
+			}()
+
+			// Record health status metric
+			if s.healthStatus != nil {
+				s.healthStatus.Record(ctx, statusToInt(status), metric.WithAttributes(
+					attribute.String("observer", obs.name),
+					attribute.String("status", string(status)),
+				))
+			}
+
+			switch status {
+			case HealthStatusHealthy:
+				// All good, continue
+				log.Debug().Str("observer", obs.name).Msg("health check passed")
+
+			case HealthStatusDegraded:
+				// Warn but continue
+				log.Warn().Str("observer", obs.name).Msg("observer degraded")
+
+			case HealthStatusUnhealthy:
+				// Restart observer
+				log.Error().Str("observer", obs.name).Msg("observer unhealthy - triggering restart")
+				cancelObserver() // This will cause runFn to exit and restart
+				return
+
+			default:
+				log.Error().Str("observer", obs.name).Str("status", string(status)).Msg("unknown health status")
+			}
+
+		case <-ctx.Done():
 			return
 		}
 	}
@@ -427,6 +526,15 @@ func (s *Supervisor) initMetrics() error {
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create activeObservers gauge: %w", err)
+	}
+
+	// Gauge: Health status
+	s.healthStatus, err = s.meter.Int64Gauge(
+		"supervisor_observer_health_status",
+		metric.WithDescription("Observer health status (1=healthy, 2=degraded, 3=unhealthy)"),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create healthStatus gauge: %w", err)
 	}
 
 	return nil
