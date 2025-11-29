@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
