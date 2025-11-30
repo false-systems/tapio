@@ -10,9 +10,11 @@ import (
 // Implementations handle the protocol-specific details of sending events.
 //
 // Examples:
-//   - OTLPEmitter: Exports to OpenTelemetry Collector (OSS)
-//   - NATSEmitter: Publishes to NATS JetStream (Enterprise)
+//   - OTLPEmitter: Exports to OpenTelemetry Collector (Simple tier)
 //   - FileEmitter: Writes to file (Debug/Testing)
+//
+// Note: NATS publishing moved to Intelligence Service (pkg/intelligence)
+// for FREE and ENTERPRISE tiers.
 //
 // Design: Configurable criticality
 //   - ObserverRuntime can have multiple emitters
@@ -30,7 +32,7 @@ type Emitter interface {
 	Emit(ctx context.Context, event *domain.ObserverEvent) error
 
 	// Name returns the emitter name for logging and metrics.
-	// Should be lowercase (e.g., "otlp", "nats", "file").
+	// Should be lowercase (e.g., "otlp", "file").
 	Name() string
 
 	// IsCritical returns true if this emitter is critical.
@@ -38,8 +40,7 @@ type Emitter interface {
 	// Non-critical emitters: Failure is logged but doesn't block processing.
 	//
 	// Example:
-	//   - OTLP: critical=true (OSS requires this)
-	//   - NATS: critical=false (Enterprise add-on, can degrade gracefully)
+	//   - OTLP: critical=true (Simple tier requires this)
 	//   - File: critical=false (Debug/testing only)
 	IsCritical() bool
 
