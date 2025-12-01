@@ -30,7 +30,7 @@ func (o *TestObserver) Setup(ctx context.Context, cfg runtime.Config) error {
 	return nil
 }
 
-// Process processes a raw event and returns a domain event (no-op for now).
+// Process processes a raw event and returns a domain event (no-op for test observer).
 func (o *TestObserver) Process(ctx context.Context, rawEvent []byte) (*domain.ObserverEvent, error) {
 	return nil, nil
 }
