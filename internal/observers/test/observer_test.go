@@ -26,7 +26,7 @@ func TestObserver_ProcessorInterface(t *testing.T) {
 	observer, err := NewTestObserver("test")
 	require.NoError(t, err)
 
-	// RED: TestObserver doesn't exist, so we can't verify it's an EventProcessor
+	// Compile-time check: TestObserver implements EventProcessor
 	var _ runtime.EventProcessor = observer // Compile-time check
 }
 
