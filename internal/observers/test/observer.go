@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/yairfalse/tapio/internal/runtime"
 	"github.com/yairfalse/tapio/pkg/domain"
@@ -15,6 +16,9 @@ type TestObserver struct {
 
 // NewTestObserver creates a new test observer.
 func NewTestObserver(name string) (*TestObserver, error) {
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
 	return &TestObserver{
 		name: name,
 	}, nil
