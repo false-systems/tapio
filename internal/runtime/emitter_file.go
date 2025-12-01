@@ -23,6 +23,10 @@ type FileEmitter struct {
 // NewFileEmitter creates a File emitter that writes to the given file path.
 // path: File path to write events to (will be created if doesn't exist)
 func NewFileEmitter(path string) (*FileEmitter, error) {
+	if path == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+
 	// Create file (truncate if exists)
 	file, err := os.Create(path)
 	if err != nil {

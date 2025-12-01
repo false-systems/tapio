@@ -14,7 +14,16 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// RED: Test basic File emitter creation and emission
+// TestFileEmitter_EmptyPath verifies that empty path is rejected.
+func TestFileEmitter_EmptyPath(t *testing.T) {
+	emitter, err := NewFileEmitter("")
+
+	assert.Error(t, err, "empty path should return error")
+	assert.Nil(t, emitter, "emitter should be nil on error")
+	assert.Contains(t, err.Error(), "path is required", "error should mention path requirement")
+}
+
+// TestFileEmitter_BasicEmit verifies basic emitter creation and emission.
 func TestFileEmitter_BasicEmit(t *testing.T) {
 	// Create temp file
 	tmpDir, err := os.MkdirTemp("", "test-file-emitter-*")
@@ -57,7 +66,7 @@ func TestFileEmitter_BasicEmit(t *testing.T) {
 	assert.Contains(t, string(data), "test-123", "file should contain event ID")
 }
 
-// RED: Test File emitter implements Emitter interface
+// TestFileEmitter_Interface verifies FileEmitter implements Emitter interface.
 func TestFileEmitter_Interface(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-file-emitter-*")
 	require.NoError(t, err)
@@ -81,7 +90,7 @@ func TestFileEmitter_Interface(t *testing.T) {
 	assert.False(t, emitter.IsCritical(), "File emitter should be non-critical")
 }
 
-// RED: Test File emitter writes JSON Lines format
+// TestFileEmitter_JSONLines verifies JSON Lines format (one JSON per line).
 func TestFileEmitter_JSONLines(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-file-emitter-*")
 	require.NoError(t, err)
@@ -140,7 +149,7 @@ func TestFileEmitter_JSONLines(t *testing.T) {
 	}
 }
 
-// RED: Test File emitter Close() flushes buffer
+// TestFileEmitter_CloseFlushes verifies Close() flushes buffered data.
 func TestFileEmitter_CloseFlushes(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-file-emitter-*")
 	require.NoError(t, err)
@@ -179,7 +188,7 @@ func TestFileEmitter_CloseFlushes(t *testing.T) {
 	assert.NoError(t, err, "Multiple Close() calls should be safe")
 }
 
-// RED: Test File emitter handles context cancellation
+// TestFileEmitter_ContextCancellation verifies respect for context cancellation.
 func TestFileEmitter_ContextCancellation(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "test-file-emitter-*")
 	require.NoError(t, err)
