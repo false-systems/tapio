@@ -4,6 +4,7 @@ package node
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -26,6 +27,11 @@ func TestPMCLoader_New(t *testing.T) {
 
 // TestPMCLoader_Lifecycle verifies Start/Stop lifecycle
 func TestPMCLoader_Lifecycle(t *testing.T) {
+	// eBPF operations require root privileges
+	if os.Geteuid() != 0 {
+		t.Skip("eBPF operations require root privileges - run with sudo")
+	}
+
 	loader, err := NewPMCLoader()
 	require.NoError(t, err)
 
@@ -43,6 +49,11 @@ func TestPMCLoader_Lifecycle(t *testing.T) {
 
 // TestPMCLoader_EventChannel verifies event reception
 func TestPMCLoader_EventChannel(t *testing.T) {
+	// eBPF operations require root privileges
+	if os.Geteuid() != 0 {
+		t.Skip("eBPF operations require root privileges - run with sudo")
+	}
+
 	loader, err := NewPMCLoader()
 	require.NoError(t, err)
 
@@ -79,6 +90,11 @@ func TestPMCLoader_StopWithoutStart(t *testing.T) {
 
 // TestPMCLoader_DoubleStart verifies Start idempotency
 func TestPMCLoader_DoubleStart(t *testing.T) {
+	// eBPF operations require root privileges
+	if os.Geteuid() != 0 {
+		t.Skip("eBPF operations require root privileges - run with sudo")
+	}
+
 	loader, err := NewPMCLoader()
 	require.NoError(t, err)
 
@@ -97,6 +113,11 @@ func TestPMCLoader_DoubleStart(t *testing.T) {
 
 // TestPMCLoader_ContextCancellation verifies graceful shutdown
 func TestPMCLoader_ContextCancellation(t *testing.T) {
+	// eBPF operations require root privileges
+	if os.Geteuid() != 0 {
+		t.Skip("eBPF operations require root privileges - run with sudo")
+	}
+
 	loader, err := NewPMCLoader()
 	require.NoError(t, err)
 
@@ -119,6 +140,11 @@ func TestPMCLoader_ContextCancellation(t *testing.T) {
 
 // TestPMCLoader_MultiCPU verifies events from multiple CPUs
 func TestPMCLoader_MultiCPU(t *testing.T) {
+	// eBPF operations require root privileges
+	if os.Geteuid() != 0 {
+		t.Skip("eBPF operations require root privileges - run with sudo")
+	}
+
 	loader, err := NewPMCLoader()
 	require.NoError(t, err)
 
