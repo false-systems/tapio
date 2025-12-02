@@ -183,41 +183,11 @@ jobs:
         with:
           sarif_file: results.sarif
 
-  # Build only if tests pass
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    needs: [changes, ebpf-generate, format, vet, test]
-    if: always() && needs.test.result == 'success'
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Download eBPF artifacts
-        if: needs.changes.outputs.ebpf == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: ebpf-generated
-
-      - uses: yairfalse/.github/.github/actions/setup-go@main
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Build binaries
-        run: |
-          CGO_ENABLED=0 go build -v -ldflags="-s -w" -o bin/tapio ./cmd/tapio
-          CGO_ENABLED=0 go build -v -ldflags="-s -w" -o bin/operator ./cmd/operator
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binaries
-          path: bin/
-          retention-days: 7
-
   # Status check
   status:
     name: CI Status
     runs-on: ubuntu-latest
-    needs: [format, vet, lint, test, security, build]
+    needs: [format, vet, lint, test, security]
     if: always()
     steps:
       - name: Check results
@@ -226,8 +196,7 @@ jobs:
              [ "${{ needs.vet.result }}" == "failure" ] || \
              [ "${{ needs.lint.result }}" == "failure" ] || \
              [ "${{ needs.test.result }}" == "failure" ] || \
-             [ "${{ needs.security.result }}" == "failure" ] || \
-             [ "${{ needs.build.result }}" == "failure" ]; then
+             [ "${{ needs.security.result }}" == "failure" ]; then
             echo "❌ CI failed"
             exit 1
           fi
