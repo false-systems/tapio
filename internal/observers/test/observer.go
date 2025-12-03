@@ -2,6 +2,7 @@ package test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/yairfalse/tapio/internal/runtime"
@@ -34,9 +35,19 @@ func (o *TestObserver) Setup(ctx context.Context, cfg runtime.Config) error {
 	return nil
 }
 
-// Process processes a raw event and returns a domain event (no-op for test observer).
+// Process processes a raw event and returns a domain event.
+// For testing purposes, it unmarshals JSON and passes it through.
 func (o *TestObserver) Process(ctx context.Context, rawEvent []byte) (*domain.ObserverEvent, error) {
-	return nil, nil
+	if len(rawEvent) == 0 {
+		return nil, nil
+	}
+
+	var event domain.ObserverEvent
+	if err := json.Unmarshal(rawEvent, &event); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal event: %w", err)
+	}
+
+	return &event, nil
 }
 
 // Teardown cleans up resources (no-op for test observer).
