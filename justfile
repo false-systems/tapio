@@ -189,14 +189,16 @@ clean:
 
 # Show project info
 info:
-    @echo "Tapio Observability Platform"
-    @echo ""
-    @echo "Go version:   $(go version)"
-    @echo "Architecture: $(uname -m)"
-    @echo ""
+    #!/usr/bin/env bash
+    echo "Tapio Observability Platform"
+    echo ""
+    echo "Go version:   $(go version)"
+    echo "Architecture: $(uname -m)"
+    echo ""
 
 # Show tool versions (useful for CI debugging)
 versions:
-    @echo "Go:           $(go version | cut -d' ' -f3)"
-    @echo "golangci-lint: $(golangci-lint --version 2>/dev/null | head -1 || echo 'not installed')"
-    @echo "just:         $(just --version)"
+    #!/usr/bin/env bash
+    echo "Go:           $(go version | cut -d' ' -f3)"
+    echo "golangci-lint: $(golangci-lint --version 2>/dev/null | head -1 || echo 'not installed')"
+    echo "just:         $(just --version)"
