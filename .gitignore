@@ -86,9 +86,10 @@ test/cni-test-main
 # eBPF object files (binary - ignore most, but not network/node)
 *.o
 *.bpf.o
-# Exception: Allow network and node observer .o files (required by go:embed)
+# Exception: Allow network, node, and container observer .o files (required by go:embed)
 !internal/observers/network/bpf/network_*_bpfel.o
 !internal/observers/node/bpf/nodepmc_*_bpfel.o
+!internal/observers/container/bpf/container_*_bpfel.o
 
 # Legacy/unused eBPF generated files (ignore these)
 kernelmonitor_bpfel_*.go
