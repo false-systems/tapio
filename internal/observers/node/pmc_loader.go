@@ -132,19 +132,19 @@ func (l *PMCLoader) Events() <-chan PMCEvent {
 func (l *PMCLoader) cleanup() {
 	// Close ring buffer reader
 	if l.reader != nil {
-		_ = l.reader.Close()
+		_ = l.reader.Close() // Ignore: cleanup
 		l.reader = nil
 	}
 
 	// Detach all perf_event links
 	for _, lnk := range l.links {
-		_ = lnk.Close()
+		_ = lnk.Close() // Ignore: cleanup
 	}
 	l.links = nil
 
 	// Close eBPF objects
 	if l.objs != nil {
-		_ = l.objs.Close()
+		_ = l.objs.Close() // Ignore: cleanup
 		l.objs = nil
 	}
 }
@@ -170,7 +170,7 @@ func (l *PMCLoader) attachPMCPerfEvent(prog *ebpf.Program, cpu int, pmcType uint
 	cpuKey := uint32(cpu)
 	fdValue := uint32(fd)
 	if err := pmcMap.Update(&cpuKey, &fdValue, ebpf.UpdateAny); err != nil {
-		_ = unix.Close(fd)
+		_ = unix.Close(fd) // Ignore: cleanup on error
 		return nil, fmt.Errorf("failed to update PMC map: %w", err)
 	}
 
@@ -181,7 +181,7 @@ func (l *PMCLoader) attachPMCPerfEvent(prog *ebpf.Program, cpu int, pmcType uint
 		Attach:  ebpf.AttachPerfEvent,
 	})
 	if err != nil {
-		_ = unix.Close(fd)
+		_ = unix.Close(fd) // Ignore: cleanup on error
 		return nil, fmt.Errorf("failed to attach program: %w", err)
 	}
 

@@ -1,586 +1,236 @@
 # Tapio
 
-**Lean Kubernetes Observability Agent**
+**Kubernetes Observability Agent**
 
-eBPF-native event capture with intelligent routing.
-Kernel-level observability (network, container, node) with zero instrumentation.
-Real-time event processing pipeline (<1ms latency).
-Tiered intelligence: Simple (OTLP) → FREE (NATS) → ENTERPRISE (correlation).
+Pattern detection for K8s failures. Observers detect issues, emit events to your stack.
 
 ---
 
-## What is Tapio?
+## Status
 
-**Tapio recognizes infrastructure patterns and adds the K8s context needed to understand WHY things fail.**
+**In Development** - Core infrastructure works. Wiring in progress.
 
-Traditional observability collects raw events. Tapio's observers detect patterns in real-time:
+### What Works Today
 
-**Network Observer (eBPF-based - Production):**
-- Detects SYN timeout patterns → Connection refused/unreachable service
-- Classifies HTTP/HTTPS traffic → Port-based protocol recognition
-- Identifies DNS queries/responses → Resolution monitoring
+| Component | Coverage | Status |
+|-----------|----------|--------|
+| Deployments Observer | 93.9% | Production-ready |
+| Scheduler Observer | 85.2% | Production-ready |
+| Supervisor | 89.8% | Production-ready |
+| OTLP Emitter | 82.1% | Works |
+| K8s Context Service | 81.0% | Works (not wired yet) |
 
-**Deployments Observer (K8s API - Production):**
-- Tracks rollout health → Stuck deployment detection
-- Monitors replica changes → Scaling issue patterns
+### What's In Progress
 
-**Example (works today):**
-```
-Raw eBPF:       TCP SYN_SENT → CLOSE on 10.0.1.42:443
-Network Observer: Recognizes "SYN timeout" pattern
-Context Service:  Enriches with "nginx-abc123 in prod namespace"
-Output:          "nginx-abc123 failed to connect to api-service (SYN timeout)"
-```
+| Component | Status |
+|-----------|--------|
+| Network Observer | Code exists, needs integration tests |
+| Intelligence Service | NATS routing scaffolded, not wired to observers |
+| Ahti integration | Designed, not connected |
 
-**Tapio works WITH your existing stack (Prometheus, Grafana, Tempo) by adding:**
-- ✅ **Pattern recognition in observers** (SYN timeouts, HTTP classification, DNS detection)
-- ✅ **K8s context enrichment** (Pod → Deployment → Node relationships)
-- ✅ **Pre-computed OTEL attributes** (100x faster than on-demand lookup)
-- ✅ **Multi-index storage** (lookup by IP/UID/Name - O(1) performance)
+### What's Not Started
 
----
-
-## Three-Tier Deployment Model
-
-Tapio observers detect patterns once, but route events differently based on deployment tier:
-
-### Simple Tier (OTLP-only)
-**Flow:** Observers → `ObserverEvent` → OTLP Exporter → Your Stack
-
-```go
-// ObserverEvent: Direct OTLP export
-{
-  "type": "network",
-  "subtype": "tcp_rtt_spike",
-  "source": "network-observer",
-  "network_data": {
-    "src_ip": "10.0.1.5",
-    "dst_ip": "10.0.2.10",
-    "rtt_current": 50.3,
-    "rtt_baseline": 10.2,
-    "pod_name": "web-server-abc",
-    "namespace": "production"
-  }
-}
-```
-
-**What you get:**
-- ✅ All observer pattern detection
-- ✅ K8s context enrichment
-- ✅ Direct OTLP export (no NATS required)
-- ✅ Simplest deployment (no infrastructure dependencies)
-
-**What you DON'T get:**
-- ❌ NATS message bus (no pub/sub)
-- ❌ Intelligence Service (no graph entities)
-- ❌ Multi-cluster correlation
-
-### FREE Tier (NATS Bridge)
-**Flow:** Observers → `ObserverEvent` → Intelligence Service → NATS → Your Stack
-
-```go
-// ObserverEvent: Published to NATS subjects
-{
-  "type": "network",
-  "subtype": "tcp_rtt_spike",
-  "source": "network-observer",
-  "network_data": {
-    "src_ip": "10.0.1.5",
-    "dst_ip": "10.0.2.10",
-    "rtt_current": 50.3,
-    "rtt_baseline": 10.2,
-    "pod_name": "web-server-abc",
-    "namespace": "production"
-  }
-}
-// Published to: tapio.events.network.tcp_rtt_spike
-```
-
-**What you get (in addition to Simple):**
-- ✅ Intelligence Service (NATS bridge)
-- ✅ Event routing via NATS subjects (tapio.events.{type}.{subtype})
-- ✅ Pub/Sub architecture (multiple consumers)
-- ✅ Event buffering and replay (NATS KV)
-
-**What you DON'T get:**
-- ❌ Graph entities (Pod, Service, Deployment objects)
-- ❌ Relationships (connects_to, manages, etc.)
-- ❌ Multi-cluster correlation
-- ❌ Automated root cause analysis
-
-### ENTERPRISE Tier (with Ahti)
-**Flow:** Observers → `ObserverEvent` → Intelligence Service (enrichment) → `TapioEvent` → Ahti
-
-```go
-// TapioEvent: Enriched with graph entities for correlation
-{
-  "type": "network",
-  "subtype": "tcp_rtt_spike",
-
-  // Graph entities extracted by Intelligence Service
-  "entities": [
-    {"type": "pod", "name": "web-server-abc", "namespace": "production"},
-    {"type": "service", "name": "api-gateway", "namespace": "production"}
-  ],
-
-  // Relationships for graph correlation
-  "relationships": [
-    {"type": "connects_to", "source": "web-server-abc", "target": "api-gateway"}
-  ],
-
-  // Same raw data as ObserverEvent
-  "network_data": {
-    "src_ip": "10.0.1.5",
-    "dst_ip": "10.0.2.10",
-    "rtt_current": 50.3,
-    "rtt_baseline": 10.2
-  }
-}
-```
-
-**What you get (in addition to FREE):**
-- ✅ Intelligence Service enrichment (graph entities + relationships)
-- ✅ Graph entities and relationships for correlation
-- ✅ TapioEvent format (NATS subjects or direct API)
-- ✅ Ahti correlation engine: "Deployment X caused RTT spike on Service Y which failed Service Z"
-- ✅ Multi-cluster root cause analysis
-- ✅ Time-travel queries (what was the state 3 days ago?)
+- Helm charts
+- Container/Node observers
+- End-to-end pipeline (Observer → NATS → Ahti)
 
 ---
 
 ## Architecture
 
-### Simple Tier (OTLP-only)
+### Current (Simple Tier - Works)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Kubernetes Cluster                           │
-│                                                                 │
-│  Level 1: Observers (Pattern Detection - DaemonSets)           │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Network Observer (eBPF - per node)                      │  │
-│  │  • SYN timeout, HTTP classification, DNS queries         │  │
-│  │  • Direct OTLP export (FileEmitter for debug)            │  │
-│  │                                                           │  │
-│  │  Runtime Observer (Container events - per node)          │  │
-│  │  • OOM kills, crashes, restarts                          │  │
-│  │  • Direct OTLP export                                    │  │
-│  └────────────────────┬─────────────────────────────────────┘  │
-│                       │ ObserverEvent → OTLP                    │
-└───────────────────────┼─────────────────────────────────────────┘
-                        │ OTLP (direct export)
-                        ▼
-        ┌──────────────────────────────────┐
-        │  Your Observability Stack        │
-        │  • Prometheus / Grafana          │
-        │  • Loki / Tempo                  │
-        │  • Build your own dashboards     │
-        └──────────────────────────────────┘
+Observers ──▶ OTLP Emitter ──▶ Your Collector (Prometheus/Grafana/etc)
 ```
 
-**Simple Tier Summary:**
-- ✅ All Observers (pattern detection)
-- ✅ Direct OTLP export (no infrastructure dependencies)
-- ✅ ObserverEvent (raw diagnostic data)
-- ❌ No NATS (no pub/sub)
-- ❌ No Intelligence Service
-- ❌ No graph entities/relationships
+### Target (Not Wired Yet)
+
+```
+Observers ──▶ Context Service ──▶ Emitters
+                (enrichment)         │
+                                     ├──▶ OTLP ──▶ Your Stack
+                                     │
+                                     └──▶ NATS ──▶ Intelligence ──▶ Ahti
+                                                     Service        (correlation)
+```
 
 ---
 
-### FREE Tier (NATS Bridge)
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Kubernetes Cluster                           │
-│                                                                 │
-│  Level 1: Observers → ObserverEvent                            │
-│  (Same as Simple tier - pattern detection)                     │
-│                       │                                         │
-│                       ▼                                         │
-│  Level 2: Intelligence Service (Deployment, 1 replica)         │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  ProcessEvent(ObserverEvent):                            │  │
-│  │  1. Receive ObserverEvent from observers                 │  │
-│  │  2. Build NATS subject (tapio.events.{type}.{subtype})   │  │
-│  │  3. Marshal to JSON                                      │  │
-│  │  4. Publish to NATS                                      │  │
-│  │     Subject: tapio.events.network.tcp_rtt_spike          │  │
-│  └────────────────────┬─────────────────────────────────────┘  │
-└───────────────────────┼─────────────────────────────────────────┘
-                        │ ObserverEvent (NATS subjects)
-                        │ NATS pub/sub
-                        ▼
-        ┌──────────────────────────────────┐
-        │  Your Consumers (multiple)       │
-        │  • Custom analytics              │
-        │  • Real-time alerting            │
-        │  • Event buffering/replay        │
-        │  • Build your own intelligence   │
-        └──────────────────────────────────┘
-```
-
-**FREE Tier Summary:**
-- ✅ Everything in Simple
-- ✅ Intelligence Service (NATS bridge - Level 2)
-- ✅ Event routing via NATS subjects
-- ✅ Pub/Sub architecture (multiple consumers)
-- ❌ No graph enrichment (TapioEvent)
-- ❌ No Ahti correlation
-
----
-
-### ENTERPRISE Tier (with Ahti)
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Kubernetes Cluster                           │
-│                                                                 │
-│  Level 1: Observers → ObserverEvent                            │
-│  (Same as FREE tier)                                            │
-│                       │                                         │
-│                       ▼                                         │
-│  Level 2: Intelligence Service (ENRICHMENT MODE)               │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  ProcessEvent(ObserverEvent):                            │  │
-│  │  1. Receive ObserverEvent from observers                 │  │
-│  │  2. Enrich: ObserverEvent → TapioEvent                   │  │
-│  │     • Extract graph entities (Pod, Service, Deployment)  │  │
-│  │     • Extract relationships (connects_to, manages, etc.) │  │
-│  │  3. Publish TapioEvent → NATS or direct API              │  │
-│  │     Subject: tapio.events.{cluster-id}.{type}            │  │
-│  └────────────────────┬─────────────────────────────────────┘  │
-└───────────────────────┼─────────────────────────────────────────┘
-                        │ TapioEvent (graph data)
-                        │ NATS or API
-                        ▼
-        ┌─────────────────────────────────────────────┐
-        │  Ahti Correlation Engine (Multi-Cluster)    │
-        │                                             │
-        │  • Graph storage (Neo4j)                    │
-        │  • Time-travel queries (MVCC)               │
-        │  • Cross-observer correlation               │
-        │  • Root cause analysis                      │
-        │  • Pattern detection across clusters        │
-        │                                             │
-        │  Example: "Deployment X caused RTT spike    │
-        │  on Service Y which failed Service Z"       │
-        └─────────────────────────────────────────────┘
-```
-
-**ENTERPRISE Tier Summary:**
-- ✅ Everything in FREE
-- ✅ Intelligence Service enrichment (graph entities)
-- ✅ TapioEvent output (entities + relationships)
-- ✅ Ahti correlation engine (multi-cluster RCA)
-- ✅ Neo4j graph storage
-- ✅ Advanced analytics and time-travel
-
----
-
-## What We've Built (Community Version)
-
-### ✅ Completed: Pattern Recognition Observers
-
-**Network Observer** - eBPF-based pattern detection (Production)
-- **SYN timeout detection:** `SYN_SENT → CLOSE` pattern = unreachable service
-  - Code: `internal/observers/network/processor_link.go:32-34`
-- **HTTP/HTTPS classification:** Port 80/443 + ESTABLISHED state pattern
-  - Code: `internal/observers/network/processor_status.go:37-42`
-- **DNS traffic detection:** UDP port 53 pattern (query vs response)
-  - Code: `internal/observers/network/processor_dns.go:31-32`
-
-**Deployments Observer** - K8s API pattern tracking (Production)
-- Rollout health monitoring (stuck deployments, scaling issues)
-- Replica count patterns (insufficient capacity detection)
-- Full test coverage with E2E, integration, performance tests
-
-### ✅ Completed: Context Enrichment Layer
-
-**K8s Context Service** - Multi-index metadata store
-- **TASK-001:** Pre-computed OTEL attributes (100x faster enrichment)
-  - Priority cascade: env vars → annotations → labels
-  - Computed once per pod, cached for all events
-  - Reference: `internal/services/k8scontext/enrichment.go`
-
-- **TASK-002:** Multi-index storage (Beyla pattern)
-  - 3 lookup patterns: by IP (network), by UID (scheduler), by name (general)
-  - O(1) NATS KV lookups with in-memory cache
-  - Reference: `internal/services/k8scontext/storage.go`
-
-**Performance Impact:**
-- Event enrichment: 100µs → 1µs (100x speedup)
-- At 10K events/sec: Saves 1 CPU second per second
-- Pattern detection: Real-time in eBPF/observers (no batch processing)
-
-### 🔄 In Progress
-
-**Scheduler Observer** - Pod scheduling diagnostics
-- Will use UID-based lookups (TASK-002 enables this)
-- K8s Events API monitoring for FailedScheduling
-- Resource constraint detection
-
-### ✅ Completed: Two-Tier Output System
-
-**BaseObserver Pipeline** - Dual output architecture (Production)
-- Reference: `internal/base/observer.go`, `internal/base/emitter.go`
-
-**Community Mode (FREE):**
-```go
-// Observer detects pattern
-event := &domain.ObserverEvent{
-    Type: "tcp_rtt_spike",
-    NetworkData: &domain.NetworkEventData{
-        RTTCurrent:  50.3,
-        RTTBaseline: 10.2,
-        PodName:     "web-server-abc",
-    },
-}
-
-// Send to OTLP as structured log (line 218-268)
-observer.SendObserverEvent(ctx, event)
-```
-
-**Enterprise Mode (PAID):**
-```go
-// Same pattern detection, different output
-tapioEvent := &domain.TapioEvent{
-    Type:    "network",
-    Subtype: "tcp_rtt_spike",
-    Entities: []domain.Entity{
-        {Type: "pod", Name: "web-server-abc"},
-        {Type: "service", Name: "api-gateway"},
-    },
-    Relationships: []domain.Relationship{
-        {Type: "connects_to", Source: pod, Target: service},
-    },
-    NetworkData: event.NetworkData, // Same data
-}
-
-// Publish to NATS for Ahti (line 214-216)
-observer.PublishEvent(ctx, "tapio.events.network.rtt_spike", tapioEvent)
-```
-
-**Key Insight:** Observers detect patterns ONCE. Output mode (OTLP vs NATS) is config-driven via `OutputConfig` (emitter.go:17-21).
-
----
-
-## Installation (Local Development)
+## Quick Start
 
 ```bash
-# Prerequisites
-# - Go 1.22+
-# - Kubernetes cluster (local: kind, k3d, or Colima)
-# - NATS Server
+# Prerequisites: Go 1.24+, Kubernetes cluster
 
-# Clone
 git clone https://github.com/yairfalse/tapio
 cd tapio
 
 # Build
 make build
 
-# Run Context Service (standalone)
-export NATS_URL=nats://localhost:4222
-./bin/k8scontext-service
-
-# Run Deployments Observer
-./bin/deployments-observer
+# Run Deployments Observer (the one that works)
+./bin/tapio --observer=deployments
 ```
 
-**Note:** Full Kubernetes deployment manifests coming soon (Helm + Operator pattern from Prometheus)
+### Environment Variables
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317  # Your OTLP collector
+KUBECONFIG=~/.kube/config                    # K8s access
+```
 
 ---
 
-## Architecture Patterns (Adopted from Industry)
+## Observers
 
-### 1. **Beyla Pattern: Pre-Computed Attributes** ✅ IMPLEMENTED
+### Deployments Observer (Production)
 
-From **Grafana Beyla** - Compute OTEL attributes once, use many times:
+Detects deployment issues via K8s API:
+- Stuck rollouts
+- Scaling failures
+- Replica mismatches
 
 ```go
-// Computed ONCE on pod add/update
-type PodContext struct {
-    Name      string
-    Namespace string
-
-    // Pre-computed (cached)
-    OTELAttributes map[string]string
+// Example event
+{
+  "type": "deployment",
+  "subtype": "rollout_stuck",
+  "deployment_data": {
+    "name": "my-app",
+    "namespace": "production",
+    "replicas_desired": 3,
+    "replicas_ready": 1
+  }
 }
-
-// Used on EVERY event (100x faster)
-attrs := podCtx.OTELAttributes
 ```
 
-**Reference:** TASK-001 implementation
+### Scheduler Observer (Production)
 
-### 2. **Beyla Pattern: Multi-Index Store** ✅ IMPLEMENTED
+Detects scheduling issues via K8s Events API:
+- FailedScheduling events
+- Resource constraints
+- Node affinity issues
 
-Different observers need different lookup patterns:
+### Network Observer (In Progress)
 
-```
-pod.ip.10.0.1.42      → PodInfo  # Network observer (eBPF captures IPs)
-pod.uid.abc-123       → PodInfo  # Scheduler observer (Events use UIDs)
-pod.name.default.nginx → PodInfo  # General queries
-```
+eBPF-based pattern detection:
+- SYN timeout → unreachable service
+- DNS failures
+- Connection refused
 
-**Reference:** TASK-002 implementation, Beyla's `pkg/components/kube/store.go`
-
-### 3. **Prometheus Pattern: Helm + Operator** 🔄 PLANNED
-
-Single `helm install` deploys:
-1. Tapio Operator (reconciles TapioStack CRs)
-2. CRDs (TapioStack, TapioObserver)
-3. Default stack (Context Service + Network Observer)
-
-**Reference:** [Prometheus Operator](https://github.com/prometheus-operator/prometheus-operator)
+**Status:** Pattern detection code exists. Needs integration testing with real eBPF.
 
 ---
 
-## Development Standards
+## The Gap
 
-**Zero Tolerance Policy** - See [CLAUDE.md](CLAUDE.md) for complete standards:
+We have good components that aren't connected:
 
-✅ **NO `map[string]interface{}`** - 2 test exceptions only (cleaned up from 206!)
-✅ **NO TODOs/stubs** - Complete implementations only
-✅ **TDD MANDATORY** - RED → GREEN → REFACTOR (all features)
-✅ **Small commits** - ≤30 lines per commit
-✅ **Type-safe** - Typed structs, no interface{} in public APIs
-✅ **5-Level Hierarchy** - Strict dependency enforcement
+```
+BUILT:                           MISSING:
+─────                            ───────
+✅ Observers detect patterns     ❌ Events don't flow to Intelligence Service
+✅ OTLP emitter works            ❌ No NATS emitter
+✅ Context Service works         ❌ Observers don't call it
+✅ Intelligence Service works    ❌ Nothing sends it events
+```
 
-**Test Categories (Per Observer):**
-1. `observer_unit_test.go` - Unit tests for methods
-2. `observer_e2e_test.go` - End-to-end workflows
-3. `observer_integration_test.go` - Real component integration
-4. `observer_performance_test.go` - Benchmarks and load tests
-5. `observer_negative_test.go` - Error handling edge cases
+### What Needs Wiring
+
+1. **NATSEmitter** - Send events to Intelligence Service
+2. **Context enrichment** - Observers call Context Service before emitting
+3. **Tier config** - Choose Simple (OTLP) vs Free (OTLP + NATS)
+4. **Integration tests** - Full pipeline Observer → NATS → Ahti
 
 ---
 
-## Current Status (January 2025)
+## Development
 
-### Completed Work
+```bash
+# Run tests
+make test
 
-**Iteration 1: Platform Foundation** ✅
-- K8s Context Service with NATS KV backend
-- Pre-computed OTEL attributes (Beyla pattern)
-- Multi-index metadata store (IP, UID, Name)
-- Deployments Observer (production-ready)
-- Network Observer (eBPF framework, in testing)
+# Lint
+make lint
 
-**Code Metrics:**
-- Lines of code: ~8,500 (production quality)
-- Test coverage: 78.1% (Context Service)
-- Zero CLAUDE.md violations in new code
-- 9 commits for TASK-001 + TASK-002 (all ≤30 lines)
+# Build all
+make build
+```
 
-### Next Milestones
+### Test Coverage
 
-**Iteration 2: Scheduler Observer** 🔄 (Q1 2025)
-- K8s Events API integration
-- FailedScheduling detection
-- Resource constraint analysis
-- Uses UID-based lookups (TASK-002)
+```
+pkg/decoders              99.1%
+internal/observers/deploy 93.9%
+internal/runtime/super    89.8%
+internal/observers/sched  85.2%
+internal/base             82.1%
+internal/services/k8s     81.0%
+pkg/intelligence          35.9%  <- needs work
+```
 
-**Iteration 3: OTLP Export** (Q1 2025)
-- Prometheus label transformation (TASK-003)
-- OTLP metrics exporter
-- OpenTelemetry traces from observers
+---
 
-**Iteration 4: Production Deployment** (Q2 2025)
+## Project Structure
+
+```
+tapio/
+├── cmd/                    # Binaries
+├── internal/
+│   ├── observers/          # Pattern detection
+│   │   ├── deployments/    # ✅ Production
+│   │   ├── scheduler/      # ✅ Production
+│   │   ├── network/        # 🔄 In progress
+│   │   └── ...
+│   ├── runtime/            # Observer lifecycle
+│   │   ├── supervisor/     # ✅ Production
+│   │   ├── emitter_otlp.go # ✅ Works
+│   │   └── emitter_file.go # ✅ Works
+│   └── services/
+│       └── k8scontext/     # ✅ Works (unused)
+├── pkg/
+│   ├── domain/             # Event types
+│   ├── intelligence/       # NATS routing (unused)
+│   └── decoders/           # Protocol parsing
+└── docs/                   # Design docs
+```
+
+---
+
+## Roadmap
+
+**Now:** Wire the pipeline
+1. Create NATSEmitter
+2. Connect Context Service to observers
+3. Integration test full flow
+
+**Next:** Production deployment
 - Helm charts
-- Operator (Kubebuilder)
-- DaemonSet optimizations (node-local filtering)
+- DaemonSet manifests
+- Operator (maybe)
 
----
-
-## Roadmap (Community Edition)
-
-**Q1 2025:**
-- ✅ Context Service + Multi-index (TASK-001, TASK-002)
-- 🔄 Scheduler Observer (TASK-004)
-- 🔄 Prometheus metrics export (TASK-003)
-
-**Q2 2025:**
-- Network Observer (eBPF-based diagnostics)
-- Helm + Operator deployment
-- Documentation and examples
-
-**Q3 2025:**
-- Additional observers (OOM, Storage)
-- Performance optimizations
-- Community feedback integration
-
-**Tier Comparison:**
-
-| Feature | Simple | FREE | ENTERPRISE |
-|---------|--------|------|------------|
-| **Pattern Detection** | ✅ All observers | ✅ All observers | ✅ All observers |
-| **Output Format** | OTLP only | NATS subjects | NATS + graph entities |
-| **Infrastructure** | Zero deps | NATS required | NATS + Ahti |
-| **Data Access** | ✅ All raw events | ✅ All raw events | ✅ All raw events |
-| **Pub/Sub** | ❌ | ✅ NATS | ✅ NATS |
-| **Graph Enrichment** | ❌ | ❌ | ✅ TapioEvent |
-| **Multi-Cluster** | Per-cluster | Per-cluster | Centralized |
-| **Root Cause** | Manual | Manual | Automated (Ahti) |
-| **Support** | Community | Community | Commercial SLA |
-
-**Key Differences:**
-- **Simple**: Zero infrastructure dependencies, direct OTLP export
-- **FREE**: Add NATS pub/sub for custom consumers and event routing
-- **ENTERPRISE**: Add Ahti for graph-based correlation and automated RCA
+**Later:** More observers
+- Network (finish eBPF integration)
+- Container lifecycle
+- Node metrics
 
 ---
 
 ## Why "Tapio"?
 
-In Finnish mythology, **Tapio** is the god of forests - watching over the ecosystem, understanding relationships between trees, animals, and environment.
+Finnish god of forests. Watches over the ecosystem.
 
-Similarly, Tapio observability watches over Kubernetes - understanding relationships between pods, services, nodes, and infrastructure.
-
----
-
-## Contributing
-
-We follow strict development standards (see [CLAUDE.md](CLAUDE.md)):
-
-1. **Design first** - Write design doc before code
-2. **Tests first** - TDD approach (RED → GREEN → REFACTOR)
-3. **Small commits** - ≤30 lines per commit
-4. **Zero violations** - No map[string]interface{}, TODOs, or stubs
-5. **Verify before push** - `make verify-full`
-
-```bash
-# Development workflow
-git checkout -b feat/my-feature
-# Write design doc
-# Write tests
-# Implement in small commits
-make verify-full
-git push origin feat/my-feature
-```
+Tapio watches Kubernetes - pods, services, nodes, deployments.
 
 ---
 
-## References
+## Related Projects
 
-**Patterns Adopted From:**
-- [Grafana Beyla](https://github.com/grafana/beyla) - Pre-computed attributes, multi-index store
-- [Prometheus Operator](https://github.com/prometheus-operator/prometheus-operator) - Helm + Operator pattern
-- [Cloudflare ebpf_exporter](https://github.com/cloudflare/ebpf_exporter) - Decoder pipeline (planned)
-
-**Implementation Guides:**
-- [Beyla Patterns Implementation](docs/BEYLA_PATTERNS_IMPLEMENTATION.md)
-- [Platform Architecture](docs/PLATFORM_ARCHITECTURE.md)
-- [Task Tickets](docs/tasks/)
+- **[Ahti](https://github.com/yairfalse/ahti)** - Graph correlation backend (Tapio → Ahti)
+- **[Sykli](https://github.com/yairfalse/sykli)** - CI in your language
 
 ---
 
 ## License
 
 Apache 2.0
-
----
-
-*Diagnostic-first observability for Kubernetes.*
-*Understand why it fails, not just what failed.*
