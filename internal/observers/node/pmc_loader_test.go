@@ -62,7 +62,7 @@ func TestPMCLoader_EventChannel(t *testing.T) {
 
 	err = loader.Start(ctx)
 	require.NoError(t, err)
-	defer loader.Stop()
+	defer func() { _ = loader.Stop() }()
 
 	// Should receive events from eBPF
 	select {
@@ -103,7 +103,7 @@ func TestPMCLoader_DoubleStart(t *testing.T) {
 	// First Start
 	err = loader.Start(ctx)
 	require.NoError(t, err)
-	defer loader.Stop()
+	defer func() { _ = loader.Stop() }()
 
 	// Second Start should fail or be idempotent
 	err = loader.Start(ctx)
@@ -125,7 +125,7 @@ func TestPMCLoader_ContextCancellation(t *testing.T) {
 
 	err = loader.Start(ctx)
 	require.NoError(t, err)
-	defer loader.Stop()
+	defer func() { _ = loader.Stop() }()
 
 	// Cancel context
 	cancel()
@@ -153,7 +153,7 @@ func TestPMCLoader_MultiCPU(t *testing.T) {
 
 	err = loader.Start(ctx)
 	require.NoError(t, err)
-	defer loader.Stop()
+	defer func() { _ = loader.Stop() }()
 
 	// Collect events from different CPUs
 	cpusSeen := make(map[uint32]bool)
