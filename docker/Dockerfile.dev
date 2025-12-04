@@ -24,18 +24,7 @@ RUN wget -q https://go.dev/dl/go1.24.0.linux-${TARGETARCH:-amd64}.tar.gz && \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 
 # Install golangci-lint
-# Securely install golangci-lint v1.61.0 with checksum verification
-RUN set -eux; \
-    GOLANGCI_LINT_VERSION="v1.61.0"; \
-    ARCH="${TARGETARCH:-amd64}"; \
-    if [ "$ARCH" = "amd64" ]; then ARCH="x86_64"; fi; \
-    TARBALL="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${ARCH}.tar.gz"; \
-    wget -q "https://github.com/golangci/golangci-lint/releases/download/${GOLANGCI_LINT_VERSION}/${TARBALL}"; \
-    wget -q "https://github.com/golangci/golangci-lint/releases/download/${GOLANGCI_LINT_VERSION}/checksums.txt"; \
-    grep "${TARBALL}" checksums.txt | sha256sum -c -; \
-    tar -xzf "${TARBALL}"; \
-    cp "golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${ARCH}/golangci-lint" /usr/local/bin/; \
-    rm -rf "golangci-lint-${GOLANGCI_LINT_VERSION}-linux-${ARCH}" "${TARBALL}" checksums.txt
+RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v1.61.0
 
 # Add Go and LLVM to PATH
 ENV PATH="/usr/local/go/bin:/usr/lib/llvm-18/bin:$PATH"
