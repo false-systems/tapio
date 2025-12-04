@@ -247,7 +247,7 @@ func (s *Supervisor) superviseObserver(obs *supervisedObserver) {
 
 		// Start health check loop (if health check provided)
 		if obs.config.healthCheckFn != nil {
-			healthCtx := context.Background()
+			var healthCtx context.Context
 			healthCtx, healthCancel = context.WithCancel(s.ctx)
 
 			go s.healthCheckLoop(healthCtx, obs, observerCancel)
