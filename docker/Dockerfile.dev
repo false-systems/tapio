@@ -23,8 +23,8 @@ RUN wget -q https://go.dev/dl/go1.24.0.linux-${TARGETARCH:-amd64}.tar.gz && \
 # Install just
 RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 
-# Install golangci-lint
-RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v1.61.0
+# Install golangci-lint (v2.x for Go 1.24 support)
+RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v2.7.1
 
 # Add Go and LLVM to PATH
 ENV PATH="/usr/local/go/bin:/usr/lib/llvm-18/bin:$PATH"
