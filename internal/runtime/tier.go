@@ -9,13 +9,13 @@ import (
 type Tier string
 
 const (
-	// TierSimple enables OTLP only.
-	// Use for: Basic observability without Ahti correlation.
-	TierSimple Tier = "simple"
-
-	// TierFree enables OTLP + NATS.
-	// Use for: Ahti correlation with ObserverEvent (no graph entities).
+	// TierFree enables OTLP only.
+	// Use for: Basic observability, metrics to Prometheus/Grafana.
 	TierFree Tier = "free"
+
+	// TierEnterprise enables OTLP + NATS with TapioEvent.
+	// Use for: Full Ahti graph correlation with enriched events.
+	TierEnterprise Tier = "enterprise"
 )
 
 // TierConfig holds emitter configuration based on deployment tier.
@@ -29,7 +29,7 @@ type TierConfig struct {
 	// Insecure disables TLS for OTLP connection
 	Insecure bool
 
-	// NATSURL for FREE tier (ignored for SIMPLE tier)
+	// NATSURL for ENTERPRISE tier (ignored for FREE tier)
 	NATSURL string
 }
 
@@ -50,8 +50,8 @@ func (c *TierConfig) BuildEmitters() ([]Emitter, error) {
 	}
 	emitters = append(emitters, otlp)
 
-	// NATS only for FREE tier (non-critical)
-	if c.Tier == TierFree && c.NATSURL != "" {
+	// NATS only for ENTERPRISE tier (non-critical)
+	if c.Tier == TierEnterprise && c.NATSURL != "" {
 		nats, err := NewNATSEmitter(c.NATSURL)
 		if err != nil {
 			// Log warning but don't fail - NATS is non-critical

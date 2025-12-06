@@ -12,9 +12,9 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// TestFullPipeline_ObserverToNATS verifies the complete flow:
-// Observer → TierConfig(Free) → NATSEmitter → NATS → (Ahti subscriber)
-func TestFullPipeline_ObserverToNATS(t *testing.T) {
+// TestFullPipeline_EnterpriseToNATS verifies the complete flow:
+// Observer → TierConfig(Enterprise) → NATSEmitter → NATS → (Ahti subscriber)
+func TestFullPipeline_EnterpriseToNATS(t *testing.T) {
 	// 1. Start embedded NATS
 	ns := startTestNATS(t)
 	defer ns.Shutdown()
@@ -36,9 +36,9 @@ func TestFullPipeline_ObserverToNATS(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, nc.Flush())
 
-	// 3. Create runtime with FREE tier config
+	// 3. Create runtime with ENTERPRISE tier config
 	cfg := TierConfig{
-		Tier:     TierFree,
+		Tier:     TierEnterprise,
 		OTLPURL:  "localhost:4317", // Required but won't actually connect
 		Insecure: true,
 		NATSURL:  ns.ClientURL(),
@@ -55,7 +55,7 @@ func TestFullPipeline_ObserverToNATS(t *testing.T) {
 			break
 		}
 	}
-	require.NotNil(t, natsEmitter, "NATS emitter should be created for FREE tier")
+	require.NotNil(t, natsEmitter, "NATS emitter should be created for ENTERPRISE tier")
 
 	// 4. Emit event directly to NATS emitter (simulating observer)
 	event := &domain.ObserverEvent{
@@ -89,8 +89,8 @@ func TestFullPipeline_ObserverToNATS(t *testing.T) {
 	}
 }
 
-// TestFullPipeline_SimpleTierNoNATS verifies SIMPLE tier doesn't publish to NATS.
-func TestFullPipeline_SimpleTierNoNATS(t *testing.T) {
+// TestFullPipeline_FreeTierNoNATS verifies FREE tier doesn't publish to NATS.
+func TestFullPipeline_FreeTierNoNATS(t *testing.T) {
 	// Start embedded NATS
 	ns := startTestNATS(t)
 	defer ns.Shutdown()
@@ -109,12 +109,12 @@ func TestFullPipeline_SimpleTierNoNATS(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, nc.Flush())
 
-	// Create SIMPLE tier config
+	// Create FREE tier config
 	cfg := TierConfig{
-		Tier:     TierSimple,
+		Tier:     TierFree,
 		OTLPURL:  "localhost:4317",
 		Insecure: true,
-		NATSURL:  ns.ClientURL(), // Should be ignored
+		NATSURL:  ns.ClientURL(), // Should be ignored for Free tier
 	}
 	emitters, err := cfg.BuildEmitters()
 	require.NoError(t, err)
@@ -122,13 +122,13 @@ func TestFullPipeline_SimpleTierNoNATS(t *testing.T) {
 
 	// Verify no NATS emitter
 	for _, e := range emitters {
-		assert.NotEqual(t, "nats", e.Name(), "SIMPLE tier should not have NATS emitter")
+		assert.NotEqual(t, "nats", e.Name(), "FREE tier should not have NATS emitter")
 	}
 
 	// No message should be received (we can't even emit since no NATS emitter)
 	select {
 	case <-received:
-		t.Fatal("SIMPLE tier should not publish to NATS")
+		t.Fatal("FREE tier should not publish to NATS")
 	case <-time.After(100 * time.Millisecond):
 		// Good - no message received
 	}
@@ -136,9 +136,9 @@ func TestFullPipeline_SimpleTierNoNATS(t *testing.T) {
 
 // TestFullPipeline_GracefulDegradation verifies pipeline works when NATS is down.
 func TestFullPipeline_GracefulDegradation(t *testing.T) {
-	// Create FREE tier with bad NATS URL
+	// Create ENTERPRISE tier with bad NATS URL
 	cfg := TierConfig{
-		Tier:     TierFree,
+		Tier:     TierEnterprise,
 		OTLPURL:  "localhost:4317",
 		Insecure: true,
 		NATSURL:  "nats://nonexistent:4222", // Bad URL
