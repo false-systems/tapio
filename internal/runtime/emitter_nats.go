@@ -34,7 +34,9 @@ func NewNATSEmitter(url string) (*NATSEmitter, error) {
 
 // Emit sends an observer event to NATS via Intelligence Service.
 func (e *NATSEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
-	// Check context cancellation first
+	if event == nil {
+		return fmt.Errorf("nil event")
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

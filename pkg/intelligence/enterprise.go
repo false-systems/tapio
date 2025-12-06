@@ -18,6 +18,9 @@ type ContextLookup interface {
 
 // EnterpriseService enriches events with K8s context and graph entities.
 // This creates TapioEvent (not ObserverEvent) for Ahti graph correlation.
+//
+// Currently supports: Network events (requires SrcIP for K8s context lookup).
+// Future: Add support for scheduler events (by UID), deployment events (by name).
 type EnterpriseService struct {
 	nc        *nats.Conn
 	ctxLookup ContextLookup
