@@ -14,7 +14,26 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-// startTestNATS is now defined in test_helpers.go
+
+// startTestNATS starts an embedded NATS server for testing.
+func startTestNATS(t *testing.T) *server.Server {
+	opts := &server.Options{
+		Host:           "127.0.0.1",
+		Port:           server.RANDOM_PORT,
+		NoLog:          true,
+		NoSigs:         true,
+		MaxControlLine: 256,
+	}
+	ns, err := server.NewServer(opts)
+	if err != nil {
+		t.Fatalf("failed to start NATS server: %v", err)
+	}
+	go ns.Start()
+	if !ns.ReadyForConnections(10 * time.Second) {
+		t.Fatalf("NATS server not ready in time")
+	}
+	return ns
+}
 func TestNATSEmitter_Emit(t *testing.T) {
 	// Start embedded NATS
 	ns := startTestNATS(t)
