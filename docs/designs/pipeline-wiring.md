@@ -281,8 +281,8 @@ func TestEnricher_NilContextService(t *testing.T) {
 type Tier string
 
 const (
-    TierSimple Tier = "simple"  // OTLP only
-    TierFree   Tier = "free"    // OTLP + NATS
+    TierFree       Tier = "free"       // OTLP only
+    TierEnterprise Tier = "enterprise" // OTLP + NATS → Ahti
 )
 
 // Config holds observer runtime configuration
@@ -292,7 +292,7 @@ type Config struct {
     // Tier determines emitter configuration
     Tier Tier
 
-    // NATSURL for free tier (ignored for simple tier)
+    // NATSURL for enterprise tier (ignored for free tier)
     NATSURL string
 
     // OTLPURL for all tiers
@@ -315,8 +315,8 @@ func (c *Config) BuildEmitters() ([]Emitter, error) {
         emitters = append(emitters, otlp)
     }
 
-    // NATS only for free tier (non-critical)
-    if c.Tier == TierFree && c.NATSURL != "" {
+    // NATS only for enterprise tier (non-critical)
+    if c.Tier == TierEnterprise && c.NATSURL != "" {
         nats, err := NewNATSEmitter(c.NATSURL)
         if err != nil {
             // Log warning but don't fail - NATS is non-critical
@@ -333,12 +333,12 @@ func (c *Config) BuildEmitters() ([]Emitter, error) {
 ### Environment Variables
 
 ```bash
-# Simple tier (default)
-TAPIO_TIER=simple
+# Free tier (default) - OTLP only
+TAPIO_TIER=free
 OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
 
-# Free tier (adds NATS)
-TAPIO_TIER=free
+# Enterprise tier - OTLP + NATS → Ahti
+TAPIO_TIER=enterprise
 OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
 NATS_URL=nats://localhost:4222
 ```
@@ -348,27 +348,27 @@ NATS_URL=nats://localhost:4222
 ```go
 // internal/runtime/config_test.go (additions)
 
-func TestConfig_BuildEmitters_SimpleTier(t *testing.T) {
+func TestConfig_BuildEmitters_FreeTier(t *testing.T) {
     cfg := Config{
-        Tier:    TierSimple,
+        Tier:    TierFree,
         OTLPURL: "localhost:4317",
-        NATSURL: "nats://localhost:4222",  // Should be ignored
+        NATSURL: "nats://localhost:4222",  // Should be ignored for Free tier
     }
 
     emitters, err := cfg.BuildEmitters()
     require.NoError(t, err)
 
-    // Only OTLP emitter
+    // Only OTLP emitter (Free tier = OTLP only)
     assert.Len(t, emitters, 1)
     assert.Equal(t, "otlp", emitters[0].Name())
 }
 
-func TestConfig_BuildEmitters_FreeTier(t *testing.T) {
+func TestConfig_BuildEmitters_EnterpriseTier(t *testing.T) {
     ns := natsserver.RunDefaultServer()
     defer ns.Shutdown()
 
     cfg := Config{
-        Tier:    TierFree,
+        Tier:    TierEnterprise,
         OTLPURL: "localhost:4317",
         NATSURL: ns.ClientURL(),
     }
@@ -385,7 +385,7 @@ func TestConfig_BuildEmitters_FreeTier(t *testing.T) {
 
 func TestConfig_BuildEmitters_NATSDown(t *testing.T) {
     cfg := Config{
-        Tier:    TierFree,
+        Tier:    TierEnterprise,
         OTLPURL: "localhost:4317",
         NATSURL: "nats://nonexistent:4222",  // Bad URL
     }
@@ -439,9 +439,9 @@ func TestFullPipeline_ObserverToNATS(t *testing.T) {
         },
     }
 
-    // 4. Create runtime with free tier config
+    // 4. Create runtime with enterprise tier config
     cfg := Config{
-        Tier:    TierFree,
+        Tier:    TierEnterprise,
         NATSURL: ns.ClientURL(),
     }
     emitters, _ := cfg.BuildEmitters()
@@ -478,8 +478,8 @@ func TestFullPipeline_ObserverToNATS(t *testing.T) {
     }
 }
 
-func TestFullPipeline_SimpleTierNoNATS(t *testing.T) {
-    // Simple tier should NOT publish to NATS
+func TestFullPipeline_FreeTierNoNATS(t *testing.T) {
+    // Free tier should NOT publish to NATS
     ns := natsserver.RunDefaultServer()
     defer ns.Shutdown()
 
@@ -491,7 +491,7 @@ func TestFullPipeline_SimpleTierNoNATS(t *testing.T) {
     })
 
     cfg := Config{
-        Tier:    TierSimple,  // Simple tier - no NATS
+        Tier:    TierFree,  // Free tier - no NATS
         NATSURL: ns.ClientURL(),
     }
     emitters, _ := cfg.BuildEmitters()
@@ -503,7 +503,7 @@ func TestFullPipeline_SimpleTierNoNATS(t *testing.T) {
     // Should NOT receive anything on NATS
     select {
     case <-received:
-        t.Fatal("simple tier should not publish to NATS")
+        t.Fatal("free tier should not publish to NATS")
     case <-time.After(500 * time.Millisecond):
         // Good - no message received
     }
@@ -525,7 +525,7 @@ Before merging:
 - [ ] **Coverage maintained:** >80% for runtime package
 - [ ] **NATS emitter is non-critical:** Verify IsCritical() returns false
 - [ ] **Enrichment works:** Network events get pod context
-- [ ] **Tier config works:** Simple = OTLP only, Free = OTLP + NATS
+- [ ] **Tier config works:** Free = OTLP only, Enterprise = OTLP + NATS
 
 ---
 
