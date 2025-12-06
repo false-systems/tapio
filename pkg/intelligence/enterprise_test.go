@@ -151,7 +151,6 @@ func TestEnterpriseService_NoContextFound(t *testing.T) {
 
 	// Should return error since we can't enrich without context
 	err = svc.ProcessEvent(context.Background(), event)
-	// Should return error since we can't enrich without context
 	assert.Error(t, err)
 }
 
