@@ -170,3 +170,32 @@ func TestEnterpriseService_NilEvent(t *testing.T) {
 	err = svc.ProcessEvent(context.Background(), nil)
 	assert.Error(t, err)
 }
+
+// TestEnterpriseService_NonNetworkEvent verifies that non-network events
+// fail gracefully since EnterpriseService currently only supports network events.
+func TestEnterpriseService_NonNetworkEvent(t *testing.T) {
+	ns := startTestNATS(t)
+	defer ns.Shutdown()
+
+	ctxLookup := &mockContextLookup{}
+	svc, err := NewEnterpriseService(ns.ClientURL(), ctxLookup)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if err := svc.Shutdown(context.Background()); err != nil {
+			t.Logf("failed to shutdown service: %v", err)
+		}
+	})
+
+	// Deployment event without network data - should fail
+	event := &domain.ObserverEvent{
+		ID:      "test-deploy-123",
+		Type:    "deployment",
+		Subtype: "rollout_stuck",
+		Source:  "deployments-observer",
+		// No NetworkData - can't extract source IP
+	}
+
+	err = svc.ProcessEvent(context.Background(), event)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no source IP")
+}
