@@ -60,27 +60,33 @@ lint:
 # Testing
 # ============================================================================
 
-# Run all tests with race detection
+# Run all tests
 test:
     @echo "Running tests..."
-    go test -race -timeout 5m ./...
+    go test -timeout 5m ./...
     @echo "✓ Tests OK"
 
 # Run tests with verbose output
 test-v:
-    go test -race -v -timeout 5m ./...
+    go test -v -timeout 5m ./...
 
 # Run specific test
 test-one TEST:
-    go test -race -v -run {{TEST}} ./...
+    go test -v -run {{TEST}} ./...
 
 # Run tests with coverage
 test-coverage:
     @mkdir -p coverage
-    go test -race -coverprofile=coverage/coverage.out -covermode=atomic ./...
+    go test -coverprofile=coverage/coverage.out -covermode=atomic ./...
     go tool cover -html=coverage/coverage.out -o coverage/coverage.html
     @echo "Coverage report: coverage/coverage.html"
     go tool cover -func=coverage/coverage.out | tail -1
+
+# Run tests with race detection (requires CGO_ENABLED=1)
+test-race:
+    @echo "Running tests with race detection..."
+    CGO_ENABLED=1 go test -race -timeout 5m ./...
+    @echo "✓ Race tests OK"
 
 # ============================================================================
 # CLAUDE.md Verification
