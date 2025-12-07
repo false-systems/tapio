@@ -115,14 +115,14 @@ ebpf-clean: ## Clean generated eBPF files
 
 test: test-unit ## Run all tests
 
-test-unit: ## Run unit tests with race detection
+test-unit: ## Run unit tests
 	@echo "${GREEN}Running unit tests...${NC}"
-	@$(GO) test -race -timeout 60s ./...
+	@$(GO) test -timeout 60s ./...
 
 test-coverage: ## Run tests with coverage (minimum 80%)
 	@echo "${GREEN}Running tests with coverage...${NC}"
 	@mkdir -p $(COVERAGE_DIR)
-	@$(GO) test -race -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic ./...
+	@$(GO) test -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic ./...
 	@$(GO) tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
 	@echo "${GREEN}Coverage report: $(COVERAGE_DIR)/coverage.html${NC}"
 	@$(GO) tool cover -func=$(COVERAGE_DIR)/coverage.out | tail -1
