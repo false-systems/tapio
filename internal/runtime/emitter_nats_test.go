@@ -14,7 +14,6 @@ import (
 	"github.com/yairfalse/tapio/pkg/domain"
 )
 
-
 // startTestNATS starts an embedded NATS server for testing.
 func startTestNATS(t *testing.T) *server.Server {
 	opts := &server.Options{
