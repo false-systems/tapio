@@ -106,19 +106,35 @@ verify-quick:
 # Building
 # ============================================================================
 
-# Build all binaries
+# Build all binaries (skips if cmd directories are empty)
 build:
-    @echo "Building binaries..."
-    @mkdir -p bin
-    CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/tapio ./cmd/tapio
-    CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/operator ./cmd/operator
-    @echo "✓ Build OK"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Building binaries..."
+    mkdir -p bin
+    if [ -f cmd/tapio/main.go ]; then
+        CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/tapio ./cmd/tapio
+    else
+        echo "  Skipping tapio (no main.go)"
+    fi
+    if [ -f cmd/operator/main.go ]; then
+        CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/operator ./cmd/operator
+    else
+        echo "  Skipping operator (no main.go)"
+    fi
+    echo "✓ Build OK"
 
 # Build with debug symbols
 build-debug:
-    @mkdir -p bin
-    go build -o bin/tapio ./cmd/tapio
-    go build -o bin/operator ./cmd/operator
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p bin
+    if [ -f cmd/tapio/main.go ]; then
+        go build -o bin/tapio ./cmd/tapio
+    fi
+    if [ -f cmd/operator/main.go ]; then
+        go build -o bin/operator ./cmd/operator
+    fi
 
 # ============================================================================
 # eBPF Management
