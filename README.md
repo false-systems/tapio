@@ -1,66 +1,123 @@
 # Tapio
 
-**Kubernetes Observability Agent**
+**Edge Intelligence for Kubernetes**
 
-Pattern detection for K8s failures. Observers detect issues, emit events to your stack.
+eBPF-based agent that captures kernel-level events, filters to anomalies at the edge (~1%), and sends enriched events to AHTI for root cause analysis.
 
 ---
 
-## Status
+## What Makes Tapio Different
 
-**In Development** - Core infrastructure works. Wiring in progress.
+**Tapio doesn't just collect data - it learns baselines and only sends what matters.**
 
-### What Works Today
+| Traditional Observability | Tapio (Edge Intelligence) |
+|--------------------------|---------------------------|
+| Send everything | Filter to ~1% (anomalies only) |
+| Central processing | Edge filtering |
+| High bandwidth | Low bandwidth |
+| Noise | Signal |
 
-| Component | Coverage | Status |
-|-----------|----------|--------|
-| Deployments Observer | 93.9% | Production-ready |
-| Scheduler Observer | 85.2% | Production-ready |
-| Supervisor | 89.8% | Production-ready |
-| OTLP Emitter | 82.1% | Works |
-| K8s Context Service | 81.0% | Works (not wired yet) |
-
-### What's In Progress
-
-| Component | Status |
-|-----------|--------|
-| Network Observer | Code exists, needs integration tests |
-| Intelligence Service | NATS routing scaffolded, not wired to observers |
-| Ahti integration | Designed, not connected |
-
-### What's Not Started
-
-- Helm charts
-- Container/Node observers
-- End-to-end pipeline (Observer → NATS → Ahti)
+```
+eBPF Kernel Events (millions/sec)
+        │
+        ▼
+   Edge Filtering
+   (RTT baseline learning,
+    memory pressure detection)
+        │
+        ▼
+   ~1% Anomalies ──────▶ AHTI (Central Intelligence)
+                         └─▶ Root cause analysis
+```
 
 ---
 
 ## Architecture
 
-### Current (Simple Tier - Works)
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TAPIO (Edge - Per Node)                       │
+│                                                                  │
+│  ┌──────────────────────┐    ┌──────────────────────┐           │
+│  │   eBPF Observers     │    │   K8s Observers      │           │
+│  │                      │    │                      │           │
+│  │  • network (TCP/DNS) │    │  • deployments       │           │
+│  │  • container (OOM)   │    │  • configmaps        │           │
+│  │  • node (PMC)        │    │  • scaling events    │           │
+│  └──────────┬───────────┘    └──────────┬───────────┘           │
+│             │                           │                        │
+│             ▼                           ▼                        │
+│      Filter (~1%)                 Send ALL (rare)                │
+│      (anomalies)                  (causal events)                │
+│             │                           │                        │
+│             └───────────┬───────────────┘                        │
+│                         ▼                                        │
+│                    NATS Publish                                  │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                    NATS Cluster
+                          │
+┌─────────────────────────▼───────────────────────────────────────┐
+│                    AHTI (Central)                                │
+│                                                                  │
+│              Receives → Learns → Correlates                      │
+│                                                                  │
+│      "Deployment X at T=0 → OOM at T=5min → Root Cause"         │
+│                                                                  │
+│                   Never watches anything                         │
+└──────────────────────────────────────────────────────────────────┘
+```
 
-```
-Observers ──▶ OTLP Emitter ──▶ Your Collector (Prometheus/Grafana/etc)
-```
+**Key insight:**
+- eBPF events: High volume → Filter to 1% (only anomalies)
+- K8s events: Low volume → Send 100% (they're causal anchors)
 
-### Target (Not Wired Yet)
+---
 
-```
-Observers ──▶ Context Service ──▶ Emitters
-                (enrichment)         │
-                                     ├──▶ OTLP ──▶ Your Stack
-                                     │
-                                     └──▶ NATS ──▶ Intelligence ──▶ Ahti
-                                                     Service        (correlation)
-```
+## Observers
+
+### eBPF Observers (Kernel Level)
+
+| Observer | Captures | Filters To |
+|----------|----------|------------|
+| **Network** | TCP states, DNS, retransmits | RTT spikes >2x baseline, connection failures |
+| **Container** | OOM kills, process exits | OOM, error exits (code ≠ 0) |
+| **Node** | PMC, cgroup metrics | Memory pressure >80%, CPU throttling |
+
+### K8s Observers (API Level)
+
+| Observer | Captures | Sends |
+|----------|----------|-------|
+| **Deployments** | Creates, updates, deletes | All (causal anchors) |
+| **Scheduler** | FailedScheduling events | All (failure events) |
+
+---
+
+## Status
+
+### Production Ready
+
+| Component | Coverage | Description |
+|-----------|----------|-------------|
+| Deployments Observer | 93.9% | K8s deployment lifecycle |
+| Scheduler Observer | 85.2% | Scheduling failures |
+| Supervisor | 89.8% | Observer lifecycle |
+| Network Observer | 78% | eBPF TCP/DNS/RTT |
+
+### In Progress
+
+| Component | Status |
+|-----------|--------|
+| Container Observer | eBPF code written, needs compilation |
+| Node Observer | PMC metrics, cgroup integration |
+| NATS Integration | Scaffolded, not wired |
 
 ---
 
 ## Quick Start
 
 ```bash
-# Prerequisites: Go 1.24+, Kubernetes cluster
+# Prerequisites: Linux, Go 1.24+, Kubernetes cluster
 
 git clone https://github.com/yairfalse/tapio
 cd tapio
@@ -68,105 +125,41 @@ cd tapio
 # Build
 make build
 
-# Run Deployments Observer (the one that works)
+# Run with OTLP export (FREE tier)
 ./bin/tapio --observer=deployments
+
+# Run with NATS (connects to AHTI)
+./bin/tapio --observer=network --nats=nats://localhost:4222
 ```
 
 ### Environment Variables
 
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317  # Your OTLP collector
+OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317  # OTLP collector
+NATS_URL=nats://localhost:4222               # NATS for AHTI
 KUBECONFIG=~/.kube/config                    # K8s access
 ```
 
 ---
 
-## Observers
+## Edge Filtering Examples
 
-### Deployments Observer (Production)
+### Network Observer
 
-Detects deployment issues via K8s API:
-- Stuck rollouts
-- Scaling failures
-- Replica mismatches
-
-```go
-// Example event
-{
-  "type": "deployment",
-  "subtype": "rollout_stuck",
-  "deployment_data": {
-    "name": "my-app",
-    "namespace": "production",
-    "replicas_desired": 3,
-    "replicas_ready": 1
-  }
+```c
+// In eBPF: Only emit when RTT spikes >2x baseline OR >500ms
+if (rtt_us > (baseline->baseline_us * 2) || rtt_us > 500000) {
+    emit_rtt_spike_event();  // ~1% of traffic
 }
 ```
 
-### Scheduler Observer (Production)
+### Container Observer
 
-Detects scheduling issues via K8s Events API:
-- FailedScheduling events
-- Resource constraints
-- Node affinity issues
-
-### Network Observer (In Progress)
-
-eBPF-based pattern detection:
-- SYN timeout → unreachable service
-- DNS failures
-- Connection refused
-
-**Status:** Pattern detection code exists. Needs integration testing with real eBPF.
-
----
-
-## The Gap
-
-We have good components that aren't connected:
-
-```
-BUILT:                           MISSING:
-─────                            ───────
-✅ Observers detect patterns     ❌ Events don't flow to Intelligence Service
-✅ OTLP emitter works            ❌ No NATS emitter
-✅ Context Service works         ❌ Observers don't call it
-✅ Intelligence Service works    ❌ Nothing sends it events
-```
-
-### What Needs Wiring
-
-1. **NATSEmitter** - Send events to Intelligence Service
-2. **Context enrichment** - Observers call Context Service before emitting
-3. **Tier config** - Choose Simple (OTLP) vs Free (OTLP + NATS)
-4. **Integration tests** - Full pipeline Observer → NATS → Ahti
-
----
-
-## Development
-
-```bash
-# Run tests
-make test
-
-# Lint
-make lint
-
-# Build all
-make build
-```
-
-### Test Coverage
-
-```
-pkg/decoders              99.1%
-internal/observers/deploy 93.9%
-internal/runtime/super    89.8%
-internal/observers/sched  85.2%
-internal/base             82.1%
-internal/services/k8s     81.0%
-pkg/intelligence          35.9%  <- needs work
+```go
+// Only send OOM kills and error exits
+if evt.Type == EventTypeOOMKill || classification.Category == ExitCategoryError {
+    publish(event)  // Skip normal exits
+}
 ```
 
 ---
@@ -175,44 +168,40 @@ pkg/intelligence          35.9%  <- needs work
 
 ```
 tapio/
-├── cmd/                    # Binaries
 ├── internal/
-│   ├── observers/          # Pattern detection
-│   │   ├── deployments/    # ✅ Production
-│   │   ├── scheduler/      # ✅ Production
-│   │   ├── network/        # 🔄 In progress
-│   │   └── ...
-│   ├── runtime/            # Observer lifecycle
-│   │   ├── supervisor/     # ✅ Production
-│   │   ├── emitter_otlp.go # ✅ Works
-│   │   └── emitter_file.go # ✅ Works
+│   ├── observers/
+│   │   ├── network/        # eBPF TCP/DNS/RTT
+│   │   ├── container/      # eBPF OOM/exits
+│   │   ├── node/           # eBPF PMC/cgroup
+│   │   ├── deployments/    # K8s API
+│   │   └── scheduler/      # K8s Events
+│   ├── runtime/
+│   │   └── supervisor/     # Observer lifecycle
 │   └── services/
-│       └── k8scontext/     # ✅ Works (unused)
+│       └── k8scontext/     # Pod metadata enrichment
 ├── pkg/
-│   ├── domain/             # Event types
-│   ├── intelligence/       # NATS routing (unused)
-│   └── decoders/           # Protocol parsing
-└── docs/                   # Design docs
+│   ├── domain/             # Event types (ObserverEvent)
+│   └── intelligence/       # NATS routing
+└── docs/
+    └── designs/            # Architecture docs
 ```
 
 ---
 
-## Roadmap
+## Documentation
 
-**Now:** Wire the pipeline
-1. Create NATSEmitter
-2. Connect Context Service to observers
-3. Integration test full flow
+- **[Edge-Central Data Flow](docs/designs/edge-central-data-flow.md)** - TAPIO-AHTI architecture
+- **[Network Observer Design](docs/003-network-observer-dns-link-status-integration.md)** - eBPF patterns
+- **[Container Observer Design](docs/006-container-observer-design-v2.md)** - OOM/exit detection
 
-**Next:** Production deployment
-- Helm charts
-- DaemonSet manifests
-- Operator (maybe)
+---
 
-**Later:** More observers
-- Network (finish eBPF integration)
-- Container lifecycle
-- Node metrics
+## Related Projects
+
+| Project | Description |
+|---------|-------------|
+| **[AHTI](https://github.com/yairfalse/ahti)** | Central Intelligence - receives from TAPIO, builds causality graph |
+| **[Sykli](https://github.com/yairfalse/sykli)** | CI in your language |
 
 ---
 
@@ -220,14 +209,7 @@ tapio/
 
 Finnish god of forests. Watches over the ecosystem.
 
-Tapio watches Kubernetes - pods, services, nodes, deployments.
-
----
-
-## Related Projects
-
-- **[Ahti](https://github.com/yairfalse/ahti)** - Graph correlation backend (Tapio → Ahti)
-- **[Sykli](https://github.com/yairfalse/sykli)** - CI in your language
+Tapio watches Kubernetes at the kernel level - network packets, container lifecycle, node health. It sees what APM tools miss.
 
 ---
 
