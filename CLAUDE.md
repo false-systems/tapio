@@ -3,7 +3,9 @@
 > **For AI Agents**: Read [docs/ai/WORKFLOW.md](docs/ai/WORKFLOW.md) for TDD workflow and [docs/ai/STANDARDS.md](docs/ai/STANDARDS.md) for code quality rules.
 
 ## 🚪 Project Overview
-TAPIO is a lean, eBPF-based Kubernetes observability agent that captures kernel-level events (network, container lifecycle, node metrics) and emits them via OTLP, NATS, or file export.
+TAPIO is **Edge Intelligence** for Kubernetes - an eBPF-based agent that captures kernel-level events, filters to anomalies at the edge (~1%), and sends enriched events to AHTI (Central Intelligence) for root cause analysis.
+
+**What makes TAPIO special:** It doesn't just collect data - it learns baselines (RTT, memory patterns) and only sends what matters.
 
 ## 🧠 Architecture-First Development
 ```
@@ -34,11 +36,31 @@ The 5-Level Dependency Hierarchy IS the law. No circular dependencies, no shortc
 2. **Semantic Correlation** - Automatic causality tracking between events
 3. **Flexible Export** - OTLP (Simple), NATS (FREE), Intelligence Service (ENTERPRISE)
 
+## 🔗 TAPIO-AHTI Architecture
+
+**TAPIO = Edge Intelligence (watches). AHTI = Central Intelligence (learns).**
+
+```
+TAPIO (per node)                              AHTI (central)
+├── eBPF Observers ──filter──→ ~1% anomalies ─┐
+│   (network, container, node)                │
+│                                             ├──→ NATS ──→ Learn & Correlate
+└── K8s Observers ──────────→ 100% causal ────┘
+    (deployments, configs)    (rare events)
+```
+
+- **eBPF events**: Filter to 1% (only anomalies: OOM, connection failures, RTT spikes)
+- **K8s events**: Send 100% (deployments, config changes - they're rare but causal)
+- **AHTI never watches** - only receives pre-filtered events and builds causality graph
+
+See: **[Edge-Central Data Flow](docs/designs/edge-central-data-flow.md)**
+
 ## 📚 Documentation
 
 - **[AI Workflow](docs/ai/WORKFLOW.md)** - TDD process, commit workflow, eBPF patterns
 - **[Code Standards](docs/ai/STANDARDS.md)** - Anti-patterns, quality rules, verification
 - **[Architecture](docs/002-tapio-observer-consolidation.md)** - Observer consolidation ADR
+- **[Edge-Central Data Flow](docs/designs/edge-central-data-flow.md)** - Edge vs Central intelligence
 - **[Intelligence Service](docs/designs/intelligence-service-foundation.md)** - Tier architecture
 
 ## 🏗️ Quick Start for AI Agents
