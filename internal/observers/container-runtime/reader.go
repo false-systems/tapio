@@ -54,8 +54,10 @@ func (r *RingReader) Read(ctx context.Context) (*RingRecord, error) {
 
 // ParseRecord parses raw bytes into ContainerEventBPF
 func (r *RingReader) ParseRecord(data []byte) (*container.ContainerEventBPF, error) {
-	if len(data) < 304 {
-		return nil, fmt.Errorf("invalid record size: got %d, expected 304", len(data))
+	// C struct is 308 bytes (packed), Go struct is 312 bytes (with padding)
+	// Issue #566: Added CgroupID field (8 bytes), changing 300 → 308
+	if len(data) < 308 {
+		return nil, fmt.Errorf("invalid record size: got %d, expected 308", len(data))
 	}
 
 	evt := &container.ContainerEventBPF{}

@@ -56,12 +56,14 @@ func TestRingReader_ParseRecord(t *testing.T) {
 	evt.TimestampNs = uint64(time.Now().UnixNano())
 
 	// Marshal to bytes (unsafe cast for testing)
-	rawBytes := make([]byte, 304) // ContainerEventBPF size
+	// Issue #566: Added CgroupID field (8 bytes), C struct is now 308 bytes
+	rawBytes := make([]byte, 312) // ContainerEventBPF Go size (308 C + padding)
 	copy(rawBytes[0:8], uint64ToBytes(evt.MemoryLimit))
 	copy(rawBytes[8:16], uint64ToBytes(evt.MemoryUsage))
 	copy(rawBytes[16:24], uint64ToBytes(evt.TimestampNs))
-	copy(rawBytes[24:28], uint32ToBytes(evt.Type))
-	copy(rawBytes[28:32], uint32ToBytes(evt.PID))
+	copy(rawBytes[24:32], uint64ToBytes(evt.CgroupID)) // Issue #566
+	copy(rawBytes[32:36], uint32ToBytes(evt.Type))
+	copy(rawBytes[36:40], uint32ToBytes(evt.PID))
 
 	parsed, err := reader.ParseRecord(rawBytes)
 	require.NoError(t, err, "Parse should succeed")

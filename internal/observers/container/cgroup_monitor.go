@@ -59,6 +59,10 @@ type CgroupMonitor struct {
 	cache    *lru.Cache[string, cachedCgroupInfo]
 	mu       sync.RWMutex
 
+	// Cgroup ID → Container ID cache (Issue #566)
+	// Survives cgroup deletion - populated on successful lookups
+	cgroupIDCache *lru.Cache[uint64, string]
+
 	// OTEL metrics
 	cacheHits   metric.Int64Counter
 	cacheMisses metric.Int64Counter
@@ -90,10 +94,17 @@ func NewCgroupMonitor(cfg CgroupMonitorConfig, meter metric.Meter) (*CgroupMonit
 		return nil, fmt.Errorf("failed to create LRU cache: %w", err)
 	}
 
+	// Cgroup ID cache for surviving cgroup deletion (Issue #566)
+	cgroupIDCache, err := lru.New[uint64, string](cfg.CacheSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cgroup ID cache: %w", err)
+	}
+
 	m := &CgroupMonitor{
-		basePath: cfg.BasePath,
-		cacheTTL: cfg.CacheTTL,
-		cache:    cache,
+		basePath:      cfg.BasePath,
+		cacheTTL:      cfg.CacheTTL,
+		cache:         cache,
+		cgroupIDCache: cgroupIDCache,
 	}
 
 	// Register OTEL metrics if meter provided
@@ -353,4 +364,28 @@ func errorType(err error) string {
 		return "permission"
 	}
 	return "other"
+}
+
+// CacheCgroupID stores a cgroup ID → container ID mapping (Issue #566)
+// Called when we successfully resolve a container ID to cache for later
+func (m *CgroupMonitor) CacheCgroupID(cgroupID uint64, containerID string) {
+	if cgroupID == 0 || containerID == "" {
+		return
+	}
+	m.mu.Lock()
+	m.cgroupIDCache.Add(cgroupID, containerID)
+	m.mu.Unlock()
+}
+
+// GetContainerIDByCgroupID looks up container ID from cached cgroup ID (Issue #566)
+// Returns container ID and true if found, empty string and false otherwise
+// Use this as fallback when cgroup path resolution fails (cgroup deleted)
+func (m *CgroupMonitor) GetContainerIDByCgroupID(cgroupID uint64) (string, bool) {
+	if cgroupID == 0 {
+		return "", false
+	}
+	m.mu.RLock()
+	containerID, ok := m.cgroupIDCache.Get(cgroupID)
+	m.mu.RUnlock()
+	return containerID, ok
 }

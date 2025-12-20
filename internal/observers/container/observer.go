@@ -237,6 +237,17 @@ func (c *ContainerObserver) processEvent(ctx context.Context, evt ContainerEvent
 	cgroupPath := NullTerminatedString(evt.CgroupPath[:])
 	containerID := ParseContainerID(cgroupPath)
 
+	// Issue #566: Fallback to cgroup ID cache if path parsing failed
+	// This handles the race condition where cgroup is deleted before we can read it
+	if containerID == "" && evt.CgroupID != 0 {
+		containerID, _ = c.cgroupMonitor.GetContainerIDByCgroupID(evt.CgroupID)
+	}
+
+	// Cache cgroup ID → container ID mapping for future lookups
+	if containerID != "" && evt.CgroupID != 0 {
+		c.cgroupMonitor.CacheCgroupID(evt.CgroupID, containerID)
+	}
+
 	// Determine if this is an OOM kill
 	isOOM := evt.Type == EventTypeOOMKill
 

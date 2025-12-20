@@ -26,18 +26,19 @@ type ExitClassification struct {
 }
 
 // ContainerEventBPF matches the C struct layout from container_monitor.c
-// Must be kept in sync with the C struct definition
+// Must be kept in sync with the C struct definition (308 bytes total)
 // Field order optimized to avoid Go padding (uint64 fields first for alignment)
 type ContainerEventBPF struct {
 	MemoryLimit uint64    // Memory limit from cgroup (offset 0)
 	MemoryUsage uint64    // Memory usage from cgroup (offset 8)
 	TimestampNs uint64    // Event timestamp in nanoseconds (offset 16)
-	Type        uint32    // Event type - OOM or Exit (offset 24)
-	PID         uint32    // Process ID (offset 28)
-	TID         uint32    // Thread ID (offset 32)
-	ExitCode    int32     // Exit code (offset 36)
-	Signal      int32     // Signal number (offset 40)
-	CgroupPath  [256]byte // cgroup path captured at event time (offset 44)
+	CgroupID    uint64    // Cgroup ID - survives deletion (offset 24, Issue #566)
+	Type        uint32    // Event type - OOM or Exit (offset 32)
+	PID         uint32    // Process ID (offset 36)
+	TID         uint32    // Thread ID (offset 40)
+	ExitCode    int32     // Exit code (offset 44)
+	Signal      int32     // Signal number (offset 48)
+	CgroupPath  [256]byte // cgroup path (offset 52)
 }
 
 // ClassifyExit categorizes a container exit into one of 3 categories
