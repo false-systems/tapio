@@ -164,3 +164,45 @@ func TestErrorType(t *testing.T) {
 	assert.Equal(t, "permission", errorType(os.ErrPermission))
 	assert.Equal(t, "other", errorType(os.ErrInvalid))
 }
+
+// TestCgroupIDCache tests cgroup ID → container ID caching (Issue #566)
+func TestCgroupIDCache(t *testing.T) {
+	monitor, err := NewCgroupMonitor(CgroupMonitorConfig{}, nil)
+	require.NoError(t, err)
+
+	// Initially not found
+	containerID, found := monitor.GetContainerIDByCgroupID(12345)
+	assert.False(t, found)
+	assert.Empty(t, containerID)
+
+	// Cache a mapping
+	monitor.CacheCgroupID(12345, "abc123def456")
+
+	// Now should be found
+	containerID, found = monitor.GetContainerIDByCgroupID(12345)
+	assert.True(t, found)
+	assert.Equal(t, "abc123def456", containerID)
+}
+
+// TestCgroupIDCache_ZeroValues tests that zero/empty values are not cached
+func TestCgroupIDCache_ZeroValues(t *testing.T) {
+	monitor, err := NewCgroupMonitor(CgroupMonitorConfig{}, nil)
+	require.NoError(t, err)
+
+	// Zero cgroup ID should not be cached
+	monitor.CacheCgroupID(0, "abc123")
+	_, found := monitor.GetContainerIDByCgroupID(0)
+	assert.False(t, found)
+
+	// Empty container ID should not be cached
+	monitor.CacheCgroupID(12345, "")
+	_, found = monitor.GetContainerIDByCgroupID(12345)
+	assert.False(t, found)
+}
+
+// TestCgroupIDCache_NewMonitorHasCache verifies cgroupIDCache is initialized
+func TestCgroupIDCache_NewMonitorHasCache(t *testing.T) {
+	monitor, err := NewCgroupMonitor(CgroupMonitorConfig{}, nil)
+	require.NoError(t, err)
+	assert.NotNil(t, monitor.cgroupIDCache, "cgroupIDCache should be initialized")
+}

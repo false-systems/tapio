@@ -75,14 +75,14 @@ func TestContainerEventBPF_Size(t *testing.T) {
 	size := unsafe.Sizeof(evt)
 
 	// Go aligns struct size to its largest field (uint64 = 8 bytes)
-	// Actual fields: 3*uint64 (24) + 5*uint32/int32 (20) + [256]byte (256) = 300 bytes
-	// Go rounds up to multiple of 8: 300 → 304 bytes
-	expectedSize := uintptr(304)
+	// Actual fields: 4*uint64 (32) + 5*uint32/int32 (20) + [256]byte (256) = 308 bytes
+	// Go rounds up to multiple of 8: 308 → 312 bytes
+	expectedSize := uintptr(312)
 	assert.Equal(t, expectedSize, size, "ContainerEventBPF struct size (with Go padding)")
 
-	// Verify we can still read 300 bytes from C (we'll handle the 4-byte difference in code)
-	minSize := uintptr(300)
-	assert.GreaterOrEqual(t, size, minSize, "Struct must be at least 300 bytes for C compatibility")
+	// Verify we can still read 308 bytes from C (we'll handle the 4-byte difference in code)
+	minSize := uintptr(308)
+	assert.GreaterOrEqual(t, size, minSize, "Struct must be at least 308 bytes for C compatibility")
 }
 
 // TestContainerEventBPF_FieldOffsets verifies field alignment matches C struct
@@ -90,15 +90,17 @@ func TestContainerEventBPF_FieldOffsets(t *testing.T) {
 	var evt ContainerEventBPF
 
 	// Reordered to avoid padding: uint64 fields first, then uint32/int32, then byte array
+	// Issue #566: Added CgroupID field after TimestampNs
 	assert.Equal(t, uintptr(0), unsafe.Offsetof(evt.MemoryLimit), "MemoryLimit offset")
 	assert.Equal(t, uintptr(8), unsafe.Offsetof(evt.MemoryUsage), "MemoryUsage offset")
 	assert.Equal(t, uintptr(16), unsafe.Offsetof(evt.TimestampNs), "TimestampNs offset")
-	assert.Equal(t, uintptr(24), unsafe.Offsetof(evt.Type), "Type offset")
-	assert.Equal(t, uintptr(28), unsafe.Offsetof(evt.PID), "PID offset")
-	assert.Equal(t, uintptr(32), unsafe.Offsetof(evt.TID), "TID offset")
-	assert.Equal(t, uintptr(36), unsafe.Offsetof(evt.ExitCode), "ExitCode offset")
-	assert.Equal(t, uintptr(40), unsafe.Offsetof(evt.Signal), "Signal offset")
-	assert.Equal(t, uintptr(44), unsafe.Offsetof(evt.CgroupPath), "CgroupPath offset")
+	assert.Equal(t, uintptr(24), unsafe.Offsetof(evt.CgroupID), "CgroupID offset")
+	assert.Equal(t, uintptr(32), unsafe.Offsetof(evt.Type), "Type offset")
+	assert.Equal(t, uintptr(36), unsafe.Offsetof(evt.PID), "PID offset")
+	assert.Equal(t, uintptr(40), unsafe.Offsetof(evt.TID), "TID offset")
+	assert.Equal(t, uintptr(44), unsafe.Offsetof(evt.ExitCode), "ExitCode offset")
+	assert.Equal(t, uintptr(48), unsafe.Offsetof(evt.Signal), "Signal offset")
+	assert.Equal(t, uintptr(52), unsafe.Offsetof(evt.CgroupPath), "CgroupPath offset")
 }
 
 // TestConstants_EventTypes verifies event type constants

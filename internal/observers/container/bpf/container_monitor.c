@@ -17,18 +17,19 @@
 #define CGROUP_PATH_LEN 256
 
 // Container event structure
-// MUST match Go ContainerEventBPF exactly (300 bytes)
+// MUST match Go ContainerEventBPF exactly (308 bytes)
 // Field order optimized for alignment (uint64 first)
 struct container_event {
 	__u64 memory_limit;          // offset 0: Memory limit from cgroup
 	__u64 memory_usage;          // offset 8: Memory usage from cgroup
 	__u64 timestamp_ns;          // offset 16: Event timestamp in nanoseconds
-	__u32 type;                  // offset 24: EVENT_TYPE_OOM_KILL or EVENT_TYPE_EXIT
-	__u32 pid;                   // offset 28: Process ID
-	__u32 tid;                   // offset 32: Thread ID
-	__s32 exit_code;             // offset 36: Exit code
-	__s32 signal;                // offset 40: Signal number
-	char  cgroup_path[CGROUP_PATH_LEN]; // offset 44: cgroup path (256 bytes)
+	__u64 cgroup_id;             // offset 24: Cgroup ID (survives cgroup deletion)
+	__u32 type;                  // offset 32: EVENT_TYPE_OOM_KILL or EVENT_TYPE_EXIT
+	__u32 pid;                   // offset 36: Process ID
+	__u32 tid;                   // offset 40: Thread ID
+	__s32 exit_code;             // offset 44: Exit code
+	__s32 signal;                // offset 48: Signal number
+	char  cgroup_path[CGROUP_PATH_LEN]; // offset 52: cgroup path (256 bytes)
 } __attribute__((packed));
 
 // Ring buffer for events (256KB)
@@ -91,18 +92,14 @@ int handle_oom(struct trace_event_raw_mark_victim *ctx) {
 	// Will be enriched by userspace from cgroupfs (if still available)
 	evt->memory_limit = 0;
 
-	// Get current task for cgroup path
-	// Brendan Gregg: Capture cgroup path NOW before cgroup is deleted
-	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+	// Capture cgroup ID - survives cgroup deletion (Issue #566)
+	// This is the key fix: cgroup_id is stable even after cgroup is deleted
+	evt->cgroup_id = bpf_get_current_cgroup_id();
 
-	// Try to read cgroup path from task->cgroups
-	// This may fail if the task is already being cleaned up
-	// Use bpf_probe_read_kernel for safety
-	evt->cgroup_path[0] = '\0';  // Initialize to empty
-
-	// Note: Getting full cgroup path in eBPF is complex
-	// We capture the cgroup ID and let userspace resolve the path
-	// For now, leave empty - userspace will use PID->cgroup mapping
+	// Cgroup path left empty - userspace resolves via cgroup_id
+	// This avoids the race condition where cgroup is deleted before
+	// Go can read cgroupfs
+	evt->cgroup_path[0] = '\0';
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
@@ -161,7 +158,10 @@ int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
 	evt->memory_usage = 0;
 	evt->memory_limit = 0;
 
-	// Cgroup path - leave for userspace to resolve
+	// Capture cgroup ID - survives cgroup deletion (Issue #566)
+	evt->cgroup_id = bpf_get_current_cgroup_id();
+
+	// Cgroup path left empty - userspace resolves via cgroup_id
 	evt->cgroup_path[0] = '\0';
 
 	bpf_ringbuf_submit(evt, 0);
