@@ -16,13 +16,14 @@ import (
 
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
 // Config for K8s API-based container observer
 type Config struct {
 	Clientset kubernetes.Interface
 	Namespace string // "" = all namespaces
-	Emitter   base.Emitter
+	Emitter   intelligence.Service
 }
 
 // Validate checks that config is valid
@@ -46,7 +47,7 @@ type APIObserver struct {
 	*base.BaseObserver
 	config   Config
 	informer cache.SharedIndexInformer
-	emitter  base.Emitter
+	emitter  intelligence.Service
 	stopCh   chan struct{}
 }
 

@@ -250,7 +250,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 
 			// State change event - convert to domain representation
 			eventType := stateToEventType(evt.OldState, evt.NewState, connKey, n)
-			comm := extractComm(evt.Comm)
+			_ = extractComm(evt.Comm) // comm used for debug output (disabled)
 
 			// Record network-specific metrics based on event type
 			switch eventType {
@@ -258,14 +258,6 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 				n.connectionRefused.Add(ctx, 1)
 			case "connection_syn_timeout":
 				n.synTimeouts.Add(ctx, 1)
-			}
-
-			// Output event (if stdout enabled)
-			if n.config.Output.Stdout {
-				log.Printf("[%s] %s: %s (%d) %s:%d -> %s:%d [%s->%s]",
-					n.Name(), eventType, comm, evt.PID,
-					srcIP, evt.SrcPort, dstIP, evt.DstPort,
-					tcpStateName(evt.OldState), tcpStateName(evt.NewState))
 			}
 
 			// Record base metrics
@@ -286,8 +278,8 @@ func tcpStateName(state uint8) string {
 // processRetransmitEvent handles TCP retransmission events
 func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt NetworkEventBPF, connKey, srcIP, dstIP string) {
 	// Extract retransmit data from reused fields
-	totalRetrans := evt.OldState // total_retrans from eBPF
-	sndCwnd := evt.NewState      // snd_cwnd from eBPF
+	_ = evt.OldState        // total_retrans from eBPF (used for debug output, disabled)
+	sndCwnd := evt.NewState // snd_cwnd from eBPF
 	comm := extractComm(evt.Comm)
 
 	// Read stats from eBPF LRU map (already updated by tcp_retransmit_skb handler)
@@ -349,21 +341,7 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 				},
 			})
 
-			// Output warning if stdout enabled
-			if n.config.Output.Stdout {
-				log.Printf("[%s] HIGH RETRANSMIT RATE: %s (%s) %.1f%% (retx=%d, total=%d, cwnd=%d)",
-					n.Name(), connKey, comm, retxRate*100,
-					stats.Retransmits, stats.TotalPackets, sndCwnd)
-			}
 		}
-	}
-
-	// Output retransmit event if stdout enabled
-	if n.config.Output.Stdout {
-		log.Printf("[%s] RETRANSMIT: %s (%d) %s:%d -> %s:%d (total_retrans=%d, cwnd=%d)",
-			n.Name(), comm, evt.PID,
-			srcIP, evt.SrcPort, dstIP, evt.DstPort,
-			totalRetrans, sndCwnd)
 	}
 
 	// Record processing time
@@ -405,13 +383,6 @@ func (n *NetworkObserver) processRTTSpikeEvent(ctx context.Context, evt NetworkE
 		},
 	})
 
-	// Output RTT spike event if stdout enabled
-	if n.config.Output.Stdout {
-		log.Printf("[%s] RTT SPIKE: %s (%d) %s:%d -> %s:%d (baseline=%.0fms, current=%.0fms, +%.1f%%)",
-			n.Name(), comm, evt.PID,
-			srcIP, evt.SrcPort, dstIP, evt.DstPort,
-			baselineMs, currentMs, degradation*100)
-	}
 }
 
 // emitDomainEvent outputs domain events from processors
@@ -432,15 +403,6 @@ func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.Obser
 
 	// Send to OTLP (Community path - structured logs)
 	n.SendObserverEvent(ctx, evt)
-
-	// Output event (if stdout enabled)
-	if n.config.Output.Stdout {
-		log.Printf("[%s] %s.%s: %s:%d -> %s:%d (%s)",
-			n.Name(), evt.Type, evt.Subtype,
-			evt.NetworkData.SrcIP, evt.NetworkData.SrcPort,
-			evt.NetworkData.DstIP, evt.NetworkData.DstPort,
-			evt.NetworkData.TCPState)
-	}
 }
 
 // enrichWithK8sContext lookups pod metadata by IP and populates NetworkEventData fields

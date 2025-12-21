@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -19,7 +20,7 @@ import (
 // Config for node observer
 type Config struct {
 	Clientset kubernetes.Interface
-	Emitter   base.Emitter
+	Emitter   intelligence.Service
 }
 
 // Validate checks config is valid
@@ -38,7 +39,7 @@ type Observer struct {
 	*base.BaseObserver
 	config   Config
 	informer cache.SharedIndexInformer
-	emitter  base.Emitter
+	emitter  intelligence.Service
 }
 
 // NewObserver creates a new node observer

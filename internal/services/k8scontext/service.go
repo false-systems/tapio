@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -31,8 +32,8 @@ type Service struct {
 	// Event buffer for async NATS KV writes
 	eventBuffer chan func() error
 
-	// Event emission (optional - if Output configured)
-	emitter base.Emitter // OTLP emitter for community tier
+	// Event emission (optional - injected via Config)
+	emitter intelligence.Service
 
 	// Lifecycle management
 	ctx      context.Context
@@ -106,18 +107,11 @@ func NewService(config Config) (*Service, error) {
 	// 7. Create logger
 	logger := base.NewLogger("k8scontext")
 
-	// 8. Create event emitter (if event emission enabled)
-	var emitter base.Emitter
-	if config.Output.OTEL || config.Output.Tapio || config.Output.Stdout {
-		emitter, err = base.CreateEmitters(base.OutputConfig{
-			OTEL:   config.Output.OTEL,
-			Tapio:  config.Output.Tapio,
-			Stdout: config.Output.Stdout,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to create event emitters: %w", err)
-		}
-		logger.Info().Msg("Event emission enabled (OTLP/NATS/stdout)")
+	// 8. Log event emission status
+	if config.Emitter != nil {
+		logger.Info().
+			Str("emitter", config.Emitter.Name()).
+			Msg("Event emission enabled")
 	} else {
 		logger.Info().Msg("Event emission disabled (metadata-only mode)")
 	}
@@ -129,7 +123,7 @@ func NewService(config Config) (*Service, error) {
 		logger:          logger,
 		informerFactory: informerFactory,
 		eventBuffer:     eventBuffer,
-		emitter:         emitter,
+		emitter:         config.Emitter,
 	}, nil
 }
 
@@ -236,7 +230,7 @@ func (s *Service) Stop() error {
 }
 
 // emitDomainEvent emits diagnostic events for K8s resource changes
-// Follows same pattern as NetworkObserver.emitDomainEvent()
+// Uses the injected intelligence.Service for tier-based emission
 func (s *Service) emitDomainEvent(ctx context.Context, evt *domain.ObserverEvent) {
 	// Skip if event emission not configured
 	if s.emitter == nil {
@@ -257,7 +251,7 @@ func (s *Service) emitDomainEvent(ctx context.Context, evt *domain.ObserverEvent
 		evt.Source = "k8scontext"
 	}
 
-	// Emit to OTLP (Community tier - structured logs)
+	// Emit via intelligence service (handles tier-based routing)
 	if err := s.emitter.Emit(ctx, evt); err != nil {
 		s.logger.Error().
 			Err(err).
@@ -267,20 +261,9 @@ func (s *Service) emitDomainEvent(ctx context.Context, evt *domain.ObserverEvent
 		return
 	}
 
-	// Publish to NATS with graph enrichment (Enterprise tier)
-	if s.config.Output.Tapio && s.config.Publisher != nil {
+	// Additional enrichment for enterprise tier (graph entities)
+	if s.config.Publisher != nil {
 		s.enrichAndPublish(ctx, evt)
-	}
-
-	// Debug logging if stdout enabled
-	if s.config.Output.Stdout {
-		s.logger.Info().
-			Str("type", evt.Type).
-			Str("subtype", evt.Subtype).
-			Str("resource", evt.K8sData.ResourceKind).
-			Str("name", evt.K8sData.ResourceName).
-			Str("action", evt.K8sData.Action).
-			Msg("K8s event emitted")
 	}
 }
 

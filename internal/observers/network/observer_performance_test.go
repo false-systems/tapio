@@ -8,7 +8,6 @@ import (
 	"unsafe"
 
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/internal/base"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/metric"
 )
@@ -153,9 +152,7 @@ func BenchmarkEventProcessingPipeline(b *testing.B) {
 func BenchmarkObserverCreation(b *testing.B) {
 	setupBenchmark(b)
 
-	config := Config{
-		Output: base.OutputConfig{Stdout: true},
-	}
+	config := Config{}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

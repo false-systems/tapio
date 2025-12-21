@@ -485,10 +485,6 @@ func TestE2E_EventEmission(t *testing.T) {
 		config: Config{
 			MaxRetries:    3,
 			RetryInterval: 10 * time.Millisecond,
-			Output: OutputConfig{
-				OTEL:   true,
-				Stdout: false,
-			},
 		},
 	}
 
@@ -694,6 +690,14 @@ func (m *mockEventEmitter) Emit(ctx context.Context, event *domain.ObserverEvent
 
 func (m *mockEventEmitter) Close() error {
 	return nil
+}
+
+func (m *mockEventEmitter) Name() string {
+	return "mock-emitter"
+}
+
+func (m *mockEventEmitter) IsCritical() bool {
+	return false
 }
 
 // findEvent searches for an event by type and subtype

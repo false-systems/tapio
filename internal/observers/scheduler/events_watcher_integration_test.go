@@ -2,14 +2,13 @@ package scheduler
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/internal/base"
-	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -22,7 +21,7 @@ func TestEventsWatcher_Integration(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 
 	// Create mock emitter to capture events
-	mockEmitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	mockEmitter := intelligence.NewMock()
 
 	// Create Scheduler Observer with Events watcher
 	baseObs, err := base.NewBaseObserver("test-scheduler")
@@ -78,7 +77,7 @@ func TestEventsWatcher_Integration(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Initial event should be skipped (OnAdd)
-	assert.Equal(t, 0, mockEmitter.eventCount(), "OnAdd events should be skipped")
+	assert.Equal(t, 0, mockEmitter.EventCount(), "OnAdd events should be skipped")
 
 	// Update event (increment count - new scheduling attempt)
 	initialEvent.Count = 2
@@ -91,9 +90,9 @@ func TestEventsWatcher_Integration(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Should have emitted one event
-	require.Equal(t, 1, mockEmitter.eventCount(), "OnUpdate should emit event")
+	require.Equal(t, 1, mockEmitter.EventCount(), "OnUpdate should emit event")
 
-	events := mockEmitter.getEvents()
+	events := mockEmitter.Events()
 	require.Len(t, events, 1)
 	event := events[0]
 	assert.Equal(t, "scheduler", event.Type)
@@ -120,7 +119,7 @@ func TestEventsWatcher_Integration(t *testing.T) {
 // TestEventsWatcher_IgnoreNonScheduling verifies non-scheduling events are ignored
 func TestEventsWatcher_IgnoreNonScheduling(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	mockEmitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	mockEmitter := intelligence.NewMock()
 
 	baseObs, err := base.NewBaseObserver("test-scheduler")
 	require.NoError(t, err)
@@ -170,13 +169,13 @@ func TestEventsWatcher_IgnoreNonScheduling(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Should not emit any events
-	assert.Equal(t, 0, mockEmitter.eventCount(), "Non-scheduling events should be ignored")
+	assert.Equal(t, 0, mockEmitter.EventCount(), "Non-scheduling events should be ignored")
 }
 
 // TestEventsWatcher_IgnoreNonPod verifies non-pod events are ignored
 func TestEventsWatcher_IgnoreNonPod(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	mockEmitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	mockEmitter := intelligence.NewMock()
 
 	baseObs, err := base.NewBaseObserver("test-scheduler")
 	require.NoError(t, err)
@@ -226,13 +225,13 @@ func TestEventsWatcher_IgnoreNonPod(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Should not emit any events
-	assert.Equal(t, 0, mockEmitter.eventCount(), "Non-pod events should be ignored")
+	assert.Equal(t, 0, mockEmitter.EventCount(), "Non-pod events should be ignored")
 }
 
 // TestEventsWatcher_NoCountIncrease verifies events with no count increase are skipped
 func TestEventsWatcher_NoCountIncrease(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	mockEmitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	mockEmitter := intelligence.NewMock()
 
 	baseObs, err := base.NewBaseObserver("test-scheduler")
 	require.NoError(t, err)
@@ -282,34 +281,6 @@ func TestEventsWatcher_NoCountIncrease(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Should not emit (count didn't increase)
-	assert.Equal(t, 0, mockEmitter.eventCount(), "Should skip events without count increase")
+	assert.Equal(t, 0, mockEmitter.EventCount(), "Should skip events without count increase")
 }
 
-// mockEmitter captures emitted events for testing (thread-safe)
-type mockEmitter struct {
-	mu     sync.Mutex
-	events []*domain.ObserverEvent
-}
-
-func (m *mockEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.events = append(m.events, event)
-	return nil
-}
-
-func (m *mockEmitter) getEvents() []*domain.ObserverEvent {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]*domain.ObserverEvent{}, m.events...)
-}
-
-func (m *mockEmitter) eventCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.events)
-}
-
-func (m *mockEmitter) Close() error {
-	return nil
-}

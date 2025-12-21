@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -51,7 +52,7 @@ func BenchmarkCreateDomainEvent(b *testing.B) {
 
 func BenchmarkHandleAdd(b *testing.B) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0, b.N)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -74,7 +75,7 @@ func BenchmarkHandleAdd(b *testing.B) {
 
 func BenchmarkHandleUpdate(b *testing.B) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0, b.N)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -98,7 +99,7 @@ func BenchmarkHandleUpdate(b *testing.B) {
 
 func BenchmarkHandleDelete(b *testing.B) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0, b.N)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -122,7 +123,7 @@ func BenchmarkHandleDelete(b *testing.B) {
 // Benchmark full event processing pipeline
 func BenchmarkFullEventPipeline(b *testing.B) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0, b.N)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,

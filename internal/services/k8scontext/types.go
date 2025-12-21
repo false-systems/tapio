@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/rest"
 )
 
@@ -78,17 +79,12 @@ type Config struct {
 	// Retry interval for NATS KV writes (default: 1s)
 	RetryInterval time.Duration
 
-	// Event emission configuration (optional - if provided, emits diagnostic events)
-	Output    OutputConfig   // Which outputs to enable (OTLP, NATS, stdout)
-	Publisher EventPublisher // NATS publisher for enterprise tier (optional)
-	ClusterID string         // Cluster ID for multi-cluster support
-}
+	// Event emission (optional - if provided, emits diagnostic events)
+	Emitter intelligence.Service // Intelligence service for event emission
 
-// OutputConfig defines which event outputs are enabled
-type OutputConfig struct {
-	OTEL   bool // Emit to OTLP (community tier - Grafana, Prometheus)
-	Tapio  bool // Emit to NATS with graph enrichment (enterprise tier)
-	Stdout bool // Emit to stdout (debugging)
+	// NATS publisher for enterprise tier enrichment (optional)
+	Publisher EventPublisher
+	ClusterID string // Cluster ID for multi-cluster support
 }
 
 // EventPublisher publishes enriched Tapio events to NATS

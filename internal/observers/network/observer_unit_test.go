@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/internal/base"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/metric"
 )
@@ -27,11 +26,7 @@ func setupOTEL(t *testing.T) {
 func TestNewNetworkObserver(t *testing.T) {
 	setupOTEL(t)
 
-	config := Config{
-		Output: base.OutputConfig{
-			Stdout: true,
-		},
-	}
+	config := Config{}
 
 	observer, err := NewNetworkObserver("test-network", config)
 	require.NoError(t, err)
@@ -44,9 +39,7 @@ func TestNewNetworkObserver(t *testing.T) {
 func TestNetworkObserver_Name(t *testing.T) {
 	setupOTEL(t)
 
-	config := Config{
-		Output: base.OutputConfig{Stdout: true},
-	}
+	config := Config{}
 
 	observer, err := NewNetworkObserver("my-network-observer", config)
 	require.NoError(t, err)
@@ -120,7 +113,7 @@ func TestExtractComm_Full(t *testing.T) {
 func TestRetransmitStatsTracking(t *testing.T) {
 	setupOTEL(t)
 
-	config := Config{Output: base.OutputConfig{Stdout: false}}
+	config := Config{}
 	observer, err := NewNetworkObserver("test-retransmit", config)
 	require.NoError(t, err)
 	require.NotNil(t, observer)

@@ -1,13 +1,12 @@
 package deployments
 
 import (
-	"context"
 	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -38,7 +37,8 @@ func TestDeploymentsObserver_HandlesEmitterError(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 
 	// Create emitter that fails
-	emitter := &failingEmitter{err: errors.New("emit failed")}
+	emitter := intelligence.NewMock()
+	emitter.SetEmitError(errors.New("emit failed"))
 
 	config := Config{
 		Clientset: clientset,
@@ -61,7 +61,7 @@ func TestDeploymentsObserver_HandlesEmitterError(t *testing.T) {
 
 func TestDeploymentsObserver_HandlesInvalidObjectType(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -76,12 +76,12 @@ func TestDeploymentsObserver_HandlesInvalidObjectType(t *testing.T) {
 	observer.handleAdd("not-a-deployment")
 
 	// Should not emit event for invalid type
-	assert.Len(t, emitter.events, 0, "Should not emit event for invalid object type")
+	assert.Len(t, emitter.Events(), 0, "Should not emit event for invalid object type")
 }
 
 func TestDeploymentsObserver_HandlesInvalidUpdateObjects(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -95,16 +95,16 @@ func TestDeploymentsObserver_HandlesInvalidUpdateObjects(t *testing.T) {
 	// Pass invalid old object
 	deploy := createDeployment("app", 3, 3)
 	observer.handleUpdate("not-a-deployment", deploy)
-	assert.Len(t, emitter.events, 0, "Should not emit event with invalid old object")
+	assert.Len(t, emitter.Events(), 0, "Should not emit event with invalid old object")
 
 	// Pass invalid new object
 	observer.handleUpdate(deploy, "not-a-deployment")
-	assert.Len(t, emitter.events, 0, "Should not emit event with invalid new object")
+	assert.Len(t, emitter.Events(), 0, "Should not emit event with invalid new object")
 }
 
 func TestDeploymentsObserver_HandlesInvalidDeleteObject(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -119,18 +119,6 @@ func TestDeploymentsObserver_HandlesInvalidDeleteObject(t *testing.T) {
 	observer.handleDelete("not-a-deployment")
 
 	// Should not emit event for invalid type
-	assert.Len(t, emitter.events, 0, "Should not emit event for invalid object type")
+	assert.Len(t, emitter.Events(), 0, "Should not emit event for invalid object type")
 }
 
-// Helper emitter that always fails
-type failingEmitter struct {
-	err error
-}
-
-func (e *failingEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
-	return e.err
-}
-
-func (e *failingEmitter) Close() error {
-	return nil
-}
