@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/internal/base"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -46,7 +45,6 @@ func TestDeploymentsObserver_Lifecycle(t *testing.T) {
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Output:    base.OutputConfig{Stdout: true},
 	}
 
 	observer, err := NewDeploymentsObserver("deployments", config)
@@ -76,7 +74,6 @@ func TestDeploymentsObserver_HandlesDeploymentCreate(t *testing.T) {
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Output:    base.OutputConfig{Stdout: true},
 	}
 
 	observer, err := NewDeploymentsObserver("deployments", config)

@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/internal/base"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/metric"
 )
@@ -31,11 +30,7 @@ func setupOTELIntegration(t *testing.T) *metric.ManualReader {
 func TestIntegration_ObserverLifecycle(t *testing.T) {
 	setupOTELIntegration(t)
 
-	config := Config{
-		Output: base.OutputConfig{
-			Stdout: true,
-		},
-	}
+	config := Config{}
 
 	observer, err := NewNetworkObserver("integration-test", config)
 	require.NoError(t, err, "Failed to create observer")
@@ -243,9 +238,7 @@ func TestIntegration_ConcurrentEventProcessing(t *testing.T) {
 func TestIntegration_ContextCancellation(t *testing.T) {
 	setupOTELIntegration(t)
 
-	config := Config{
-		Output: base.OutputConfig{Stdout: true},
-	}
+	config := Config{}
 
 	observer, err := NewNetworkObserver("cancel-test", config)
 	require.NoError(t, err)

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"go.opentelemetry.io/otel/metric"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/informers"
@@ -23,11 +24,8 @@ type Config struct {
 	// Namespace to watch (empty = all namespaces)
 	Namespace string
 
-	// Event emitter (OTEL, Tapio, or both)
-	Emitter base.Emitter
-
-	// Output configuration
-	Output base.OutputConfig
+	// Intelligence service for event emission
+	Emitter intelligence.Service
 }
 
 // Validate checks config is valid
@@ -43,7 +41,7 @@ type DeploymentsObserver struct {
 	*base.BaseObserver
 	config   Config
 	informer cache.SharedIndexInformer
-	emitter  base.Emitter
+	emitter  intelligence.Service
 
 	// Deployment-specific OTEL metrics
 	deploymentUpdates metric.Int64Counter

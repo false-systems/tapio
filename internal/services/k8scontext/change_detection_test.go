@@ -9,32 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// mockEmitter captures emitted events for testing
-type mockEmitter struct {
-	events    []*domain.ObserverEvent
-	shouldErr bool
-}
-
-func (m *mockEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
-	if m.shouldErr {
-		return assert.AnError
-	}
-	m.events = append(m.events, event)
-	return nil
-}
-
-func (m *mockEmitter) Close() error {
-	return nil
-}
-
 // TestDetectDeploymentChanges_ImageChanged verifies image change detection
 func TestDetectDeploymentChanges_ImageChanged(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -69,8 +52,8 @@ func TestDetectDeploymentChanges_ImageChanged(t *testing.T) {
 	ctx := context.Background()
 	service.detectDeploymentChanges(ctx, oldDeployment, newDeployment)
 
-	require.Len(t, emitter.events, 1, "should emit exactly one event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit exactly one event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "deployment", event.Type)
 	assert.Equal(t, "image_changed", event.Subtype)
 	assert.Equal(t, "k8scontext", event.Source)
@@ -82,7 +65,7 @@ func TestDetectDeploymentChanges_ImageChanged(t *testing.T) {
 
 // TestDetectDeploymentChanges_ReplicasScaled verifies replica change detection
 func TestDetectDeploymentChanges_ReplicasScaled(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -118,8 +101,8 @@ func TestDetectDeploymentChanges_ReplicasScaled(t *testing.T) {
 	ctx := context.Background()
 	service.detectDeploymentChanges(ctx, oldDeployment, newDeployment)
 
-	require.Len(t, emitter.events, 1, "should emit exactly one event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit exactly one event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "deployment", event.Type)
 	assert.Equal(t, "scaled", event.Subtype)
 	assert.NotNil(t, event.K8sData)
@@ -130,7 +113,7 @@ func TestDetectDeploymentChanges_ReplicasScaled(t *testing.T) {
 
 // TestDetectDeploymentChanges_NoChanges verifies no events when nothing changed
 func TestDetectDeploymentChanges_NoChanges(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -152,12 +135,12 @@ func TestDetectDeploymentChanges_NoChanges(t *testing.T) {
 	ctx := context.Background()
 	service.detectDeploymentChanges(ctx, deployment, deployment)
 
-	assert.Empty(t, emitter.events, "should not emit events when nothing changed")
+	assert.Empty(t, emitter.Events(), "should not emit events when nothing changed")
 }
 
 // TestDetectPodChanges_CrashLoop verifies crash loop detection
 func TestDetectPodChanges_CrashLoop(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -197,8 +180,8 @@ func TestDetectPodChanges_CrashLoop(t *testing.T) {
 	ctx := context.Background()
 	service.detectPodChanges(ctx, oldPod, newPod)
 
-	require.Len(t, emitter.events, 1, "should emit crash loop event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit crash loop event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "pod", event.Type)
 	assert.Equal(t, "crash_loop", event.Subtype)
 	assert.NotNil(t, event.ContainerData)
@@ -208,7 +191,7 @@ func TestDetectPodChanges_CrashLoop(t *testing.T) {
 
 // TestDetectPodChanges_OOMKilled verifies OOM detection
 func TestDetectPodChanges_OOMKilled(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -248,8 +231,8 @@ func TestDetectPodChanges_OOMKilled(t *testing.T) {
 	ctx := context.Background()
 	service.detectPodChanges(ctx, oldPod, newPod)
 
-	require.Len(t, emitter.events, 1, "should emit OOM event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit OOM event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "pod", event.Type)
 	assert.Equal(t, "oom_killed", event.Subtype)
 	assert.NotNil(t, event.ContainerData)
@@ -259,7 +242,7 @@ func TestDetectPodChanges_OOMKilled(t *testing.T) {
 
 // TestDetectServiceChanges_ClusterIPChanged verifies ClusterIP change detection
 func TestDetectServiceChanges_ClusterIPChanged(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -282,15 +265,15 @@ func TestDetectServiceChanges_ClusterIPChanged(t *testing.T) {
 	ctx := context.Background()
 	service.detectServiceChanges(ctx, oldService, newService)
 
-	require.Len(t, emitter.events, 1, "should emit ClusterIP change event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit ClusterIP change event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "service", event.Type)
 	assert.Equal(t, "ip_changed", event.Subtype)
 }
 
 // TestDetectNodeChanges_NotReady verifies node not ready detection
 func TestDetectNodeChanges_NotReady(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -324,8 +307,8 @@ func TestDetectNodeChanges_NotReady(t *testing.T) {
 	ctx := context.Background()
 	service.detectNodeChanges(ctx, oldNode, newNode)
 
-	require.Len(t, emitter.events, 1, "should emit node not ready event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit node not ready event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "node", event.Type)
 	assert.Equal(t, "not_ready", event.Subtype)
 }
@@ -354,7 +337,7 @@ func TestEmitDomainEvent_NilEmitter(t *testing.T) {
 
 // TestEmitDomainEvent_MissingK8sData verifies validation
 func TestEmitDomainEvent_MissingK8sData(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -372,7 +355,7 @@ func TestEmitDomainEvent_MissingK8sData(t *testing.T) {
 	service.emitDomainEvent(ctx, event)
 
 	// Should not emit event with missing K8s data
-	assert.Empty(t, emitter.events, "should not emit event without K8s data")
+	assert.Empty(t, emitter.Events(), "should not emit event without K8s data")
 }
 
 // TestGenerateEventID verifies unique event ID generation
@@ -437,7 +420,7 @@ func TestGetContainerImage(t *testing.T) {
 
 // TestDetectRolloutStatus_Complete verifies rollout completion detection
 func TestDetectRolloutStatus_Complete(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -474,8 +457,8 @@ func TestDetectRolloutStatus_Complete(t *testing.T) {
 	ctx := context.Background()
 	service.detectRolloutStatus(ctx, oldDeployment, newDeployment)
 
-	require.Len(t, emitter.events, 1, "should emit rollout complete event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit rollout complete event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "deployment", event.Type)
 	assert.Equal(t, "rollout_complete", event.Subtype)
 	assert.Equal(t, "NewReplicaSetAvailable", event.K8sData.Reason)
@@ -483,7 +466,7 @@ func TestDetectRolloutStatus_Complete(t *testing.T) {
 
 // TestDetectRolloutStatus_Failed verifies rollout failure detection
 func TestDetectRolloutStatus_Failed(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -520,8 +503,8 @@ func TestDetectRolloutStatus_Failed(t *testing.T) {
 	ctx := context.Background()
 	service.detectRolloutStatus(ctx, oldDeployment, newDeployment)
 
-	require.Len(t, emitter.events, 1, "should emit rollout failed event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit rollout failed event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "deployment", event.Type)
 	assert.Equal(t, "rollout_failed", event.Subtype)
 	assert.Equal(t, "ProgressDeadlineExceeded", event.K8sData.Reason)
@@ -529,7 +512,7 @@ func TestDetectRolloutStatus_Failed(t *testing.T) {
 
 // TestDetectRolloutStatus_Progressing verifies generic rollout progress detection
 func TestDetectRolloutStatus_Progressing(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -560,15 +543,15 @@ func TestDetectRolloutStatus_Progressing(t *testing.T) {
 	ctx := context.Background()
 	service.detectRolloutStatus(ctx, oldDeployment, newDeployment)
 
-	require.Len(t, emitter.events, 1, "should emit rollout progressing event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit rollout progressing event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "deployment", event.Type)
 	assert.Equal(t, "rollout_progressing", event.Subtype)
 }
 
 // TestDetectPodChanges_PhaseChanged verifies pod phase transition detection
 func TestDetectPodChanges_PhaseChanged(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -591,8 +574,8 @@ func TestDetectPodChanges_PhaseChanged(t *testing.T) {
 	ctx := context.Background()
 	service.detectPodChanges(ctx, oldPod, newPod)
 
-	require.Len(t, emitter.events, 1, "should emit phase change event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit phase change event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "pod", event.Type)
 	assert.Equal(t, "phase_changed", event.Subtype)
 	assert.Contains(t, event.K8sData.Message, "Pending -> Running")
@@ -600,7 +583,7 @@ func TestDetectPodChanges_PhaseChanged(t *testing.T) {
 
 // TestDetectPodChanges_MultipleCrashLoops verifies we don't emit duplicate crash loop events
 func TestDetectPodChanges_MultipleCrashLoops(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -644,12 +627,12 @@ func TestDetectPodChanges_MultipleCrashLoops(t *testing.T) {
 	service.detectPodChanges(ctx, oldPod, newPod)
 
 	// Should not emit event if already crashing
-	assert.Empty(t, emitter.events, "should not emit duplicate crash loop event")
+	assert.Empty(t, emitter.Events(), "should not emit duplicate crash loop event")
 }
 
 // TestDetectServiceChanges_TypeChanged verifies service type change detection
 func TestDetectServiceChanges_TypeChanged(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -672,8 +655,8 @@ func TestDetectServiceChanges_TypeChanged(t *testing.T) {
 	ctx := context.Background()
 	service.detectServiceChanges(ctx, oldService, newService)
 
-	require.Len(t, emitter.events, 1, "should emit type change event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit type change event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "service", event.Type)
 	assert.Equal(t, "type_changed", event.Subtype)
 	assert.Contains(t, event.K8sData.Message, "ClusterIP -> LoadBalancer")
@@ -681,7 +664,7 @@ func TestDetectServiceChanges_TypeChanged(t *testing.T) {
 
 // TestDetectNodeChanges_MemoryPressure verifies node memory pressure detection
 func TestDetectNodeChanges_MemoryPressure(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -715,15 +698,15 @@ func TestDetectNodeChanges_MemoryPressure(t *testing.T) {
 	ctx := context.Background()
 	service.detectNodeChanges(ctx, oldNode, newNode)
 
-	require.Len(t, emitter.events, 1, "should emit memory pressure event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit memory pressure event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "node", event.Type)
 	assert.Equal(t, "memory_pressure", event.Subtype)
 }
 
 // TestDetectNodeChanges_DiskPressure verifies node disk pressure detection
 func TestDetectNodeChanges_DiskPressure(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -757,15 +740,15 @@ func TestDetectNodeChanges_DiskPressure(t *testing.T) {
 	ctx := context.Background()
 	service.detectNodeChanges(ctx, oldNode, newNode)
 
-	require.Len(t, emitter.events, 1, "should emit disk pressure event")
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1, "should emit disk pressure event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "node", event.Type)
 	assert.Equal(t, "disk_pressure", event.Subtype)
 }
 
 // TestDetectDeploymentChanges_ImageAndReplicasBothChanged verifies multiple changes emit multiple events
 func TestDetectDeploymentChanges_ImageAndReplicasBothChanged(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -801,11 +784,11 @@ func TestDetectDeploymentChanges_ImageAndReplicasBothChanged(t *testing.T) {
 	ctx := context.Background()
 	service.detectDeploymentChanges(ctx, oldDeployment, newDeployment)
 
-	require.Len(t, emitter.events, 2, "should emit both image change and replica scale events")
+	require.Len(t, emitter.Events(), 2, "should emit both image change and replica scale events")
 
 	// Find events by subtype
 	var imageEvent, replicaEvent *domain.ObserverEvent
-	for _, evt := range emitter.events {
+	for _, evt := range emitter.Events() {
 		switch evt.Subtype {
 		case "image_changed":
 			imageEvent = evt
@@ -825,7 +808,8 @@ func TestDetectDeploymentChanges_ImageAndReplicasBothChanged(t *testing.T) {
 
 // TestEmitDomainEvent_EmitError verifies error handling during emission
 func TestEmitDomainEvent_EmitError(t *testing.T) {
-	emitter := &mockEmitter{shouldErr: true}
+	emitter := intelligence.NewMock()
+	emitter.SetEmitError(assert.AnError)
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -847,12 +831,12 @@ func TestEmitDomainEvent_EmitError(t *testing.T) {
 	service.emitDomainEvent(ctx, event)
 
 	// Event should not be added due to error
-	assert.Empty(t, emitter.events, "event should not be added when emit fails")
+	assert.Empty(t, emitter.Events(), "event should not be added when emit fails")
 }
 
 // TestEmitDomainEvent_SetSource verifies source is auto-set
 func TestEmitDomainEvent_SetSource(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -871,45 +855,14 @@ func TestEmitDomainEvent_SetSource(t *testing.T) {
 	ctx := context.Background()
 	service.emitDomainEvent(ctx, event)
 
-	require.Len(t, emitter.events, 1)
-	assert.Equal(t, "k8scontext", emitter.events[0].Source)
+	require.Len(t, emitter.Events(), 1)
+	assert.Equal(t, "k8scontext", emitter.Events()[0].Source)
 }
 
-// TestEmitDomainEvent_StdoutEnabled verifies stdout logging path
-func TestEmitDomainEvent_StdoutEnabled(t *testing.T) {
-	emitter := &mockEmitter{}
-	service := &Service{
-		logger:  base.NewLogger("test"),
-		emitter: emitter,
-		config: Config{
-			Output: OutputConfig{
-				Stdout: true,
-			},
-		},
-	}
-
-	event := &domain.ObserverEvent{
-		ID:      "test-123",
-		Type:    "deployment",
-		Subtype: "image_changed",
-		Source:  "k8scontext",
-		K8sData: &domain.K8sEventData{
-			ResourceKind: "Deployment",
-			ResourceName: "test-deployment",
-			Action:       "updated",
-		},
-	}
-
-	ctx := context.Background()
-	service.emitDomainEvent(ctx, event)
-
-	require.Len(t, emitter.events, 1)
-	// Stdout path should be executed (no panic)
-}
 
 // TestDetectPodChanges_MultipleOOMKills verifies we don't emit duplicate OOM events
 func TestDetectPodChanges_MultipleOOMKills(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -953,12 +906,12 @@ func TestDetectPodChanges_MultipleOOMKills(t *testing.T) {
 	service.detectPodChanges(ctx, oldPod, newPod)
 
 	// Should not emit event if already OOMKilled
-	assert.Empty(t, emitter.events, "should not emit duplicate OOM event")
+	assert.Empty(t, emitter.Events(), "should not emit duplicate OOM event")
 }
 
 // TestDetectServiceChanges_NoChange verifies no events when service unchanged
 func TestDetectServiceChanges_NoChange(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -975,12 +928,12 @@ func TestDetectServiceChanges_NoChange(t *testing.T) {
 	ctx := context.Background()
 	service.detectServiceChanges(ctx, svc, svc)
 
-	assert.Empty(t, emitter.events, "should not emit events when nothing changed")
+	assert.Empty(t, emitter.Events(), "should not emit events when nothing changed")
 }
 
 // TestDetectNodeChanges_NoChange verifies no events when node unchanged
 func TestDetectNodeChanges_NoChange(t *testing.T) {
-	emitter := &mockEmitter{}
+	emitter := intelligence.NewMock()
 	service := &Service{
 		logger:  base.NewLogger("test"),
 		emitter: emitter,
@@ -1001,5 +954,5 @@ func TestDetectNodeChanges_NoChange(t *testing.T) {
 	ctx := context.Background()
 	service.detectNodeChanges(ctx, node, node)
 
-	assert.Empty(t, emitter.events, "should not emit events when nothing changed")
+	assert.Empty(t, emitter.Events(), "should not emit events when nothing changed")
 }

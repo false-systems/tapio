@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -58,7 +58,7 @@ func TestNewSchedulerObserver_WithEmitter(t *testing.T) {
 	config := Config{
 		SchedulerMetricsURL: "http://localhost:10251/metrics",
 		ScrapeInterval:      30 * time.Second,
-		Emitter:             base.NewStdoutEmitter(),
+		Emitter:             intelligence.NewMock(),
 	}
 
 	obs, err := NewSchedulerObserver("test-scheduler", config)

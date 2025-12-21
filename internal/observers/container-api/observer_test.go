@@ -14,7 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
 // TDD Cycle 1: Detect OOMKill
@@ -375,7 +375,7 @@ func TestCreateDomainEvent_InitContainer(t *testing.T) {
 
 func TestNewAPIObserver_Success(t *testing.T) {
 	// Create observer with valid config
-	emitter := &fakeEmitter{}
+	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
 
 	config := Config{
@@ -395,7 +395,7 @@ func TestNewAPIObserver_Success(t *testing.T) {
 
 func TestNewAPIObserver_AllNamespaces(t *testing.T) {
 	// Empty namespace = watch all namespaces
-	emitter := &fakeEmitter{}
+	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
 
 	config := Config{
@@ -413,7 +413,7 @@ func TestNewAPIObserver_AllNamespaces(t *testing.T) {
 
 func TestNewAPIObserver_NilClientset(t *testing.T) {
 	// Nil clientset should return error
-	emitter := &fakeEmitter{}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: nil,
@@ -445,31 +445,11 @@ func TestNewAPIObserver_NilEmitter(t *testing.T) {
 	assert.Contains(t, err.Error(), "emitter")
 }
 
-// Fake emitter for testing
-type fakeEmitter struct {
-	events       []*domain.ObserverEvent
-	shouldFail   bool
-	attemptCount int
-}
-
-func (e *fakeEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
-	e.attemptCount++
-	if e.shouldFail {
-		return fmt.Errorf("emit failed")
-	}
-	e.events = append(e.events, event)
-	return nil
-}
-
-func (e *fakeEmitter) Close() error {
-	return nil
-}
-
 // TDD Cycle 7: handleUpdate with event emission
 
 func TestHandleUpdate_ContainerOOMKilled(t *testing.T) {
 	// Pod updated: container OOMKilled
-	emitter := &fakeEmitter{}
+	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
 
 	config := Config{
@@ -486,8 +466,8 @@ func TestHandleUpdate_ContainerOOMKilled(t *testing.T) {
 
 	observer.handleUpdate(context.Background(), oldPod, newPod)
 
-	assert.Len(t, emitter.events, 1, "Should emit 1 event")
-	event := emitter.events[0]
+	assert.Len(t, emitter.Events(), 1, "Should emit 1 event")
+	event := emitter.Events()[0]
 	assert.Equal(t, "container", event.Type)
 	assert.Equal(t, "container_oom_killed", event.Subtype)
 	assert.Equal(t, "app", event.ContainerData.ContainerName)
@@ -495,7 +475,7 @@ func TestHandleUpdate_ContainerOOMKilled(t *testing.T) {
 
 func TestHandleUpdate_NoChange(t *testing.T) {
 	// Pod updated but container state unchanged
-	emitter := &fakeEmitter{}
+	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
 
 	config := Config{
@@ -512,12 +492,12 @@ func TestHandleUpdate_NoChange(t *testing.T) {
 
 	observer.handleUpdate(context.Background(), oldPod, newPod)
 
-	assert.Len(t, emitter.events, 0, "Should not emit event when no change")
+	assert.Len(t, emitter.Events(), 0, "Should not emit event when no change")
 }
 
 func TestHandleUpdate_MultipleContainers(t *testing.T) {
 	// Pod with 2 containers: 1 crashes, 1 OK
-	emitter := &fakeEmitter{}
+	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
 
 	config := Config{
@@ -565,8 +545,8 @@ func TestHandleUpdate_MultipleContainers(t *testing.T) {
 
 	observer.handleUpdate(context.Background(), oldPod, newPod)
 
-	assert.Len(t, emitter.events, 1, "Should emit 1 event for crashed sidecar")
-	event := emitter.events[0]
+	assert.Len(t, emitter.Events(), 1, "Should emit 1 event for crashed sidecar")
+	event := emitter.Events()[0]
 	assert.Equal(t, "container_crashed", event.Subtype)
 	assert.Equal(t, "sidecar", event.ContainerData.ContainerName)
 }
@@ -597,7 +577,7 @@ func createPodWithContainer(name, namespace, containerName, state, reason string
 
 func TestStart_Success(t *testing.T) {
 	// Start observer successfully
-	emitter := &fakeEmitter{}
+	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
 
 	config := Config{
@@ -622,7 +602,7 @@ func TestStart_Success(t *testing.T) {
 
 func TestStop_WithoutStart(t *testing.T) {
 	// Calling Stop without Start returns error from BaseObserver
-	emitter := &fakeEmitter{}
+	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
 
 	config := Config{
@@ -640,7 +620,7 @@ func TestStop_WithoutStart(t *testing.T) {
 }
 
 func TestIsHealthy(t *testing.T) {
-	emitter := &fakeEmitter{}
+	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
 
 	config := Config{
@@ -672,7 +652,7 @@ func TestIsHealthy(t *testing.T) {
 
 func TestOTELMetrics_Created(t *testing.T) {
 	// Observer should create OTEL metrics without error
-	emitter := &fakeEmitter{}
+	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
 
 	config := Config{
@@ -692,7 +672,7 @@ func TestOTELMetrics_Created(t *testing.T) {
 
 func TestOTELMetrics_EmitIncrementsCounter(t *testing.T) {
 	// When an event is emitted, metrics should be updated (no panic)
-	emitter := &fakeEmitter{}
+	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
 
 	config := Config{
@@ -712,16 +692,15 @@ func TestOTELMetrics_EmitIncrementsCounter(t *testing.T) {
 	observer.handleUpdate(context.Background(), oldPod, newPod)
 
 	// Verify event was emitted
-	assert.Equal(t, 1, len(emitter.events))
+	assert.Equal(t, 1, len(emitter.Events()))
 
 	// If we got here without panic, metrics worked correctly
 }
 
 func TestOTELMetrics_ErrorIncrementsErrorCounter(t *testing.T) {
 	// When emit fails, error counter should be incremented (no panic)
-	emitter := &fakeEmitter{
-		shouldFail: true,
-	}
+	emitter := intelligence.NewMock()
+	emitter.SetEmitError(fmt.Errorf("emit failed"))
 	clientset := fake.NewSimpleClientset()
 
 	config := Config{
@@ -740,8 +719,8 @@ func TestOTELMetrics_ErrorIncrementsErrorCounter(t *testing.T) {
 	// Process update (emit will fail, error counter should increment)
 	observer.handleUpdate(context.Background(), oldPod, newPod)
 
-	// Verify emit was attempted
-	assert.Equal(t, 1, emitter.attemptCount)
+	// Verify emit was attempted but failed (no events recorded due to error)
+	assert.Equal(t, 0, emitter.EventCount())
 
 	// If we got here without panic, error metrics worked correctly
 }

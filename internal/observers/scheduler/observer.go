@@ -8,6 +8,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"go.opentelemetry.io/otel/metric"
 	"k8s.io/client-go/kubernetes"
 )
@@ -25,11 +26,8 @@ type Config struct {
 	NATSConn *nats.Conn // NATS connection for storing metadata
 	KVBucket string     // KV bucket name for metadata storage
 
-	// Event emitter (OTEL, Tapio, or both)
-	Emitter base.Emitter
-
-	// Output configuration
-	Output base.OutputConfig
+	// Intelligence service for event emission
+	Emitter intelligence.Service
 }
 
 // SchedulerObserver monitors Kubernetes scheduler using Prometheus + Events API
@@ -37,9 +35,9 @@ type SchedulerObserver struct {
 	*base.BaseObserver
 	config        Config
 	promScraper   *PrometheusScraper
-	eventsWatcher *EventsWatcher // K8s Events API watcher
-	kv            nats.KeyValue  // NATS KV for metadata storage
-	emitter       base.Emitter   // Event emitter
+	eventsWatcher *EventsWatcher       // K8s Events API watcher
+	kv            nats.KeyValue        // NATS KV for metadata storage
+	emitter       intelligence.Service // Intelligence service for events
 
 	// Scheduler-specific OTEL metrics
 	schedulingAttemptsTotal metric.Int64Counter     // scheduling_attempts_total

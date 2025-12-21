@@ -1,12 +1,11 @@
 package deployments
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -16,7 +15,7 @@ func TestDeploymentsObserver_IncrementsMetricsOnUpdate(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 
 	// Create emitter that captures events
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -39,7 +38,7 @@ func TestDeploymentsObserver_IncrementsMetricsOnUpdate(t *testing.T) {
 
 func TestDeploymentsObserver_IncrementsReplicaChangeMetric(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -56,13 +55,13 @@ func TestDeploymentsObserver_IncrementsReplicaChangeMetric(t *testing.T) {
 	observer.handleUpdate(old, new)
 
 	// Verify event was processed (replica change detected)
-	require.Len(t, emitter.events, 1, "Should emit event for replica change")
-	assert.Equal(t, "deployment_scaled", emitter.events[0].event.Type)
+	require.Len(t, emitter.Events(), 1, "Should emit event for replica change")
+	assert.Equal(t, "deployment_scaled", emitter.Events()[0].Type)
 }
 
 func TestDeploymentsObserver_IncrementsConditionChangeMetric(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -79,13 +78,13 @@ func TestDeploymentsObserver_IncrementsConditionChangeMetric(t *testing.T) {
 	observer.handleUpdate(old, new)
 
 	// Verify event was processed (condition change detected)
-	require.Len(t, emitter.events, 1, "Should emit event for condition change")
-	assert.Equal(t, "deployment_available", emitter.events[0].event.Type)
+	require.Len(t, emitter.Events(), 1, "Should emit event for condition change")
+	assert.Equal(t, "deployment_available", emitter.Events()[0].Type)
 }
 
 func TestDeploymentsObserver_IncrementsMetricsOnAdd(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -101,13 +100,13 @@ func TestDeploymentsObserver_IncrementsMetricsOnAdd(t *testing.T) {
 	observer.handleAdd(deploy)
 
 	// Verify event was processed
-	require.Len(t, emitter.events, 1, "Should emit event for creation")
-	assert.Equal(t, "deployment_created", emitter.events[0].event.Type)
+	require.Len(t, emitter.Events(), 1, "Should emit event for creation")
+	assert.Equal(t, "deployment_created", emitter.Events()[0].Type)
 }
 
 func TestDeploymentsObserver_IncrementsMetricsOnDelete(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -123,13 +122,13 @@ func TestDeploymentsObserver_IncrementsMetricsOnDelete(t *testing.T) {
 	observer.handleDelete(deploy)
 
 	// Verify event was processed
-	require.Len(t, emitter.events, 1, "Should emit event for deletion")
-	assert.Equal(t, "deployment_deleted", emitter.events[0].event.Type)
+	require.Len(t, emitter.Events(), 1, "Should emit event for deletion")
+	assert.Equal(t, "deployment_deleted", emitter.Events()[0].Type)
 }
 
 func TestDeploymentsObserver_IncrementsImageUpdateMetric(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &captureEmitter{events: make([]*capturedEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	config := Config{
 		Clientset: clientset,
@@ -146,28 +145,10 @@ func TestDeploymentsObserver_IncrementsImageUpdateMetric(t *testing.T) {
 	observer.handleUpdate(old, new)
 
 	// Verify event was processed (image change detected)
-	require.Len(t, emitter.events, 1, "Should emit event for image change")
-	assert.Equal(t, "deployment_image_updated", emitter.events[0].event.Type)
-	assert.True(t, emitter.events[0].event.K8sData.ImageChanged)
-	assert.Equal(t, "myapp:v1.0.0", emitter.events[0].event.K8sData.OldImage)
-	assert.Equal(t, "myapp:v2.0.0", emitter.events[0].event.K8sData.NewImage)
+	require.Len(t, emitter.Events(), 1, "Should emit event for image change")
+	assert.Equal(t, "deployment_image_updated", emitter.Events()[0].Type)
+	assert.True(t, emitter.Events()[0].K8sData.ImageChanged)
+	assert.Equal(t, "myapp:v1.0.0", emitter.Events()[0].K8sData.OldImage)
+	assert.Equal(t, "myapp:v2.0.0", emitter.Events()[0].K8sData.NewImage)
 }
 
-// Helper to capture emitted events for testing
-type capturedEvent struct {
-	ctx   context.Context
-	event *domain.ObserverEvent
-}
-
-type captureEmitter struct {
-	events []*capturedEvent
-}
-
-func (e *captureEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
-	e.events = append(e.events, &capturedEvent{ctx: ctx, event: event})
-	return nil
-}
-
-func (e *captureEmitter) Close() error {
-	return nil
-}

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/internal/base"
-	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -22,7 +22,7 @@ func TestEventsWatcher_Run_BlocksUntilCancelled(t *testing.T) {
 
 	obs := &SchedulerObserver{
 		BaseObserver: baseObs,
-		emitter:      &mockEmitter{events: make([]*domain.ObserverEvent, 0)},
+		emitter:      intelligence.NewMock(),
 	}
 
 	watcher := NewEventsWatcher(clientset, obs)
@@ -81,7 +81,7 @@ func TestEventsWatcher_Run_ReturnsImmediatelyIfContextAlreadyCancelled(t *testin
 
 	obs := &SchedulerObserver{
 		BaseObserver: baseObs,
-		emitter:      &mockEmitter{events: make([]*domain.ObserverEvent, 0)},
+		emitter:      intelligence.NewMock(),
 	}
 
 	watcher := NewEventsWatcher(clientset, obs)
@@ -110,7 +110,7 @@ func TestEventsWatcher_Run_CacheSyncFailure(t *testing.T) {
 
 	obs := &SchedulerObserver{
 		BaseObserver: baseObs,
-		emitter:      &mockEmitter{events: make([]*domain.ObserverEvent, 0)},
+		emitter:      intelligence.NewMock(),
 	}
 
 	watcher := NewEventsWatcher(clientset, obs)
@@ -135,7 +135,7 @@ func TestEventsWatcher_Run_InformerShutdown(t *testing.T) {
 
 	obs := &SchedulerObserver{
 		BaseObserver: baseObs,
-		emitter:      &mockEmitter{events: make([]*domain.ObserverEvent, 0)},
+		emitter:      intelligence.NewMock(),
 	}
 
 	watcher := NewEventsWatcher(clientset, obs)

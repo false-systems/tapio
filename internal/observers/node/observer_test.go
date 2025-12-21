@@ -4,12 +4,11 @@ package node
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,7 +20,7 @@ import (
 // TestNewObserver_Success verifies constructor with valid config
 func TestNewObserver_Success(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	cfg := Config{
 		Clientset: clientset,
@@ -37,7 +36,7 @@ func TestNewObserver_Success(t *testing.T) {
 
 // TestNewObserver_MissingClientset verifies error when clientset is nil
 func TestNewObserver_MissingClientset(t *testing.T) {
-	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	cfg := Config{
 		Clientset: nil,
@@ -70,7 +69,7 @@ func TestNewObserver_MissingEmitter(t *testing.T) {
 // TestObserver_StartStop verifies observer lifecycle
 func TestObserver_StartStop(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	cfg := Config{
 		Clientset: clientset,
@@ -102,7 +101,7 @@ func TestObserver_StartStop(t *testing.T) {
 // TestObserver_StartRegistersHandlers verifies event handlers are registered
 func TestObserver_StartRegistersHandlers(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	cfg := Config{
 		Clientset: clientset,
@@ -127,7 +126,7 @@ func TestObserver_StartRegistersHandlers(t *testing.T) {
 // TestHandleNode_NodeReady verifies NodeReady event emission
 func TestHandleNode_NodeReady(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	cfg := Config{
 		Clientset: clientset,
@@ -175,8 +174,8 @@ func TestHandleNode_NodeReady(t *testing.T) {
 	observer.handleNode(ctx, oldNode, newNode)
 
 	// Verify event was emitted
-	require.Len(t, emitter.events, 1)
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1)
+	event := emitter.Events()[0]
 	assert.Equal(t, "node", event.Type)
 	assert.Equal(t, "node_ready", event.Subtype)
 	require.NotNil(t, event.NodeData)
@@ -189,7 +188,7 @@ func TestHandleNode_NodeReady(t *testing.T) {
 // TestHandleNode_NodeNotReady verifies NodeNotReady event emission
 func TestHandleNode_NodeNotReady(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	cfg := Config{
 		Clientset: clientset,
@@ -235,8 +234,8 @@ func TestHandleNode_NodeNotReady(t *testing.T) {
 	observer.handleNode(ctx, oldNode, newNode)
 
 	// Verify event was emitted
-	require.Len(t, emitter.events, 1)
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1)
+	event := emitter.Events()[0]
 	assert.Equal(t, "node", event.Type)
 	assert.Equal(t, "node_not_ready", event.Subtype)
 	require.NotNil(t, event.NodeData)
@@ -250,7 +249,7 @@ func TestHandleNode_NodeNotReady(t *testing.T) {
 // TestHandleNode_MemoryPressure verifies MemoryPressure event emission
 func TestHandleNode_MemoryPressure(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	cfg := Config{
 		Clientset: clientset,
@@ -287,8 +286,8 @@ func TestHandleNode_MemoryPressure(t *testing.T) {
 	ctx := context.Background()
 	observer.handleNode(ctx, oldNode, newNode)
 
-	require.Len(t, emitter.events, 1)
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1)
+	event := emitter.Events()[0]
 	assert.Equal(t, "node", event.Type)
 	assert.Equal(t, "node_memory_pressure", event.Subtype)
 	require.NotNil(t, event.NodeData)
@@ -299,7 +298,7 @@ func TestHandleNode_MemoryPressure(t *testing.T) {
 // TestHandleNode_DiskPressure verifies DiskPressure event emission
 func TestHandleNode_DiskPressure(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	cfg := Config{
 		Clientset: clientset,
@@ -327,8 +326,8 @@ func TestHandleNode_DiskPressure(t *testing.T) {
 	ctx := context.Background()
 	observer.handleNode(ctx, nil, newNode)
 
-	require.Len(t, emitter.events, 1)
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1)
+	event := emitter.Events()[0]
 	assert.Equal(t, "node", event.Type)
 	assert.Equal(t, "node_disk_pressure", event.Subtype)
 	assert.Equal(t, "DiskPressure", event.NodeData.Condition)
@@ -337,7 +336,7 @@ func TestHandleNode_DiskPressure(t *testing.T) {
 // TestHandleNode_PIDPressure verifies PIDPressure event emission
 func TestHandleNode_PIDPressure(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	cfg := Config{
 		Clientset: clientset,
@@ -365,8 +364,8 @@ func TestHandleNode_PIDPressure(t *testing.T) {
 	ctx := context.Background()
 	observer.handleNode(ctx, nil, newNode)
 
-	require.Len(t, emitter.events, 1)
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1)
+	event := emitter.Events()[0]
 	assert.Equal(t, "node", event.Type)
 	assert.Equal(t, "node_pid_pressure", event.Subtype)
 	assert.Equal(t, "PIDPressure", event.NodeData.Condition)
@@ -377,7 +376,7 @@ func TestHandleNode_PIDPressure(t *testing.T) {
 // TestCreateNodeEvent_IncludesResources verifies resource capacity and allocation tracking
 func TestCreateNodeEvent_IncludesResources(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	emitter := &mockEmitter{events: make([]*domain.ObserverEvent, 0)}
+	emitter := intelligence.NewMock()
 
 	cfg := Config{
 		Clientset: clientset,
@@ -413,8 +412,8 @@ func TestCreateNodeEvent_IncludesResources(t *testing.T) {
 	ctx := context.Background()
 	observer.handleNode(ctx, nil, newNode)
 
-	require.Len(t, emitter.events, 1)
-	event := emitter.events[0]
+	require.Len(t, emitter.Events(), 1)
+	event := emitter.Events()[0]
 	require.NotNil(t, event.NodeData)
 
 	// Verify capacity
@@ -423,20 +422,3 @@ func TestCreateNodeEvent_IncludesResources(t *testing.T) {
 	assert.Equal(t, int64(110), event.NodeData.PodCapacity)                  // 110 pods
 }
 
-// Mock emitter for testing
-type mockEmitter struct {
-	events     []*domain.ObserverEvent
-	shouldFail bool
-}
-
-func (m *mockEmitter) Emit(ctx context.Context, event *domain.ObserverEvent) error {
-	if m.shouldFail {
-		return fmt.Errorf("mock emit error")
-	}
-	m.events = append(m.events, event)
-	return nil
-}
-
-func (m *mockEmitter) Close() error {
-	return nil
-}

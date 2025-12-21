@@ -13,12 +13,13 @@ import (
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/internal/observers/container"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
 // Config for container runtime observer
 type Config struct {
 	BPFPath string
-	Emitter base.Emitter
+	Emitter intelligence.Service
 }
 
 // Validate checks config is valid
@@ -49,7 +50,7 @@ type RuntimeObserver struct {
 	exitProcessor *ExitProcessor
 	collection    *ebpf.Collection
 	ringReader    *RingReader
-	emitter       base.Emitter
+	emitter       intelligence.Service
 	links         []tracepointLink
 }
 

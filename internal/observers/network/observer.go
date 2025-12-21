@@ -31,7 +31,6 @@ type K8sContextGetter interface {
 
 // Config holds network observer configuration
 type Config struct {
-	Output           base.OutputConfig
 	EventChannelSize int // Ring buffer → processor channel size (default: 1000)
 
 	// K8s context service (optional - nil in OSS mode)

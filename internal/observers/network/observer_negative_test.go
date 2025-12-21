@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yairfalse/tapio/internal/base"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/metric"
 )
@@ -215,17 +214,17 @@ func TestNegative_NewNetworkObserver_InvalidConfig(t *testing.T) {
 		{
 			name:    "Empty name",
 			obsName: "",
-			config:  Config{Output: base.OutputConfig{Stdout: true}},
+			config:  Config{},
 		},
 		{
 			name:    "Very long name",
 			obsName: "network-observer-with-a-very-long-name-that-exceeds-typical-length-limits-and-keeps-going",
-			config:  Config{Output: base.OutputConfig{Stdout: true}},
+			config:  Config{},
 		},
 		{
 			name:    "Special characters in name",
 			obsName: "network@observer#123",
-			config:  Config{Output: base.OutputConfig{Stdout: true}},
+			config:  Config{},
 		},
 	}
 
@@ -415,9 +414,7 @@ func TestNegative_ObserverCreation_NoOTEL(t *testing.T) {
 		otel.SetMeterProvider(provider)
 	})
 
-	config := Config{
-		Output: base.OutputConfig{Stdout: true},
-	}
+	config := Config{}
 
 	// Without OTEL, observer creation will panic or fail
 	// Use defer/recover to catch panic
