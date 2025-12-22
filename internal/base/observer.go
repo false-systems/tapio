@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -14,15 +13,9 @@ import (
 	"go.opentelemetry.io/otel/log/global"
 )
 
-// Observer defines the interface all observers must implement
-type Observer interface {
-	Start(ctx context.Context) error
-	Stop() error
-	Name() string
-	IsHealthy() bool
-}
-
-// BaseObserver provides common functionality for all observers
+// BaseObserver provides common infrastructure for all observers
+// (metrics, telemetry, pipeline, logging, event publishing)
+// Lifecycle management is handled by the Supervisor.
 type BaseObserver struct {
 	name      string
 	startTime time.Time
@@ -46,12 +39,6 @@ type BaseObserver struct {
 
 	// Pipeline for observer stages
 	pipeline *Pipeline
-
-	// Lifecycle management
-	running        atomic.Bool
-	stopped        atomic.Bool
-	mu             sync.Mutex // Protects cancelPipeline
-	cancelPipeline context.CancelFunc
 }
 
 // NewBaseObserver creates a new base observer with OTEL instrumentation
@@ -90,8 +77,7 @@ func NewBaseObserverWithConfig(name string, telemetryConfig *TelemetryConfig, ev
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		// Pass nil for observers - health checks are for external monitoring, not self-monitoring
-		shutdown, err := InitTelemetry(ctx, telemetryConfig, nil)
+		shutdown, err := InitTelemetry(ctx, telemetryConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize telemetry for observer %s: %w", name, err)
 		}
@@ -106,85 +92,32 @@ func (b *BaseObserver) Name() string {
 	return b.name
 }
 
-// IsHealthy returns true if the observer is running without errors
-func (b *BaseObserver) IsHealthy() bool {
-	return b.running.Load() && !b.stopped.Load()
-}
-
 // Logger returns the observer's logger with optional trace context
 func (b *BaseObserver) Logger(ctx context.Context) zerolog.Logger {
 	return WithTraceContext(ctx, b.logger)
 }
 
-// Start initiates the observer pipeline
-func (b *BaseObserver) Start(ctx context.Context) error {
-	if b.running.Load() {
-		b.logger.Warn().Msg("observer already running")
-		return fmt.Errorf("observer %s already running", b.name)
-	}
-
-	b.running.Store(true)
-	b.stopped.Store(false)
-	b.startTime = time.Now()
-
-	b.logger.Info().Msg("observer starting")
-
-	// Create cancellable context for pipeline
-	pipelineCtx, cancel := context.WithCancel(ctx)
-	b.mu.Lock()
-	b.cancelPipeline = cancel
-	b.mu.Unlock()
-
-	if err := b.pipeline.Run(pipelineCtx); err != nil {
-		b.stopped.Store(true)
-		b.running.Store(false)
-		b.logger.Error().Err(err).Msg("pipeline failed")
-		cancel()
-		return fmt.Errorf("pipeline failed for observer %s: %w", b.name, err)
-	}
-
-	return nil
+// AddStage registers a pipeline stage
+func (b *BaseObserver) AddStage(stage PipelineStage) {
+	b.pipeline.Add(stage)
 }
 
-// Stop gracefully shuts down the observer
-func (b *BaseObserver) Stop() error {
-	if !b.running.Load() {
-		b.logger.Warn().Msg("observer not running")
-		return fmt.Errorf("observer %s not running", b.name)
-	}
+// RunPipeline executes all registered pipeline stages
+// This is typically called from the observer's Run method
+func (b *BaseObserver) RunPipeline(ctx context.Context) error {
+	return b.pipeline.Run(ctx)
+}
 
-	b.logger.Info().Msg("observer stopping")
-
-	// Cancel pipeline context to stop all stages
-	b.mu.Lock()
-	cancel := b.cancelPipeline
-	b.mu.Unlock()
-
-	if cancel != nil {
-		cancel()
-	}
-
-	b.stopped.Store(true)
-	b.running.Store(false)
-
-	// Shutdown telemetry if initialized
+// Shutdown cleans up observer resources (telemetry, etc.)
+// Should be called when observer is done running
+func (b *BaseObserver) Shutdown(ctx context.Context) error {
 	if b.telemetryShutdown != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
 		if err := b.telemetryShutdown.Shutdown(ctx); err != nil {
 			b.logger.Error().Err(err).Msg("telemetry shutdown failed")
 			return fmt.Errorf("failed to shutdown telemetry for observer %s: %w", b.name, err)
 		}
 	}
-
-	b.logger.Info().Msg("observer stopped")
 	return nil
-}
-
-// AddStage registers a pipeline stage
-func (b *BaseObserver) AddStage(stage PipelineStage) {
-	b.pipeline.Add(stage)
 }
 
 // RecordEvent increments events processed counter and records metrics
