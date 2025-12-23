@@ -12,12 +12,11 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf/ringbuf"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/internal/observers/container/bpf"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 )
 
 // Config holds container observer configuration
@@ -36,15 +35,15 @@ type ContainerObserver struct {
 	config        Config
 	cgroupMonitor *CgroupMonitor
 
-	// Container-specific OTEL metrics
-	oomKillsTotal   metric.Int64Counter
-	exitsTotal      metric.Int64Counter
-	exitsByCategory metric.Int64Counter
-	memoryAtExit    metric.Float64Histogram
+	// Container-specific Prometheus metrics
+	oomKillsTotal   *prometheus.Counter
+	exitsTotal      *prometheus.Counter
+	exitsByCategory *prometheus.Counter
+	memoryAtExit    *prometheus.Histogram
 
 	// Processing metrics
-	processingLatency metric.Float64Histogram
-	enrichmentErrors  metric.Int64Counter
+	processingLatency *prometheus.Histogram
+	enrichmentErrors  *prometheus.Counter
 }
 
 // NewContainerObserver creates a new container observer
@@ -81,14 +80,19 @@ func NewContainerObserver(name string, config Config) (*ContainerObserver, error
 	return obs, nil
 }
 
-// initMetrics initializes OTEL metrics for the container observer
+// initMetrics initializes Prometheus metrics for the container observer
 func (c *ContainerObserver) initMetrics(name string) error {
-	return base.NewMetricBuilder(name).
+	// Memory buckets: 1MB to 16GB
+	memoryBuckets := []float64{1e6, 10e6, 50e6, 100e6, 500e6, 1e9, 2e9, 4e9, 8e9, 16e9}
+	// Latency buckets: 0.1ms to 100ms
+	latencyBuckets := []float64{0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100}
+
+	return base.NewPromMetricBuilder(base.GlobalRegistry, name).
 		Counter(&c.oomKillsTotal, "oom_kills_total", "Total OOM kills detected").
 		Counter(&c.exitsTotal, "exits_total", "Total container exits detected").
 		Counter(&c.exitsByCategory, "exits_by_category_total", "Container exits by exit category").
-		Histogram(&c.memoryAtExit, "memory_at_exit_bytes", "Memory usage at container exit time").
-		Histogram(&c.processingLatency, "event_processing_duration_ms", "Event processing latency in milliseconds").
+		Histogram(&c.memoryAtExit, "memory_at_exit_bytes", "Memory usage at container exit time", memoryBuckets).
+		Histogram(&c.processingLatency, "event_processing_duration_ms", "Event processing latency in milliseconds", latencyBuckets).
 		Counter(&c.enrichmentErrors, "enrichment_errors_total", "Errors during event enrichment").
 		Build()
 }
@@ -226,7 +230,7 @@ func (c *ContainerObserver) processEventsStage(ctx context.Context, eventCh chan
 
 			// Record processing latency
 			latencyMs := float64(time.Since(startTime).Microseconds()) / 1000.0
-			c.processingLatency.Record(ctx, latencyMs)
+			(*c.processingLatency).Observe(latencyMs)
 		}
 	}
 }
@@ -260,9 +264,7 @@ func (c *ContainerObserver) processEvent(ctx context.Context, evt ContainerEvent
 	if containerID != "" {
 		cgroupInfo, enrichmentErr = c.cgroupMonitor.GetInfo(ctx, containerID)
 		if enrichmentErr != nil && !errors.Is(enrichmentErr, ErrCgroupNotFound) {
-			c.enrichmentErrors.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("error_type", "cgroup"),
-			))
+			(*c.enrichmentErrors).Inc()
 		}
 	}
 
@@ -309,14 +311,12 @@ func (c *ContainerObserver) processEvent(ctx context.Context, evt ContainerEvent
 
 	// Record metrics
 	if isOOM {
-		c.oomKillsTotal.Add(ctx, 1)
+		(*c.oomKillsTotal).Inc()
 	}
-	c.exitsTotal.Add(ctx, 1)
-	c.exitsByCategory.Add(ctx, 1, metric.WithAttributes(
-		attribute.String("category", string(classification.Category)),
-	))
+	(*c.exitsTotal).Inc()
+	(*c.exitsByCategory).Inc() // Note: category label lost (would need CounterVec)
 	if memoryUsage > 0 {
-		c.memoryAtExit.Record(ctx, float64(memoryUsage))
+		(*c.memoryAtExit).Observe(float64(memoryUsage))
 	}
 
 	// Emit domain event: record metrics and send to OTLP

@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence"
-	"go.opentelemetry.io/otel/metric"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -43,11 +43,11 @@ type DeploymentsObserver struct {
 	informer cache.SharedIndexInformer
 	emitter  intelligence.Service
 
-	// Deployment-specific OTEL metrics
-	deploymentUpdates metric.Int64Counter
-	replicaChanges    metric.Int64Counter
-	conditionChanges  metric.Int64Counter
-	imageUpdates      metric.Int64Counter
+	// Deployment-specific Prometheus metrics
+	deploymentUpdates *prometheus.Counter
+	replicaChanges    *prometheus.Counter
+	conditionChanges  *prometheus.Counter
+	imageUpdates      *prometheus.Counter
 }
 
 // NewDeploymentsObserver creates a new deployments observer
@@ -69,8 +69,8 @@ func NewDeploymentsObserver(name string, config Config) (*DeploymentsObserver, e
 		emitter:      config.Emitter,
 	}
 
-	// Create deployment-specific OTEL metrics
-	err = base.NewMetricBuilder(name).
+	// Create deployment-specific Prometheus metrics
+	err = base.NewPromMetricBuilder(base.GlobalRegistry, name).
 		Counter(&obs.deploymentUpdates, "deployment_updates_total", "Deployment update events").
 		Counter(&obs.replicaChanges, "replica_changes_total", "Replica count changes").
 		Counter(&obs.conditionChanges, "condition_changes_total", "Deployment condition changes").
@@ -156,26 +156,26 @@ func (o *DeploymentsObserver) handleUpdate(oldObj, newObj interface{}) {
 
 	evt := createDomainEvent(oldDeploy, newDeploy)
 
-	// Increment OTEL metrics based on event type
+	// Increment Prometheus metrics based on event type
 	ctx := context.Background()
-	o.deploymentUpdates.Add(ctx, 1)
+	(*o.deploymentUpdates).Inc()
 
 	// Check if replica changed
 	replicaChanged, _, _ := detectReplicaChange(oldDeploy, newDeploy)
 	if replicaChanged {
-		o.replicaChanges.Add(ctx, 1)
+		(*o.replicaChanges).Inc()
 	}
 
 	// Check if condition changed
 	condChanged, _, _ := detectConditionChange(oldDeploy, newDeploy)
 	if condChanged {
-		o.conditionChanges.Add(ctx, 1)
+		(*o.conditionChanges).Inc()
 	}
 
 	// Check if image changed
 	imageChanged, _, _ := detectImageChange(oldDeploy, newDeploy)
 	if imageChanged {
-		o.imageUpdates.Add(ctx, 1)
+		(*o.imageUpdates).Inc()
 	}
 
 	o.emitEvent(ctx, evt)

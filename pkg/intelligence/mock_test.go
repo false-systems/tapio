@@ -12,9 +12,9 @@ import (
 type mockService struct {
 	mu       sync.Mutex
 	events   []*domain.ObserverEvent
-	emitErr  error   // If set, Emit returns this error
-	name     string  // Service name (default: "mock")
-	critical bool    // Whether service is critical
+	emitErr  error  // If set, Emit returns this error
+	name     string // Service name (default: "mock")
+	critical bool   // Whether service is critical
 	closed   bool
 }
 

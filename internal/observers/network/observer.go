@@ -8,8 +8,8 @@ import (
 	"net"
 
 	"github.com/cilium/ebpf"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/yairfalse/tapio/internal/base"
-	"go.opentelemetry.io/otel/metric"
 )
 
 // PodInfo matches internal/services/k8scontext/types.go:PodInfo
@@ -47,25 +47,25 @@ type NetworkObserver struct {
 	// eBPF map references (nil when eBPF not loaded)
 	connStatsMap *ebpf.Map // conn_stats LRU map from eBPF
 
-	// Network-specific OTEL metrics
-	connectionResets  metric.Int64Counter // connection_resets_total
-	synTimeouts       metric.Int64Counter // syn_timeouts_total
-	connectionRefused metric.Int64Counter // connection_refused_total
+	// Network-specific Prometheus metrics (native, zero-allocation)
+	connectionResets  *prometheus.Counter // connection_resets_total
+	synTimeouts       *prometheus.Counter // syn_timeouts_total
+	connectionRefused *prometheus.Counter // connection_refused_total
 
 	// Packet loss metrics
-	retransmitsTotal metric.Int64Counter // retransmits_total
-	retransmitRate   metric.Float64Gauge // retransmit_rate_ratio (0.0-1.0)
-	congestionEvents metric.Int64Counter // congestion_events_total
+	retransmitsTotal *prometheus.Counter // retransmits_total
+	retransmitRate   *prometheus.Gauge   // retransmit_rate_ratio (0.0-1.0)
+	congestionEvents *prometheus.Counter // congestion_events_total
 
 	// RTT spike metrics (Stage 3)
-	rttSpikesTotal metric.Int64Counter // rtt_spikes_total
-	rttCurrentMs   metric.Float64Gauge // rtt_current_ms
+	rttSpikesTotal *prometheus.Counter // rtt_spikes_total
+	rttCurrentMs   *prometheus.Gauge   // rtt_current_ms
 
-	rttDegradationPct metric.Float64Gauge // rtt_degradation_percent
+	rttDegradationPct *prometheus.Gauge // rtt_degradation_percent
 
 	// eBPF health metrics
-	ringbufferUtilization metric.Float64Gauge // ringbuffer_utilization_percent
-	ebpfMapSize           metric.Int64Gauge   // ebpf_map_size_entries
+	ringbufferUtilization *prometheus.Gauge // ringbuffer_utilization_percent
+	ebpfMapSize           *prometheus.Gauge // ebpf_map_size_entries
 }
 
 // NewNetworkObserver creates a new network observer
@@ -80,8 +80,8 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		config:       config,
 	}
 
-	// Create network-specific OTEL metrics using fluent API (100 lines → 14 lines!)
-	err = base.NewMetricBuilder(name).
+	// Create network-specific Prometheus metrics using fluent API
+	err = base.NewPromMetricBuilder(base.GlobalRegistry, name).
 		Counter(&obs.connectionResets, "connection_resets_total", "TCP connection resets (RST) received").
 		Counter(&obs.synTimeouts, "syn_timeouts_total", "TCP SYN timeouts (no response)").
 		Counter(&obs.connectionRefused, "connection_refused_total", "TCP connections refused (RST on SYN)").
@@ -92,7 +92,7 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		Gauge(&obs.rttCurrentMs, "rtt_current_ms", "Current RTT in milliseconds when spike detected").
 		Gauge(&obs.rttDegradationPct, "rtt_degradation_ratio", "RTT degradation ratio from baseline (0.0-1.0)").
 		Gauge(&obs.ringbufferUtilization, "ringbuffer_utilization_percent", "eBPF ring buffer utilization percentage").
-		Int64Gauge(&obs.ebpfMapSize, "ebpf_map_size_entries", "Number of entries in eBPF maps (baseline_rtt)").
+		Gauge(&obs.ebpfMapSize, "ebpf_map_size_entries", "Number of entries in eBPF maps (baseline_rtt)").
 		Build()
 
 	if err != nil {

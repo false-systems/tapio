@@ -159,7 +159,7 @@ func (w *EventsWatcher) processEvent(event *corev1.Event) {
 
 	// Record metric if available (may be nil in tests)
 	if w.observer.schedulingErrorsTotal != nil {
-		w.observer.schedulingErrorsTotal.Add(ctx, 1)
+		(*w.observer.schedulingErrorsTotal).Inc()
 	}
 }
 

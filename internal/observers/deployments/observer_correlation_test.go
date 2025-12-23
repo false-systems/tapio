@@ -151,4 +151,3 @@ func TestDeploymentsObserver_IncrementsImageUpdateMetric(t *testing.T) {
 	assert.Equal(t, "myapp:v1.0.0", emitter.Events()[0].K8sData.OldImage)
 	assert.Equal(t, "myapp:v2.0.0", emitter.Events()[0].K8sData.NewImage)
 }
-

@@ -3,8 +3,16 @@
 package base
 
 import (
+	"errors"
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+// registryMetrics caches metrics per registry to avoid duplicate registration
+var (
+	registryMetrics   = make(map[prometheus.Registerer]*PromObserverMetrics)
+	registryMetricsMu sync.Mutex
 )
 
 // PromObserverMetrics holds native Prometheus metrics for observer telemetry.
@@ -36,114 +44,143 @@ type PromObserverMetrics struct {
 
 // NewPromObserverMetrics creates native Prometheus metrics with registry injection.
 // Following Cortex/Mimir pattern: promauto.With(reg)
+// Caches metrics per registry to avoid duplicate registration errors.
 func NewPromObserverMetrics(reg prometheus.Registerer) *PromObserverMetrics {
+	registryMetricsMu.Lock()
+	defer registryMetricsMu.Unlock()
+
+	// Return cached metrics if they exist for this registry
+	if m, ok := registryMetrics[reg]; ok {
+		return m
+	}
+
+	m := createPromObserverMetrics(reg)
+	registryMetrics[reg] = m
+	return m
+}
+
+// registerVec registers a collector or returns existing one if already registered
+func registerVec[T prometheus.Collector](reg prometheus.Registerer, collector T) T {
+	if err := reg.Register(collector); err != nil {
+		var alreadyRegErr prometheus.AlreadyRegisteredError
+		if errors.As(err, &alreadyRegErr) {
+			if existing, ok := alreadyRegErr.ExistingCollector.(T); ok {
+				return existing
+			}
+		}
+	}
+	return collector
+}
+
+// createPromObserverMetrics creates the actual metrics
+func createPromObserverMetrics(reg prometheus.Registerer) *PromObserverMetrics {
 	return &PromObserverMetrics{
-		EventsProcessed: promauto.With(reg).NewCounterVec(
+		EventsProcessed: registerVec(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "tapio_observer_events_processed_total",
 				Help: "Total number of events processed by observer",
 			},
 			[]string{"observer", "event_type", "domain"},
-		),
-		EventsDropped: promauto.With(reg).NewCounterVec(
+		)),
+		EventsDropped: registerVec(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "tapio_observer_events_dropped_total",
 				Help: "Total number of events dropped by observer",
 			},
 			[]string{"observer", "event_type", "domain"},
-		),
-		ErrorsTotal: promauto.With(reg).NewCounterVec(
+		)),
+		ErrorsTotal: registerVec(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "tapio_observer_errors_total",
 				Help: "Total number of errors in observer",
 			},
 			[]string{"observer", "event_type", "domain", "error_type"},
-		),
-		ProcessingTime: promauto.With(reg).NewHistogramVec(
+		)),
+		ProcessingTime: registerVec(reg, prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "tapio_observer_processing_duration_ms",
 				Help:    "Processing duration for observer events in milliseconds",
 				Buckets: []float64{0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100},
 			},
 			[]string{"observer", "event_type", "domain"},
-		),
-		PipelineStagesActive: promauto.With(reg).NewGaugeVec(
+		)),
+		PipelineStagesActive: registerVec(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "tapio_observer_pipeline_stages_active",
 				Help: "Current number of active pipeline stages",
 			},
 			[]string{"observer"},
-		),
-		PipelineStagesFailed: promauto.With(reg).NewCounterVec(
+		)),
+		PipelineStagesFailed: registerVec(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "tapio_observer_pipeline_stages_failed_total",
 				Help: "Total number of pipeline stage failures",
 			},
 			[]string{"observer", "stage"},
-		),
-		PipelineQueueDepth: promauto.With(reg).NewGaugeVec(
+		)),
+		PipelineQueueDepth: registerVec(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "tapio_observer_pipeline_queue_depth",
 				Help: "Current depth of observer pipeline work queue",
 			},
 			[]string{"observer"},
-		),
-		PipelineQueueUtilization: promauto.With(reg).NewGaugeVec(
+		)),
+		PipelineQueueUtilization: registerVec(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "tapio_observer_pipeline_queue_utilization_ratio",
 				Help: "Pipeline queue utilization (0.0-1.0)",
 			},
 			[]string{"observer"},
-		),
-		EventsOutOfOrder: promauto.With(reg).NewCounterVec(
+		)),
+		EventsOutOfOrder: registerVec(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "tapio_observer_events_out_of_order_total",
 				Help: "Events rejected due to out-of-order timestamps",
 			},
 			[]string{"observer", "event_type", "domain"},
-		),
-		EventsDuplicate: promauto.With(reg).NewCounterVec(
+		)),
+		EventsDuplicate: registerVec(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "tapio_observer_events_duplicate_total",
 				Help: "Duplicate events detected and dropped",
 			},
 			[]string{"observer", "event_type", "domain"},
-		),
-		EventsEnrichmentFailed: promauto.With(reg).NewCounterVec(
+		)),
+		EventsEnrichmentFailed: registerVec(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "tapio_observer_events_enrichment_failed_total",
 				Help: "Events failed to enrich with K8s metadata",
 			},
 			[]string{"observer", "enrichment_type"},
-		),
-		EBPFMapSize: promauto.With(reg).NewGaugeVec(
+		)),
+		EBPFMapSize: registerVec(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "tapio_observer_ebpf_map_entries",
 				Help: "Current number of entries in eBPF maps",
 			},
 			[]string{"observer"},
-		),
-		EBPFMapCapacity: promauto.With(reg).NewGaugeVec(
+		)),
+		EBPFMapCapacity: registerVec(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "tapio_observer_ebpf_map_capacity",
 				Help: "Maximum capacity of eBPF maps",
 			},
 			[]string{"observer"},
-		),
-		EBPFRingBufferLost: promauto.With(reg).NewCounterVec(
+		)),
+		EBPFRingBufferLost: registerVec(reg, prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "tapio_observer_ebpf_ringbuffer_lost_total",
 				Help: "Total events lost due to ring buffer overflow",
 			},
 			[]string{"observer"},
-		),
-		EBPFRingBufferUtilization: promauto.With(reg).NewGaugeVec(
+		)),
+		EBPFRingBufferUtilization: registerVec(reg, prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "tapio_observer_ebpf_ringbuffer_utilization_ratio",
 				Help: "eBPF ring buffer utilization (0.0-1.0)",
 			},
 			[]string{"observer"},
-		),
+		)),
 	}
 }
 

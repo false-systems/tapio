@@ -180,7 +180,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			} else {
 				utilization = 0
 			}
-			n.ringbufferUtilization.Record(ctx, utilization)
+			(*n.ringbufferUtilization).Set(utilization)
 
 		case evt, ok := <-eventCh:
 			if !ok {
@@ -232,7 +232,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 				log.Printf("[%s] RST received for %s (state=%s)", n.Name(), connKey, tcpStateName(evt.OldState))
 
 				// Record RST metric
-				n.connectionResets.Add(ctx, 1)
+				(*n.connectionResets).Inc()
 				continue // Don't emit event yet, wait for state transition
 			}
 
@@ -255,9 +255,9 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			// Record network-specific metrics based on event type
 			switch eventType {
 			case "connection_refused":
-				n.connectionRefused.Add(ctx, 1)
+				(*n.connectionRefused).Inc()
 			case "connection_syn_timeout":
-				n.synTimeouts.Add(ctx, 1)
+				(*n.synTimeouts).Inc()
 			}
 
 			// Record base metrics
@@ -306,23 +306,23 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 		for iter.Next(&k, &v) {
 			count++
 		}
-		n.ebpfMapSize.Record(ctx, int64(count))
+		(*n.ebpfMapSize).Set(float64(count))
 	}
 
 	// Record retransmit metric
-	n.retransmitsTotal.Add(ctx, 1)
+	(*n.retransmitsTotal).Inc()
 
 	// Calculate retransmit rate if we have enough data
 	const minPacketsForRate = 100
 	if stats.TotalPackets >= minPacketsForRate {
 		retxRate := float64(stats.Retransmits) / float64(stats.TotalPackets)
-		n.retransmitRate.Record(ctx, retxRate)
+		(*n.retransmitRate).Set(retxRate)
 
 		// Detect high retransmit rate (>0.05 = 5% indicates network issues)
 		const highRetransmitThreshold = 0.05
 		if retxRate > highRetransmitThreshold {
 			// Record congestion event
-			n.congestionEvents.Add(ctx, 1)
+			(*n.congestionEvents).Inc()
 
 			// Create and emit domain event for high retransmit rate
 			n.emitDomainEvent(ctx, &domain.ObserverEvent{
@@ -361,10 +361,10 @@ func (n *NetworkObserver) processRTTSpikeEvent(ctx context.Context, evt NetworkE
 		degradation = (currentMs - baselineMs) / baselineMs
 	}
 
-	// Record OTEL metrics
-	n.rttSpikesTotal.Add(ctx, 1)
-	n.rttCurrentMs.Record(ctx, currentMs)
-	n.rttDegradationPct.Record(ctx, degradation)
+	// Record Prometheus metrics
+	(*n.rttSpikesTotal).Inc()
+	(*n.rttCurrentMs).Set(currentMs)
+	(*n.rttDegradationPct).Set(degradation)
 
 	// Create and emit domain event
 	n.emitDomainEvent(ctx, &domain.ObserverEvent{
