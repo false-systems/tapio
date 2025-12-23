@@ -283,4 +283,3 @@ func TestEventsWatcher_NoCountIncrease(t *testing.T) {
 	// Should not emit (count didn't increase)
 	assert.Equal(t, 0, mockEmitter.EventCount(), "Should skip events without count increase")
 }
-

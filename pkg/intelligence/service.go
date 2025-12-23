@@ -397,38 +397,3 @@ func extractSourceIP(event *domain.ObserverEvent) string {
 	}
 	return ""
 }
-
-// Legacy compatibility - keep IntelligenceService interface for existing code
-// TODO: Remove after full migration
-
-// IntelligenceService is the legacy interface (deprecated).
-// Use Service interface instead.
-type IntelligenceService interface {
-	ProcessEvent(ctx context.Context, event *domain.ObserverEvent) error
-	Shutdown(ctx context.Context) error
-}
-
-// NewIntelligenceService creates a legacy intelligence service (deprecated).
-// Use New(Config{Tier: TierFree, NATSURL: url}) instead.
-func NewIntelligenceService(url string) (IntelligenceService, error) {
-	svc, err := New(Config{
-		Tier:    TierFree,
-		NATSURL: url,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &legacyAdapter{svc: svc}, nil
-}
-
-type legacyAdapter struct {
-	svc Service
-}
-
-func (a *legacyAdapter) ProcessEvent(ctx context.Context, event *domain.ObserverEvent) error {
-	return a.svc.Emit(ctx, event)
-}
-
-func (a *legacyAdapter) Shutdown(ctx context.Context) error {
-	return a.svc.Close()
-}

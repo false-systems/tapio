@@ -421,4 +421,3 @@ func TestCreateNodeEvent_IncludesResources(t *testing.T) {
 	assert.Equal(t, int64(16*1024*1024*1024), event.NodeData.MemoryCapacity) // 16GB
 	assert.Equal(t, int64(110), event.NodeData.PodCapacity)                  // 110 pods
 }
-

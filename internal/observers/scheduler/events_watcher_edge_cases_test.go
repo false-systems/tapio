@@ -71,7 +71,7 @@ func TestOnDelete_SkipsEvents(t *testing.T) {
 
 // TestOnUpdate_InvalidOldType verifies type assertion error handling
 func TestOnUpdate_InvalidOldType(t *testing.T) {
-	baseObs, err := base.NewBaseObserver("test")
+	baseObs, err := base.NewBaseObserver("test-invalid-old")
 	require.NoError(t, err)
 
 	handler := &eventsEventHandler{
@@ -89,7 +89,7 @@ func TestOnUpdate_InvalidOldType(t *testing.T) {
 
 // TestOnUpdate_InvalidNewType verifies type assertion error handling
 func TestOnUpdate_InvalidNewType(t *testing.T) {
-	baseObs, err := base.NewBaseObserver("test")
+	baseObs, err := base.NewBaseObserver("test-invalid-new")
 	require.NoError(t, err)
 
 	handler := &eventsEventHandler{

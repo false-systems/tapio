@@ -121,4 +121,3 @@ func TestDeploymentsObserver_HandlesInvalidDeleteObject(t *testing.T) {
 	// Should not emit event for invalid type
 	assert.Len(t, emitter.Events(), 0, "Should not emit event for invalid object type")
 }
-

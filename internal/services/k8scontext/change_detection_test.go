@@ -859,7 +859,6 @@ func TestEmitDomainEvent_SetSource(t *testing.T) {
 	assert.Equal(t, "k8scontext", emitter.Events()[0].Source)
 }
 
-
 // TestDetectPodChanges_MultipleOOMKills verifies we don't emit duplicate OOM events
 func TestDetectPodChanges_MultipleOOMKills(t *testing.T) {
 	emitter := intelligence.NewMock()

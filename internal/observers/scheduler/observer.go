@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"github.com/yairfalse/tapio/pkg/intelligence"
-	"go.opentelemetry.io/otel/metric"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -39,12 +39,12 @@ type SchedulerObserver struct {
 	kv            nats.KeyValue        // NATS KV for metadata storage
 	emitter       intelligence.Service // Intelligence service for events
 
-	// Scheduler-specific OTEL metrics
-	schedulingAttemptsTotal metric.Int64Counter     // scheduling_attempts_total
-	schedulingErrorsTotal   metric.Int64Counter     // scheduling_errors_total
-	pendingPodsGauge        metric.Int64Gauge       // pending_pods_current
-	preemptionEventsTotal   metric.Int64Counter     // preemption_events_total
-	pluginDurationMs        metric.Float64Histogram // plugin_duration_ms
+	// Scheduler-specific Prometheus metrics
+	schedulingAttemptsTotal *prometheus.Counter   // scheduling_attempts_total
+	schedulingErrorsTotal   *prometheus.Counter   // scheduling_errors_total
+	pendingPodsGauge        *prometheus.Gauge     // pending_pods_current
+	preemptionEventsTotal   *prometheus.Counter   // preemption_events_total
+	pluginDurationMs        *prometheus.Histogram // plugin_duration_ms
 }
 
 // NewSchedulerObserver creates a new scheduler observer with BaseObserver
@@ -90,13 +90,13 @@ func NewSchedulerObserver(name string, config Config) (*SchedulerObserver, error
 		emitter:      config.Emitter,
 	}
 
-	// Create scheduler-specific OTEL metrics using fluent API (46 lines → 7 lines!)
-	err = base.NewMetricBuilder(name).
+	// Create scheduler-specific Prometheus metrics using fluent API
+	err = base.NewPromMetricBuilder(base.GlobalRegistry, name).
 		Counter(&obs.schedulingAttemptsTotal, "scheduling_attempts_total", "Pod scheduling attempts").
 		Counter(&obs.schedulingErrorsTotal, "scheduling_errors_total", "Pod scheduling errors").
-		Int64Gauge(&obs.pendingPodsGauge, "pending_pods_current", "Current number of pending pods waiting to be scheduled").
+		Gauge(&obs.pendingPodsGauge, "pending_pods_current", "Current number of pending pods waiting to be scheduled").
 		Counter(&obs.preemptionEventsTotal, "preemption_events_total", "Pod preemption events").
-		Histogram(&obs.pluginDurationMs, "plugin_duration_ms", "Scheduler plugin execution duration in milliseconds").
+		Histogram(&obs.pluginDurationMs, "plugin_duration_ms", "Scheduler plugin execution duration in milliseconds", prometheus.DefBuckets).
 		Build()
 
 	if err != nil {

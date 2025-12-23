@@ -2,7 +2,6 @@ package base
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -10,8 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"go.opentelemetry.io/otel/log"
-	"go.opentelemetry.io/otel/log/global"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
 // Observer defines the interface all observers must implement
@@ -35,8 +33,11 @@ type BaseObserver struct {
 	eventsDropped   atomic.Int64
 	errorsTotal     atomic.Int64
 
-	// OTEL instrumentation
-	metrics *ObserverMetrics
+	// Prometheus metrics (native, fast)
+	metrics *PromObserverMetrics
+
+	// Intelligence service for event emission
+	emitter intelligence.Service
 
 	// Telemetry shutdown
 	telemetryShutdown *TelemetryShutdown
@@ -66,9 +67,13 @@ func NewBaseObserverWithTelemetry(name string, telemetryConfig *TelemetryConfig)
 
 // NewBaseObserverWithConfig creates a base observer with telemetry and event publisher
 func NewBaseObserverWithConfig(name string, telemetryConfig *TelemetryConfig, eventPublisher domain.EventPublisher) (*BaseObserver, error) {
-	metrics, err := NewObserverMetrics(name)
+	// Use native Prometheus metrics (fast, no OTEL SDK overhead)
+	metrics := NewPromObserverMetrics(GlobalRegistry)
+
+	// Default to debug emitter (stdout) - observers can inject their own
+	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create metrics for observer %s: %w", name, err)
+		return nil, fmt.Errorf("failed to create emitter for observer %s: %w", name, err)
 	}
 
 	// Default to NoOp publisher if not provided
@@ -81,6 +86,7 @@ func NewBaseObserverWithConfig(name string, telemetryConfig *TelemetryConfig, ev
 		startTime:      time.Now(),
 		logger:         NewLogger(name),
 		metrics:        metrics,
+		emitter:        emitter,
 		pipeline:       NewPipeline(),
 		eventPublisher: eventPublisher,
 	}
@@ -188,26 +194,41 @@ func (b *BaseObserver) AddStage(stage PipelineStage) {
 }
 
 // RecordEvent increments events processed counter and records metrics
-func (b *BaseObserver) RecordEvent(ctx context.Context) {
+func (b *BaseObserver) RecordEvent(_ context.Context) {
 	b.eventsProcessed.Add(1)
-	b.metrics.RecordEvent(ctx, b.name, nil)
+	b.metrics.RecordEvent(b.name, "event")
+}
+
+// RecordEventWithType increments events processed counter with specific event type
+func (b *BaseObserver) RecordEventWithType(_ context.Context, eventType string) {
+	b.eventsProcessed.Add(1)
+	b.metrics.RecordEvent(b.name, eventType)
 }
 
 // RecordDrop increments events dropped counter and records metrics
-func (b *BaseObserver) RecordDrop(ctx context.Context, eventType string) {
+func (b *BaseObserver) RecordDrop(_ context.Context, eventType string) {
 	b.eventsDropped.Add(1)
-	b.metrics.RecordDrop(ctx, b.name, eventType)
+	b.metrics.RecordDrop(b.name, eventType)
 }
 
 // RecordError increments error counter and records metrics
-func (b *BaseObserver) RecordError(ctx context.Context, event *domain.ObserverEvent) {
+func (b *BaseObserver) RecordError(_ context.Context, event *domain.ObserverEvent) {
 	b.errorsTotal.Add(1)
-	b.metrics.RecordError(ctx, b.name, event)
+	eventType := "event"
+	errorType := "unknown"
+	if event != nil {
+		eventType = event.Type
+	}
+	b.metrics.RecordError(b.name, eventType, errorType)
 }
 
 // RecordProcessingTime records event processing duration
-func (b *BaseObserver) RecordProcessingTime(ctx context.Context, event *domain.ObserverEvent, durationMs float64) {
-	b.metrics.RecordProcessingTime(ctx, b.name, event, durationMs)
+func (b *BaseObserver) RecordProcessingTime(_ context.Context, event *domain.ObserverEvent, durationMs float64) {
+	eventType := "event"
+	if event != nil {
+		eventType = event.Type
+	}
+	b.metrics.RecordProcessingTime(b.name, eventType, durationMs)
 }
 
 // PublishEvent publishes a domain event to the configured backend (NATS in enterprise, NoOp in OSS)
@@ -215,56 +236,27 @@ func (b *BaseObserver) PublishEvent(ctx context.Context, subject string, event a
 	return b.eventPublisher.Publish(ctx, subject, event)
 }
 
-// SendObserverEvent sends full ObserverEvent as structured log to OTLP (OSS value!)
-// This gives free users all the raw data - they can query, analyze, build dashboards
+// SendObserverEvent emits an event through the intelligence service
+// This routes to NATS (free/enterprise) or stdout (debug) based on tier config
 func (b *BaseObserver) SendObserverEvent(ctx context.Context, event *domain.ObserverEvent) {
 	if event == nil {
 		b.logger.Error().Msg("SendObserverEvent called with nil event")
 		return
 	}
-	logger := global.GetLoggerProvider().Logger(b.name)
 
-	// Marshal event to JSON for log body
-	eventJSON, err := json.Marshal(event)
-	if err != nil {
-		b.logger.Error().Err(err).Msg("failed to marshal observer event")
+	if b.emitter == nil {
+		b.logger.Warn().Msg("no emitter configured, dropping event")
 		return
 	}
 
-	// Build attributes for filtering/querying
-	var attrs []log.KeyValue
-	attrs = append(attrs, log.String("event.type", event.Type))
-	attrs = append(attrs, log.String("event.source", event.Source))
-	attrs = append(attrs, log.String("event.id", event.ID))
-
-	// Add trace context if present
-	if event.TraceID != "" {
-		attrs = append(attrs, log.String("trace.id", event.TraceID))
-	}
-	if event.SpanID != "" {
-		attrs = append(attrs, log.String("span.id", event.SpanID))
-	}
-
-	// Add type-specific attributes for easy querying
-	if event.NetworkData != nil {
-		if event.NetworkData.Protocol != "" {
-			attrs = append(attrs, log.String("network.protocol", event.NetworkData.Protocol))
-		}
-		if event.NetworkData.PodName != "" {
-			attrs = append(attrs, log.String("k8s.pod.name", event.NetworkData.PodName))
-		}
-		if event.NetworkData.Namespace != "" {
-			attrs = append(attrs, log.String("k8s.namespace", event.NetworkData.Namespace))
+	if err := b.emitter.Emit(ctx, event); err != nil {
+		// Log but don't fail - emitter handles criticality internally
+		if b.emitter.IsCritical() {
+			b.logger.Error().Err(err).Str("event_type", event.Type).Msg("failed to emit event")
+		} else {
+			b.logger.Debug().Err(err).Str("event_type", event.Type).Msg("event emission failed (non-critical)")
 		}
 	}
-
-	// Emit as structured log record
-	var logRecord log.Record
-	logRecord.SetTimestamp(event.Timestamp)
-	logRecord.SetBody(log.StringValue(string(eventJSON)))
-	logRecord.AddAttributes(attrs...)
-
-	logger.Emit(ctx, logRecord)
 }
 
 // Stats returns current observer statistics
