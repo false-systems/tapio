@@ -4,10 +4,14 @@
 package network
 
 import (
+	"context"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/metric"
 )
@@ -138,4 +142,44 @@ func TestHighRetransmitRateCalculation(t *testing.T) {
 	// Test high rate (above threshold)
 	highRate := float64(10) / float64(100) * 100
 	assert.Greater(t, highRate, 5.0, "10% rate should exceed threshold")
+}
+
+// TestNew_WithDeps tests the new lean constructor with dependency injection
+func TestNew_WithDeps(t *testing.T) {
+	// Create deps with fresh registry and debug emitter
+	reg := prometheus.NewRegistry()
+	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
+	require.NoError(t, err)
+	deps := base.NewDeps(reg, emitter)
+
+	config := Config{EventChannelSize: 500}
+
+	// Call new constructor
+	obs := New(config, deps)
+
+	// Verify observer is created correctly
+	require.NotNil(t, obs)
+	assert.Equal(t, "network", obs.name)
+	assert.Same(t, deps, obs.deps)
+	assert.Equal(t, 500, obs.config.EventChannelSize)
+}
+
+// TestRun_ReturnsOnContextCancel tests that Run() exits when context is cancelled
+func TestRun_ReturnsOnContextCancel(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
+	require.NoError(t, err)
+	deps := base.NewDeps(reg, emitter)
+
+	obs := New(Config{}, deps)
+
+	// Create a context that we'll cancel immediately
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	// Run should return quickly (not block forever)
+	err = obs.Run(ctx)
+
+	// Should return without error (context cancelled is graceful shutdown)
+	assert.NoError(t, err)
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
 // PodInfo matches internal/services/k8scontext/types.go:PodInfo
@@ -41,6 +42,8 @@ type Config struct {
 // NetworkObserver tracks TCP/UDP/DNS network events using eBPF
 type NetworkObserver struct {
 	*base.BaseObserver
+	name    string     // Explicit name for lean pattern
+	deps    *base.Deps // Injected dependencies
 	config  Config
 	ebpfMgr *base.EBPFManager // eBPF lifecycle manager
 
@@ -75,8 +78,17 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		return nil, fmt.Errorf("failed to create base observer: %w", err)
 	}
 
+	// Create deps for lean pattern compatibility
+	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create emitter: %w", err)
+	}
+	deps := base.NewDeps(base.GlobalRegistry, emitter)
+
 	obs := &NetworkObserver{
 		BaseObserver: baseObs,
+		name:         name,
+		deps:         deps,
 		config:       config,
 	}
 
@@ -100,6 +112,34 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 	}
 
 	return obs, nil
+}
+
+// New creates a network observer with dependency injection (lean pattern).
+// This replaces NewNetworkObserver for the new architecture.
+func New(config Config, deps *base.Deps) *NetworkObserver {
+	obs := &NetworkObserver{
+		name:   "network",
+		deps:   deps,
+		config: config,
+	}
+
+	// Create observer-specific Prometheus metrics
+	builder := base.NewPromMetricBuilder(base.GlobalRegistry, "network")
+	builder.Counter(&obs.connectionResets, "connection_resets_total", "TCP connection resets (RST) received")
+	builder.Counter(&obs.synTimeouts, "syn_timeouts_total", "TCP SYN timeouts (no response)")
+	builder.Counter(&obs.connectionRefused, "connection_refused_total", "TCP connections refused (RST on SYN)")
+	builder.Counter(&obs.retransmitsTotal, "retransmits_total", "TCP packet retransmissions detected")
+	builder.Gauge(&obs.retransmitRate, "retransmit_rate_ratio", "TCP retransmission rate ratio (0.0-1.0)")
+	builder.Counter(&obs.congestionEvents, "congestion_events_total", "High retransmit rate events (>5%)")
+	builder.Counter(&obs.rttSpikesTotal, "rtt_spikes_total", "RTT spike events detected")
+	builder.Gauge(&obs.rttCurrentMs, "rtt_current_ms", "Current RTT in milliseconds when spike detected")
+	builder.Gauge(&obs.rttDegradationPct, "rtt_degradation_ratio", "RTT degradation ratio from baseline (0.0-1.0)")
+	builder.Gauge(&obs.ringbufferUtilization, "ringbuffer_utilization_percent", "eBPF ring buffer utilization percentage")
+	builder.Gauge(&obs.ebpfMapSize, "ebpf_map_size_entries", "Number of entries in eBPF maps (baseline_rtt)")
+	//nolint:errcheck // metrics registration errors are non-fatal for observer operation
+	builder.Build()
+
+	return obs
 }
 
 // stateToEventType maps TCP state transitions to domain event types

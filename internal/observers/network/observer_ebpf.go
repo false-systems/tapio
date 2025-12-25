@@ -16,6 +16,7 @@ import (
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/internal/observers/network/bpf"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"golang.org/x/sync/errgroup"
 )
 
 // tcpStateNames maps TCP state constants to human-readable names
@@ -56,6 +57,33 @@ func (n *NetworkObserver) Start(ctx context.Context) error {
 	return n.BaseObserver.Start(ctx)
 }
 
+// Run executes the observer using errgroup (lean pattern, no pipeline abstraction).
+// This replaces Start() for observers created with New().
+func (n *NetworkObserver) Run(ctx context.Context) error {
+	// Check if context is already cancelled
+	if ctx.Err() != nil {
+		return nil
+	}
+
+	channelSize := n.config.EventChannelSize
+	if channelSize <= 0 {
+		channelSize = 1000
+	}
+	eventCh := make(chan NetworkEventBPF, channelSize)
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		return n.loadAndAttachStage(ctx, eventCh)
+	})
+
+	g.Go(func() error {
+		return n.processEventsStage(ctx, eventCh)
+	})
+
+	return g.Wait()
+}
+
 // loadAndAttachStage loads eBPF program, attaches to tracepoint, reads ring buffer
 func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan NetworkEventBPF) error {
 	// Close channel when exiting to signal processor stage
@@ -68,7 +96,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	}
 	defer func() {
 		if err := objs.Close(); err != nil {
-			log.Printf("[%s] Error closing eBPF objects: %v", n.Name(), err)
+			log.Printf("[%s] Error closing eBPF objects: %v", n.name, err)
 		}
 	}()
 
@@ -82,7 +110,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	n.ebpfMgr = base.NewEBPFManagerFromCollection(nil)
 	defer func() {
 		if err := n.ebpfMgr.Close(); err != nil {
-			log.Printf("[%s] Error closing eBPF manager: %v", n.Name(), err)
+			log.Printf("[%s] Error closing eBPF manager: %v", n.name, err)
 		}
 	}()
 
@@ -101,14 +129,14 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 		return fmt.Errorf("failed to attach tcp_retransmit_skb: %w", err)
 	}
 
-	log.Printf("[%s] eBPF programs loaded and attached (3 tracepoints)", n.Name())
+	log.Printf("[%s] eBPF programs loaded and attached (3 tracepoints)", n.name)
 
 	// Read ring buffer events (bpf2go-generated objects give us direct map access)
 	// Monitor context and close ring buffer when cancelled
 	go func() {
 		<-ctx.Done()
 		if err := n.ebpfMgr.Close(); err != nil {
-			log.Printf("[%s] Error closing eBPF manager in cleanup goroutine: %v", n.Name(), err)
+			log.Printf("[%s] Error closing eBPF manager in cleanup goroutine: %v", n.name, err)
 		}
 	}()
 
@@ -120,7 +148,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 	}
 	defer func() {
 		if err := reader.Close(); err != nil {
-			log.Printf("[%s] Error closing ring buffer reader: %v", n.Name(), err)
+			log.Printf("[%s] Error closing ring buffer reader: %v", n.name, err)
 		}
 	}()
 
@@ -128,19 +156,19 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 		record, err := reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
-				log.Printf("[%s] Ring buffer closed, shutting down", n.Name())
+				log.Printf("[%s] Ring buffer closed, shutting down", n.name)
 				return nil
 			}
-			log.Printf("[%s] Error reading ring buffer: %v", n.Name(), err)
-			n.RecordError(ctx, nil) // nil event: internal ring buffer error, not a domain event
+			log.Printf("[%s] Error reading ring buffer: %v", n.name, err)
+			n.deps.Metrics.RecordError(n.name, "network_event", "ring_buffer_error")
 			continue
 		}
 
 		// Parse event
 		var evt NetworkEventBPF
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &evt); err != nil {
-			log.Printf("[%s] Error parsing event: %v", n.Name(), err)
-			n.RecordError(ctx, nil) // nil event: binary parsing error, no domain event created yet
+			log.Printf("[%s] Error parsing event: %v", n.name, err)
+			n.deps.Metrics.RecordError(n.name, "network_event", "parse_error")
 			continue
 		}
 
@@ -150,7 +178,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 			// Event sent
 		default:
 			// Channel full - drop event
-			n.RecordDrop(ctx, "network_event")
+			n.deps.Metrics.RecordDrop(n.name, "network_event")
 		}
 	}
 }
@@ -169,7 +197,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("[%s] Shutting down event processor", n.Name())
+			log.Printf("[%s] Shutting down event processor", n.name)
 			return nil
 
 		case <-ticker.C:
@@ -185,15 +213,15 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 		case evt, ok := <-eventCh:
 			if !ok {
 				// Channel closed by loadAndAttachStage - exit gracefully
-				log.Printf("[%s] Event channel closed, processor exiting", n.Name())
+				log.Printf("[%s] Event channel closed, processor exiting", n.name)
 				return nil
 			}
 			startTime := time.Now()
 
 			// Validate address family
 			if evt.Family != AF_INET && evt.Family != AF_INET6 {
-				log.Printf("[%s] Invalid address family %d, skipping event", n.Name(), evt.Family)
-				n.RecordError(ctx, nil) // nil event: validation error before domain event creation
+				log.Printf("[%s] Invalid address family %d, skipping event", n.name, evt.Family)
+				n.deps.Metrics.RecordError(n.name, "network_event", "invalid_address_family")
 				continue
 			}
 
@@ -229,7 +257,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			// Handle different event types
 			if evt.EventType == EventTypeRSTReceived {
 				// RST received - already marked in eBPF LRU map by tcp_receive_reset handler
-				log.Printf("[%s] RST received for %s (state=%s)", n.Name(), connKey, tcpStateName(evt.OldState))
+				log.Printf("[%s] RST received for %s (state=%s)", n.name, connKey, tcpStateName(evt.OldState))
 
 				// Record RST metric
 				(*n.connectionResets).Inc()
@@ -250,7 +278,6 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 
 			// State change event - convert to domain representation
 			eventType := stateToEventType(evt.OldState, evt.NewState, connKey, n)
-			_ = extractComm(evt.Comm) // comm used for debug output (disabled)
 
 			// Record network-specific metrics based on event type
 			switch eventType {
@@ -261,8 +288,8 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			}
 
 			// Record base metrics
-			n.RecordEvent(ctx)
-			n.RecordProcessingTime(ctx, nil, float64(time.Since(startTime).Milliseconds())) // nil event: state change processing, not a specific domain event
+			n.deps.Metrics.RecordEvent(n.name, eventType)
+			n.deps.Metrics.RecordProcessingTime(n.name, eventType, float64(time.Since(startTime).Milliseconds()))
 		}
 	}
 }
@@ -277,9 +304,8 @@ func tcpStateName(state uint8) string {
 
 // processRetransmitEvent handles TCP retransmission events
 func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt NetworkEventBPF, connKey, srcIP, dstIP string) {
-	// Extract retransmit data from reused fields
-	_ = evt.OldState        // total_retrans from eBPF (used for debug output, disabled)
-	sndCwnd := evt.NewState // snd_cwnd from eBPF
+	// Extract retransmit data from reused fields (OldState=total_retrans, NewState=snd_cwnd)
+	sndCwnd := evt.NewState
 	comm := extractComm(evt.Comm)
 
 	// Read stats from eBPF LRU map (already updated by tcp_retransmit_skb handler)
@@ -292,9 +318,10 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 			SrcPort: evt.SrcPort,
 			DstPort: evt.DstPort,
 		}
-		// Lookup stats from eBPF map - if entry not found, stats remain zero-initialized
-		// This is expected for new connections and not an error condition
-		_ = n.connStatsMap.Lookup(&key, &stats) // Ignore: missing entries are expected
+		// Lookup stats from eBPF map - missing entries are expected for new connections
+		// and stats remain zero-initialized in that case (not an error condition)
+		//nolint:errcheck // intentional: missing entries expected
+		n.connStatsMap.Lookup(&key, &stats)
 	}
 
 	// Track eBPF map size (number of tracked connections)
@@ -345,7 +372,7 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 	}
 
 	// Record processing time
-	n.RecordEvent(ctx)
+	n.deps.Metrics.RecordEvent(n.name, "retransmit")
 }
 
 // processRTTSpikeEvent handles RTT spike events from eBPF (Stage 3)
@@ -387,12 +414,12 @@ func (n *NetworkObserver) processRTTSpikeEvent(ctx context.Context, evt NetworkE
 
 // emitDomainEvent outputs domain events from processors
 func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.ObserverEvent) {
-	// Record OTEL metrics
-	n.RecordEvent(ctx)
+	// Record metrics
+	n.deps.Metrics.RecordEvent(n.name, evt.Type)
 
 	// Validate event has network data
 	if evt.NetworkData == nil {
-		log.Printf("[%s] %s.%s: missing network data", n.Name(), evt.Type, evt.Subtype)
+		log.Printf("[%s] %s.%s: missing network data", n.name, evt.Type, evt.Subtype)
 		return
 	}
 
@@ -401,8 +428,10 @@ func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.Obser
 		n.enrichWithK8sContext(evt)
 	}
 
-	// Send to OTLP (Community path - structured logs)
-	n.SendObserverEvent(ctx, evt)
+	// Emit event via intelligence service
+	if err := n.deps.Emitter.Emit(ctx, evt); err != nil {
+		log.Printf("[%s] failed to emit event: %v", n.name, err)
+	}
 }
 
 // enrichWithK8sContext lookups pod metadata by IP and populates NetworkEventData fields
@@ -431,10 +460,11 @@ func (n *NetworkObserver) enrichWithK8sContext(evt *domain.ObserverEvent) {
 
 			// Enrich to TapioEvent with graph entities (Enterprise path)
 			tapioEvent, err := domain.EnrichWithK8sContext(evt, k8sCtx)
-			if err == nil {
+			if err == nil && n.BaseObserver != nil {
 				// Publish to NATS (NoOp in OSS, real NATS in Enterprise)
+				// Only available when using legacy NewNetworkObserver constructor
 				if err := n.PublishEvent(context.Background(), "tapio.events.network", tapioEvent); err != nil {
-					log.Printf("[%s] failed to publish TapioEvent: %v", n.Name(), err)
+					log.Printf("[%s] failed to publish TapioEvent: %v", n.name, err)
 				}
 			}
 		}
