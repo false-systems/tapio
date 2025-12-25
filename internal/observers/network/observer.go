@@ -79,6 +79,7 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 
 	obs := &NetworkObserver{
 		BaseObserver: baseObs,
+		name:         name, // Also set for new pattern compatibility
 		config:       config,
 	}
 
