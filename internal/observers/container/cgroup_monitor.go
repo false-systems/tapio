@@ -109,12 +109,22 @@ func NewCgroupMonitor(cfg CgroupMonitorConfig, meter metric.Meter) (*CgroupMonit
 
 	// Register OTEL metrics if meter provided
 	if meter != nil {
-		m.cacheHits, _ = meter.Int64Counter("container_cgroup_cache_hits_total",
+		var err error
+		m.cacheHits, err = meter.Int64Counter("container_cgroup_cache_hits_total",
 			metric.WithDescription("Number of cgroup cache hits"))
-		m.cacheMisses, _ = meter.Int64Counter("container_cgroup_cache_misses_total",
+		if err != nil {
+			return nil, fmt.Errorf("failed to create cacheHits counter: %w", err)
+		}
+		m.cacheMisses, err = meter.Int64Counter("container_cgroup_cache_misses_total",
 			metric.WithDescription("Number of cgroup cache misses"))
-		m.readErrors, _ = meter.Int64Counter("container_cgroup_read_errors_total",
+		if err != nil {
+			return nil, fmt.Errorf("failed to create cacheMisses counter: %w", err)
+		}
+		m.readErrors, err = meter.Int64Counter("container_cgroup_read_errors_total",
 			metric.WithDescription("Number of cgroup read errors"))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create readErrors counter: %w", err)
+		}
 	}
 
 	return m, nil
@@ -292,7 +302,7 @@ func readPSIFile(path string) (PSIData, error) {
 	if err != nil {
 		return PSIData{}, err
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck // read-only file, close errors non-actionable
 
 	var psi PSIData
 	scanner := bufio.NewScanner(file)
@@ -300,9 +310,11 @@ func readPSIFile(path string) (PSIData, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "some ") {
+			//nolint:errcheck // PSI format is kernel-stable, partial parse acceptable
 			fmt.Sscanf(line, "some avg10=%f avg60=%f avg300=%f total=%d",
 				&psi.SomeAvg10, &psi.SomeAvg60, &psi.SomeAvg300, &psi.SomeTotal)
 		} else if strings.HasPrefix(line, "full ") {
+			//nolint:errcheck // PSI format is kernel-stable, partial parse acceptable
 			fmt.Sscanf(line, "full avg10=%f avg60=%f avg300=%f total=%d",
 				&psi.FullAvg10, &psi.FullAvg60, &psi.FullAvg300, &psi.FullTotal)
 		}
@@ -320,7 +332,7 @@ func readCPUStat(path string) (CPUStatData, error) {
 	if err != nil {
 		return CPUStatData{}, err
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck // read-only file, close errors non-actionable
 
 	var stat CPUStatData
 	scanner := bufio.NewScanner(file)
