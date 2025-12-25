@@ -16,6 +16,7 @@ import (
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/internal/observers/network/bpf"
 	"github.com/yairfalse/tapio/pkg/domain"
+	"golang.org/x/sync/errgroup"
 )
 
 // tcpStateNames maps TCP state constants to human-readable names
@@ -54,6 +55,33 @@ func (n *NetworkObserver) Start(ctx context.Context) error {
 
 	// Let BaseObserver run the pipeline
 	return n.BaseObserver.Start(ctx)
+}
+
+// Run executes the observer using errgroup (lean pattern, no pipeline abstraction).
+// This replaces Start() for observers created with New().
+func (n *NetworkObserver) Run(ctx context.Context) error {
+	// Check if context is already cancelled
+	if ctx.Err() != nil {
+		return nil
+	}
+
+	channelSize := n.config.EventChannelSize
+	if channelSize <= 0 {
+		channelSize = 1000
+	}
+	eventCh := make(chan NetworkEventBPF, channelSize)
+
+	g, ctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		return n.loadAndAttachStage(ctx, eventCh)
+	})
+
+	g.Go(func() error {
+		return n.processEventsStage(ctx, eventCh)
+	})
+
+	return g.Wait()
 }
 
 // loadAndAttachStage loads eBPF program, attaches to tracepoint, reads ring buffer
@@ -250,7 +278,6 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 
 			// State change event - convert to domain representation
 			eventType := stateToEventType(evt.OldState, evt.NewState, connKey, n)
-			_ = extractComm(evt.Comm) // comm used for debug output (disabled)
 
 			// Record network-specific metrics based on event type
 			switch eventType {
@@ -277,9 +304,8 @@ func tcpStateName(state uint8) string {
 
 // processRetransmitEvent handles TCP retransmission events
 func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt NetworkEventBPF, connKey, srcIP, dstIP string) {
-	// Extract retransmit data from reused fields
-	_ = evt.OldState        // total_retrans from eBPF (used for debug output, disabled)
-	sndCwnd := evt.NewState // snd_cwnd from eBPF
+	// Extract retransmit data from reused fields (OldState=total_retrans, NewState=snd_cwnd)
+	sndCwnd := evt.NewState
 	comm := extractComm(evt.Comm)
 
 	// Read stats from eBPF LRU map (already updated by tcp_retransmit_skb handler)
@@ -292,9 +318,10 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 			SrcPort: evt.SrcPort,
 			DstPort: evt.DstPort,
 		}
-		// Lookup stats from eBPF map - if entry not found, stats remain zero-initialized
-		// This is expected for new connections and not an error condition
-		_ = n.connStatsMap.Lookup(&key, &stats) // Ignore: missing entries are expected
+		// Lookup stats from eBPF map - missing entries are expected for new connections
+		// and stats remain zero-initialized in that case (not an error condition)
+		//nolint:errcheck // intentional: missing entries expected
+		n.connStatsMap.Lookup(&key, &stats)
 	}
 
 	// Track eBPF map size (number of tracked connections)

@@ -4,6 +4,7 @@
 package network
 
 import (
+	"context"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -161,4 +162,24 @@ func TestNew_WithDeps(t *testing.T) {
 	assert.Equal(t, "network", obs.name)
 	assert.Same(t, deps, obs.deps)
 	assert.Equal(t, 500, obs.config.EventChannelSize)
+}
+
+// TestRun_ReturnsOnContextCancel tests that Run() exits when context is cancelled
+func TestRun_ReturnsOnContextCancel(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
+	require.NoError(t, err)
+	deps := base.NewDeps(reg, emitter)
+
+	obs := New(Config{}, deps)
+
+	// Create a context that we'll cancel immediately
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	// Run should return quickly (not block forever)
+	err = obs.Run(ctx)
+
+	// Should return without error (context cancelled is graceful shutdown)
+	assert.NoError(t, err)
 }
