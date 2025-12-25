@@ -160,7 +160,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 				return nil
 			}
 			log.Printf("[%s] Error reading ring buffer: %v", n.name, err)
-			n.RecordError(ctx, nil) // nil event: internal ring buffer error, not a domain event
+			n.deps.Metrics.RecordError(n.name, "network_event", "ring_buffer_error")
 			continue
 		}
 
@@ -168,7 +168,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 		var evt NetworkEventBPF
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &evt); err != nil {
 			log.Printf("[%s] Error parsing event: %v", n.name, err)
-			n.RecordError(ctx, nil) // nil event: binary parsing error, no domain event created yet
+			n.deps.Metrics.RecordError(n.name, "network_event", "parse_error")
 			continue
 		}
 
@@ -178,7 +178,7 @@ func (n *NetworkObserver) loadAndAttachStage(ctx context.Context, eventCh chan N
 			// Event sent
 		default:
 			// Channel full - drop event
-			n.RecordDrop(ctx, "network_event")
+			n.deps.Metrics.RecordDrop(n.name, "network_event")
 		}
 	}
 }
@@ -221,7 +221,7 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			// Validate address family
 			if evt.Family != AF_INET && evt.Family != AF_INET6 {
 				log.Printf("[%s] Invalid address family %d, skipping event", n.name, evt.Family)
-				n.RecordError(ctx, nil) // nil event: validation error before domain event creation
+				n.deps.Metrics.RecordError(n.name, "network_event", "invalid_address_family")
 				continue
 			}
 
@@ -288,8 +288,8 @@ func (n *NetworkObserver) processEventsStage(ctx context.Context, eventCh chan N
 			}
 
 			// Record base metrics
-			n.RecordEvent(ctx)
-			n.RecordProcessingTime(ctx, nil, float64(time.Since(startTime).Milliseconds())) // nil event: state change processing, not a specific domain event
+			n.deps.Metrics.RecordEvent(n.name, eventType)
+			n.deps.Metrics.RecordProcessingTime(n.name, eventType, float64(time.Since(startTime).Milliseconds()))
 		}
 	}
 }
@@ -372,7 +372,7 @@ func (n *NetworkObserver) processRetransmitEvent(ctx context.Context, evt Networ
 	}
 
 	// Record processing time
-	n.RecordEvent(ctx)
+	n.deps.Metrics.RecordEvent(n.name, "retransmit")
 }
 
 // processRTTSpikeEvent handles RTT spike events from eBPF (Stage 3)
@@ -414,8 +414,8 @@ func (n *NetworkObserver) processRTTSpikeEvent(ctx context.Context, evt NetworkE
 
 // emitDomainEvent outputs domain events from processors
 func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.ObserverEvent) {
-	// Record OTEL metrics
-	n.RecordEvent(ctx)
+	// Record metrics
+	n.deps.Metrics.RecordEvent(n.name, evt.Type)
 
 	// Validate event has network data
 	if evt.NetworkData == nil {
@@ -428,8 +428,10 @@ func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.Obser
 		n.enrichWithK8sContext(evt)
 	}
 
-	// Send to OTLP (Community path - structured logs)
-	n.SendObserverEvent(ctx, evt)
+	// Emit event via intelligence service
+	if err := n.deps.Emitter.Emit(ctx, evt); err != nil {
+		log.Printf("[%s] failed to emit event: %v", n.name, err)
+	}
 }
 
 // enrichWithK8sContext lookups pod metadata by IP and populates NetworkEventData fields

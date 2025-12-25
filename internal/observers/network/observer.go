@@ -10,6 +10,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
 // PodInfo matches internal/services/k8scontext/types.go:PodInfo
@@ -77,9 +78,17 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 		return nil, fmt.Errorf("failed to create base observer: %w", err)
 	}
 
+	// Create deps for lean pattern compatibility
+	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create emitter: %w", err)
+	}
+	deps := base.NewDeps(base.GlobalRegistry, emitter)
+
 	obs := &NetworkObserver{
 		BaseObserver: baseObs,
-		name:         name, // Also set for new pattern compatibility
+		name:         name,
+		deps:         deps,
 		config:       config,
 	}
 
