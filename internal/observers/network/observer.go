@@ -117,11 +117,34 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 // New creates a network observer with dependency injection (lean pattern).
 // This replaces NewNetworkObserver for the new architecture.
 func New(config Config, deps *base.Deps) *NetworkObserver {
-	return &NetworkObserver{
+	obs := &NetworkObserver{
 		name:   "network",
 		deps:   deps,
 		config: config,
 	}
+
+	// Initialize network-specific Prometheus metrics using the injected registry.
+	// We intentionally ignore the returned error here because the New()
+	// signature does not allow returning it. This mirrors the metric
+	// definitions in NewNetworkObserver, but uses deps.Registry instead
+	// of the global registry.
+	if deps != nil && deps.Registry != nil {
+		_ = base.NewPromMetricBuilder(deps.Registry, obs.name).
+			WithCounter(&obs.connectionResets, "tapio_network_connection_resets_total", "Total number of TCP connection resets").
+			WithCounter(&obs.retransmitsTotal, "tapio_network_retransmits_total", "Total number of TCP retransmissions").
+			WithCounter(&obs.synTimeouts, "tapio_network_syn_timeouts_total", "Total number of SYN timeouts").
+			WithCounter(&obs.connectionRefused, "tapio_network_connection_refused_total", "Total number of connection refused errors").
+			WithGauge(&obs.retransmitRate, "tapio_network_retransmit_rate", "Current TCP retransmit rate").
+			WithCounter(&obs.congestionEvents, "tapio_network_congestion_events_total", "Total number of TCP congestion control events").
+			WithCounter(&obs.rttSpikesTotal, "tapio_network_rtt_spikes_total", "Total number of RTT spike events").
+			WithGauge(&obs.rttCurrentMs, "tapio_network_rtt_current_ms", "Current smoothed RTT in milliseconds").
+			WithGauge(&obs.rttDegradationPct, "tapio_network_rtt_degradation_pct", "RTT degradation percentage compared to baseline").
+			WithGauge(&obs.ringbufferUtilization, "tapio_network_ringbuffer_utilization", "Current eBPF ringbuffer utilization").
+			WithGauge(&obs.ebpfMapSize, "tapio_network_ebpf_map_size", "Current size of the eBPF connection tracking map").
+			Build()
+	}
+
+	return obs
 }
 
 // stateToEventType maps TCP state transitions to domain event types
