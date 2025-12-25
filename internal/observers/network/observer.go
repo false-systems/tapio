@@ -41,6 +41,8 @@ type Config struct {
 // NetworkObserver tracks TCP/UDP/DNS network events using eBPF
 type NetworkObserver struct {
 	*base.BaseObserver
+	name    string     // Explicit name for lean pattern
+	deps    *base.Deps // Injected dependencies
 	config  Config
 	ebpfMgr *base.EBPFManager // eBPF lifecycle manager
 
@@ -100,6 +102,16 @@ func NewNetworkObserver(name string, config Config) (*NetworkObserver, error) {
 	}
 
 	return obs, nil
+}
+
+// New creates a network observer with dependency injection (lean pattern).
+// This replaces NewNetworkObserver for the new architecture.
+func New(config Config, deps *base.Deps) *NetworkObserver {
+	return &NetworkObserver{
+		name:   "network",
+		deps:   deps,
+		config: config,
+	}
 }
 
 // stateToEventType maps TCP state transitions to domain event types
