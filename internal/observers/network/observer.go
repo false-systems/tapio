@@ -123,26 +123,21 @@ func New(config Config, deps *base.Deps) *NetworkObserver {
 		config: config,
 	}
 
-	// Initialize network-specific Prometheus metrics using the injected registry.
-	// We intentionally ignore the returned error here because the New()
-	// signature does not allow returning it. This mirrors the metric
-	// definitions in NewNetworkObserver, but uses deps.Registry instead
-	// of the global registry.
-	if deps != nil && deps.Registry != nil {
-		_ = base.NewPromMetricBuilder(deps.Registry, obs.name).
-			WithCounter(&obs.connectionResets, "tapio_network_connection_resets_total", "Total number of TCP connection resets").
-			WithCounter(&obs.retransmitsTotal, "tapio_network_retransmits_total", "Total number of TCP retransmissions").
-			WithCounter(&obs.synTimeouts, "tapio_network_syn_timeouts_total", "Total number of SYN timeouts").
-			WithCounter(&obs.connectionRefused, "tapio_network_connection_refused_total", "Total number of connection refused errors").
-			WithGauge(&obs.retransmitRate, "tapio_network_retransmit_rate", "Current TCP retransmit rate").
-			WithCounter(&obs.congestionEvents, "tapio_network_congestion_events_total", "Total number of TCP congestion control events").
-			WithCounter(&obs.rttSpikesTotal, "tapio_network_rtt_spikes_total", "Total number of RTT spike events").
-			WithGauge(&obs.rttCurrentMs, "tapio_network_rtt_current_ms", "Current smoothed RTT in milliseconds").
-			WithGauge(&obs.rttDegradationPct, "tapio_network_rtt_degradation_pct", "RTT degradation percentage compared to baseline").
-			WithGauge(&obs.ringbufferUtilization, "tapio_network_ringbuffer_utilization", "Current eBPF ringbuffer utilization").
-			WithGauge(&obs.ebpfMapSize, "tapio_network_ebpf_map_size", "Current size of the eBPF connection tracking map").
-			Build()
-	}
+	// Create observer-specific Prometheus metrics
+	builder := base.NewPromMetricBuilder(base.GlobalRegistry, "network")
+	builder.Counter(&obs.connectionResets, "connection_resets_total", "TCP connection resets (RST) received")
+	builder.Counter(&obs.synTimeouts, "syn_timeouts_total", "TCP SYN timeouts (no response)")
+	builder.Counter(&obs.connectionRefused, "connection_refused_total", "TCP connections refused (RST on SYN)")
+	builder.Counter(&obs.retransmitsTotal, "retransmits_total", "TCP packet retransmissions detected")
+	builder.Gauge(&obs.retransmitRate, "retransmit_rate_ratio", "TCP retransmission rate ratio (0.0-1.0)")
+	builder.Counter(&obs.congestionEvents, "congestion_events_total", "High retransmit rate events (>5%)")
+	builder.Counter(&obs.rttSpikesTotal, "rtt_spikes_total", "RTT spike events detected")
+	builder.Gauge(&obs.rttCurrentMs, "rtt_current_ms", "Current RTT in milliseconds when spike detected")
+	builder.Gauge(&obs.rttDegradationPct, "rtt_degradation_ratio", "RTT degradation ratio from baseline (0.0-1.0)")
+	builder.Gauge(&obs.ringbufferUtilization, "ringbuffer_utilization_percent", "eBPF ring buffer utilization percentage")
+	builder.Gauge(&obs.ebpfMapSize, "ebpf_map_size_entries", "Number of entries in eBPF maps (baseline_rtt)")
+	//nolint:errcheck // metrics registration errors are non-fatal for observer operation
+	builder.Build()
 
 	return obs
 }

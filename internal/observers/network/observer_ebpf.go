@@ -460,8 +460,9 @@ func (n *NetworkObserver) enrichWithK8sContext(evt *domain.ObserverEvent) {
 
 			// Enrich to TapioEvent with graph entities (Enterprise path)
 			tapioEvent, err := domain.EnrichWithK8sContext(evt, k8sCtx)
-			if err == nil {
+			if err == nil && n.BaseObserver != nil {
 				// Publish to NATS (NoOp in OSS, real NATS in Enterprise)
+				// Only available when using legacy NewNetworkObserver constructor
 				if err := n.PublishEvent(context.Background(), "tapio.events.network", tapioEvent); err != nil {
 					log.Printf("[%s] failed to publish TapioEvent: %v", n.name, err)
 				}
