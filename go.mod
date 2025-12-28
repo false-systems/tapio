@@ -3,6 +3,7 @@ module github.com/yairfalse/tapio
 go 1.24.0
 
 require (
+	github.com/yairfalse/proto v0.0.0
 	github.com/cilium/ebpf v0.20.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/nats-io/nats-server/v2 v2.12.2
@@ -105,3 +106,6 @@ require (
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+// Local development - point to local proto repo
+replace github.com/yairfalse/proto => ../proto
