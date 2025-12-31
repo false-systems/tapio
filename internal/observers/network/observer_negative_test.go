@@ -5,21 +5,17 @@ package network
 import (
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/sdk/metric"
+	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
-// setupNegativeTest sets up OTEL for negative tests
+// setupNegativeTest is a no-op now that we use Prometheus metrics directly
 func setupNegativeTest(t *testing.T) {
 	t.Helper()
-	reader := metric.NewManualReader()
-	provider := metric.NewMeterProvider(metric.WithReader(reader))
-	otel.SetMeterProvider(provider)
-	t.Cleanup(func() {
-		otel.SetMeterProvider(nil)
-	})
+	// No-op: observer uses Prometheus metrics directly via base.Deps
 }
 
 // TestNegative_StateToEventType_InvalidStates tests behavior with invalid TCP states
@@ -201,53 +197,17 @@ func TestNegative_NetworkEventBPF_ZeroValues(t *testing.T) {
 	assert.Equal(t, "", comm)
 }
 
-// TestNegative_NewNetworkObserver_InvalidConfig tests observer creation with invalid config
-func TestNegative_NewNetworkObserver_InvalidConfig(t *testing.T) {
-	setupNegativeTest(t)
+// TestNegative_New_ZeroConfig tests observer creation with zero config
+func TestNegative_New_ZeroConfig(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
+	require.NoError(t, err)
+	deps := base.NewDeps(reg, emitter)
 
-	tests := []struct {
-		name    string
-		obsName string
-		config  Config
-	}{
-		{
-			name:    "Empty name",
-			obsName: "",
-			config:  Config{},
-		},
-		{
-			name:    "Very long name",
-			obsName: "network-observer-with-a-very-long-name-that-exceeds-typical-length-limits-and-keeps-going",
-			config:  Config{},
-		},
-		{
-			name:    "Special characters in name",
-			obsName: "network@observer#123",
-			config:  Config{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			observer, err := NewNetworkObserver(tt.obsName, tt.config)
-
-			if tt.obsName == "" {
-				// Empty name might fail in base observer creation
-				if err != nil {
-					assert.Error(t, err)
-					assert.Nil(t, observer)
-				} else {
-					// If it succeeds, verify observer was created
-					require.NotNil(t, observer)
-				}
-			} else {
-				// Other cases should succeed
-				require.NoError(t, err)
-				require.NotNil(t, observer)
-				assert.Equal(t, tt.obsName, observer.Name())
-			}
-		})
-	}
+	// Zero config should work (defaults applied internally)
+	observer := New(Config{}, deps)
+	require.NotNil(t, observer)
+	assert.Equal(t, "network", observer.name)
 }
 
 // TestNegative_EventConversion_MalformedData tests handling of malformed event data
@@ -402,32 +362,11 @@ func TestNegative_LargeEventBatch(t *testing.T) {
 	require.Equal(t, eventCount, processed)
 }
 
-// TestNegative_ObserverCreation_NoOTEL tests observer creation without OTEL setup
-func TestNegative_ObserverCreation_NoOTEL(t *testing.T) {
-	// Intentionally don't set up OTEL
-	otel.SetMeterProvider(nil)
-	t.Cleanup(func() {
-		// Restore OTEL after test
-		reader := metric.NewManualReader()
-		provider := metric.NewMeterProvider(metric.WithReader(reader))
-		otel.SetMeterProvider(provider)
-	})
-
-	config := Config{}
-
-	// Without OTEL, observer creation will panic or fail
-	// Use defer/recover to catch panic
-	defer func() {
-		if r := recover(); r != nil {
-			// Expected panic due to missing OTEL provider
-			assert.NotNil(t, r, "Should panic without OTEL provider")
-		}
-	}()
-
-	observer, err := NewNetworkObserver("no-otel-test", config)
-
-	// If no panic, verify observer was created (unlikely without OTEL)
-	if err == nil && observer != nil {
-		assert.Equal(t, "no-otel-test", observer.Name())
-	}
+// TestNegative_ObserverCreation_NilDeps tests observer creation with nil deps
+func TestNegative_ObserverCreation_NilDeps(t *testing.T) {
+	// New() with nil deps should still work (metrics become nil, handled internally)
+	observer := New(Config{}, nil)
+	require.NotNil(t, observer)
+	assert.Equal(t, "network", observer.name)
+	assert.Nil(t, observer.deps)
 }

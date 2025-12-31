@@ -6,31 +6,31 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/sdk/metric"
+	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
-// setupBenchmark sets up OTEL for benchmarks
+// setupBenchmark is a no-op now that we use Prometheus metrics directly
 func setupBenchmark(b *testing.B) {
 	b.Helper()
-	reader := metric.NewManualReader()
-	provider := metric.NewMeterProvider(metric.WithReader(reader))
-	otel.SetMeterProvider(provider)
-	b.Cleanup(func() {
-		otel.SetMeterProvider(nil)
-	})
+	// No-op: observer uses Prometheus metrics directly via base.Deps
 }
 
-// setupTest sets up OTEL for regular tests
+// setupTest is a no-op now that we use Prometheus metrics directly
 func setupTest(t *testing.T) {
 	t.Helper()
-	reader := metric.NewManualReader()
-	provider := metric.NewMeterProvider(metric.WithReader(reader))
-	otel.SetMeterProvider(provider)
-	t.Cleanup(func() {
-		otel.SetMeterProvider(nil)
-	})
+	// No-op: observer uses Prometheus metrics directly via base.Deps
+}
+
+// createTestDeps creates deps for benchmarks
+func createTestDeps(b *testing.B) *base.Deps {
+	b.Helper()
+	reg := prometheus.NewRegistry()
+	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
+	require.NoError(b, err)
+	return base.NewDeps(reg, emitter)
 }
 
 // BenchmarkStateToEventType measures state transition mapping performance
@@ -149,16 +149,12 @@ func BenchmarkEventProcessingPipeline(b *testing.B) {
 
 // BenchmarkObserverCreation measures observer creation overhead
 func BenchmarkObserverCreation(b *testing.B) {
-	setupBenchmark(b)
-
+	deps := createTestDeps(b)
 	config := Config{}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		observer, err := NewNetworkObserver("bench-observer", config)
-		if err != nil {
-			b.Fatalf("Failed to create observer: %v", err)
-		}
+		observer := New(config, deps)
 		_ = observer // Ignore: benchmark needs result to prevent optimization
 	}
 }
