@@ -7,37 +7,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/sdk/metric"
+	"github.com/yairfalse/tapio/internal/base"
+	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
-// setupOTELIntegration sets up OTEL with metric reader for integration tests
-func setupOTELIntegration(t *testing.T) *metric.ManualReader {
+// setupTestDeps creates deps for integration tests
+func setupTestDeps(t *testing.T) *base.Deps {
 	t.Helper()
-	reader := metric.NewManualReader()
-	provider := metric.NewMeterProvider(metric.WithReader(reader))
-	otel.SetMeterProvider(provider)
-	t.Cleanup(func() {
-		otel.SetMeterProvider(nil)
-	})
-	return reader
+	reg := prometheus.NewRegistry()
+	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
+	require.NoError(t, err)
+	return base.NewDeps(reg, emitter)
+}
+
+// setupOTELIntegration is a no-op now that we use Prometheus metrics directly
+// Kept for backwards compatibility with existing tests that don't need observer
+func setupOTELIntegration(t *testing.T) {
+	t.Helper()
+	// No-op: observer uses Prometheus metrics directly via base.Deps
 }
 
 // TestIntegration_ObserverLifecycle tests complete observer lifecycle
 func TestIntegration_ObserverLifecycle(t *testing.T) {
-	setupOTELIntegration(t)
+	deps := setupTestDeps(t)
 
-	config := Config{}
-
-	observer, err := NewNetworkObserver("integration-test", config)
-	require.NoError(t, err, "Failed to create observer")
+	observer := New(Config{}, deps)
 	require.NotNil(t, observer)
 
 	// Verify observer state
-	assert.Equal(t, "integration-test", observer.Name())
-	assert.NotNil(t, observer.BaseObserver)
+	assert.Equal(t, "network", observer.name)
+	assert.Same(t, deps, observer.deps)
 }
 
 // TestIntegration_EventConversion tests converting raw eBPF events to domain events
@@ -235,12 +237,9 @@ func TestIntegration_ConcurrentEventProcessing(t *testing.T) {
 
 // TestIntegration_ContextCancellation tests observer behavior with context cancellation
 func TestIntegration_ContextCancellation(t *testing.T) {
-	setupOTELIntegration(t)
-
-	config := Config{}
-
-	observer, err := NewNetworkObserver("cancel-test", config)
-	require.NoError(t, err)
+	deps := setupTestDeps(t)
+	observer := New(Config{}, deps)
+	require.NotNil(t, observer)
 
 	// Create cancellable context
 	ctx, cancel := context.WithCancel(context.Background())
@@ -257,8 +256,7 @@ func TestIntegration_ContextCancellation(t *testing.T) {
 	}
 
 	// Observer should still be valid
-	assert.NotNil(t, observer)
-	assert.Equal(t, "cancel-test", observer.Name())
+	assert.Equal(t, "network", observer.name)
 }
 
 // TestLinkFailure_SynTimeout tests detection of SYN timeout (connection attempt timeout)

@@ -11,43 +11,30 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/intelligence"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/sdk/metric"
 )
 
-// setupOTEL sets up OTEL for tests
-func setupOTEL(t *testing.T) {
-	t.Helper()
-	reader := metric.NewManualReader()
-	provider := metric.NewMeterProvider(metric.WithReader(reader))
-	otel.SetMeterProvider(provider)
-	t.Cleanup(func() {
-		otel.SetMeterProvider(nil)
-	})
-}
-
-func TestNewNetworkObserver(t *testing.T) {
-	setupOTEL(t)
-
-	config := Config{}
-
-	observer, err := NewNetworkObserver("test-network", config)
+func TestNew_CreatesObserver(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
 	require.NoError(t, err)
+	deps := base.NewDeps(reg, emitter)
+
+	observer := New(Config{}, deps)
 	require.NotNil(t, observer)
 
-	assert.Equal(t, "test-network", observer.Name())
-	assert.NotNil(t, observer.BaseObserver)
+	assert.Equal(t, "network", observer.name)
+	assert.Same(t, deps, observer.deps)
 }
 
 func TestNetworkObserver_Name(t *testing.T) {
-	setupOTEL(t)
-
-	config := Config{}
-
-	observer, err := NewNetworkObserver("my-network-observer", config)
+	reg := prometheus.NewRegistry()
+	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
 	require.NoError(t, err)
+	deps := base.NewDeps(reg, emitter)
 
-	assert.Equal(t, "my-network-observer", observer.Name())
+	observer := New(Config{}, deps)
+
+	assert.Equal(t, "network", observer.name)
 }
 
 // TestStateToEventType_Established verifies TCP ESTABLISHED mapping
@@ -114,14 +101,7 @@ func TestExtractComm_Full(t *testing.T) {
 // TestRetransmitStatsTracking tests retransmit rate calculation logic
 // Note: Actual tracking now happens in eBPF LRU map (conn_stats)
 func TestRetransmitStatsTracking(t *testing.T) {
-	setupOTEL(t)
-
-	config := Config{}
-	observer, err := NewNetworkObserver("test-retransmit", config)
-	require.NoError(t, err)
-	require.NotNil(t, observer)
-
-	// Test retransmit rate calculation logic
+	// Test retransmit rate calculation logic (pure math, no observer needed)
 	totalPackets := uint64(100)
 	retransmits := uint64(5)
 	rate := float64(retransmits) / float64(totalPackets) * 100
@@ -143,23 +123,16 @@ func TestHighRetransmitRateCalculation(t *testing.T) {
 	assert.Greater(t, highRate, 5.0, "10% rate should exceed threshold")
 }
 
-// TestNew_WithDeps tests the new lean constructor with dependency injection
-func TestNew_WithDeps(t *testing.T) {
-	// Create deps with fresh registry and debug emitter
+// TestNew_PreservesConfig tests that New() preserves config values
+func TestNew_PreservesConfig(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	emitter, err := intelligence.New(intelligence.Config{Tier: intelligence.TierDebug})
 	require.NoError(t, err)
 	deps := base.NewDeps(reg, emitter)
 
 	config := Config{EventChannelSize: 500}
-
-	// Call new constructor
 	obs := New(config, deps)
 
-	// Verify observer is created correctly
-	require.NotNil(t, obs)
-	assert.Equal(t, "network", obs.name)
-	assert.Same(t, deps, obs.deps)
 	assert.Equal(t, 500, obs.config.EventChannelSize)
 }
 
