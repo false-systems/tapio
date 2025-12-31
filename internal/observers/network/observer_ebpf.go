@@ -33,31 +33,7 @@ var tcpStateNames = map[uint8]string{
 	TCP_CLOSING:     "CLOSING",
 }
 
-// Start implements the Observer interface - sets up pipeline stages
-func (n *NetworkObserver) Start(ctx context.Context) error {
-	// Create event channel for ring buffer → processor communication
-	channelSize := n.config.EventChannelSize
-	if channelSize <= 0 {
-		channelSize = 1000 // Default buffer size
-	}
-	eventCh := make(chan NetworkEventBPF, channelSize)
-
-	// Stage 1: Load and attach eBPF program
-	n.AddStage(func(ctx context.Context) error {
-		return n.loadAndAttachStage(ctx, eventCh)
-	})
-
-	// Stage 2: Process events from channel
-	n.AddStage(func(ctx context.Context) error {
-		return n.processEventsStage(ctx, eventCh)
-	})
-
-	// Let BaseObserver run the pipeline
-	return n.BaseObserver.Start(ctx)
-}
-
-// Run executes the observer using errgroup (lean pattern, no pipeline abstraction).
-// This replaces Start() for observers created with New().
+// Run executes the observer using errgroup.
 func (n *NetworkObserver) Run(ctx context.Context) error {
 	// Check if context is already cancelled
 	if ctx.Err() != nil {
