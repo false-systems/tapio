@@ -79,11 +79,8 @@ func LoadTelemetryConfigFromEnv() *TelemetryConfig {
 // exposing three endpoints:
 //   - /metrics - Prometheus scrape endpoint
 //   - /health  - Always returns 200 OK (liveness probe)
-//   - /ready   - Returns 200 if all observers healthy, 503 otherwise (readiness probe)
-//
-// The observers parameter is optional and used by the /ready endpoint to check health.
-// Pass nil if health checks are not needed (e.g., for self-monitoring).
-func InitTelemetry(ctx context.Context, config *TelemetryConfig, observers []Observer) (*TelemetryShutdown, error) {
+//   - /ready   - Always returns 200 OK (supervisor handles observer health)
+func InitTelemetry(ctx context.Context, config *TelemetryConfig) (*TelemetryShutdown, error) {
 	if config == nil {
 		return nil, fmt.Errorf("telemetry config is nil")
 	}
@@ -184,7 +181,7 @@ func InitTelemetry(ctx context.Context, config *TelemetryConfig, observers []Obs
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
 		mux.HandleFunc("/health", healthHandler)
-		mux.HandleFunc("/ready", readyHandler(observers))
+		mux.HandleFunc("/ready", readyHandler) // Simplified - supervisor handles observer health
 
 		httpServer = &http.Server{
 			Addr:    fmt.Sprintf(":%d", config.PrometheusPort),
@@ -319,39 +316,11 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// readyHandler returns 200 if all observers are healthy, 503 otherwise
-func readyHandler(observers []Observer) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-
-		// If no observers, consider ready (nothing to check)
-		if len(observers) == 0 {
-			w.WriteHeader(http.StatusOK)
-			if _, err := w.Write([]byte("Ready")); err != nil {
-				stdlog.Printf("failed to write ready response: %v", err)
-			}
-			return
-		}
-
-		// Check if all observers are healthy
-		allHealthy := true
-		for _, obs := range observers {
-			if !obs.IsHealthy() {
-				allHealthy = false
-				break
-			}
-		}
-
-		if allHealthy {
-			w.WriteHeader(http.StatusOK)
-			if _, err := w.Write([]byte("Ready")); err != nil {
-				stdlog.Printf("failed to write ready response: %v", err)
-			}
-		} else {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if _, err := w.Write([]byte("Not Ready")); err != nil {
-				stdlog.Printf("failed to write not ready response: %v", err)
-			}
-		}
+// readyHandler returns 200 OK - supervisor handles observer health checks
+func readyHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write([]byte("Ready")); err != nil {
+		stdlog.Printf("failed to write ready response: %v", err)
 	}
 }
