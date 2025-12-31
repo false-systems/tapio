@@ -16,14 +16,15 @@ import (
 // TestEventsWatcher_Run_BlocksUntilCancelled verifies Run() is blocking
 func TestEventsWatcher_Run_BlocksUntilCancelled(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, intelligence.NewMock())
 
-	baseObs, err := base.NewBaseObserver("test-scheduler")
-	require.NoError(t, err)
-
-	obs := &SchedulerObserver{
-		BaseObserver: baseObs,
-		emitter:      intelligence.NewMock(),
+	config := Config{
+		SchedulerMetricsURL: "http://test:10251/metrics",
+		ScrapeInterval:      30 * time.Second,
 	}
+
+	obs, err := New(config, deps)
+	require.NoError(t, err)
 
 	watcher := NewEventsWatcher(clientset, obs)
 
@@ -46,9 +47,6 @@ func TestEventsWatcher_Run_BlocksUntilCancelled(t *testing.T) {
 	}()
 
 	// Give Run() time to start and cache to sync
-	// NOTE: Testing BLOCKING behavior requires waiting for goroutine to start.
-	// We're verifying Run() doesn't return immediately - sleep is the simplest approach.
-	// 300ms accounts for cache sync timeout with fake clientset.
 	time.Sleep(300 * time.Millisecond)
 
 	// Verify Run() hasn't returned yet (still blocking)
@@ -75,14 +73,15 @@ func TestEventsWatcher_Run_BlocksUntilCancelled(t *testing.T) {
 // TestEventsWatcher_Run_ReturnsImmediatelyIfContextAlreadyCancelled verifies fast shutdown
 func TestEventsWatcher_Run_ReturnsImmediatelyIfContextAlreadyCancelled(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, intelligence.NewMock())
 
-	baseObs, err := base.NewBaseObserver("test-scheduler")
-	require.NoError(t, err)
-
-	obs := &SchedulerObserver{
-		BaseObserver: baseObs,
-		emitter:      intelligence.NewMock(),
+	config := Config{
+		SchedulerMetricsURL: "http://test:10251/metrics",
+		ScrapeInterval:      30 * time.Second,
 	}
+
+	obs, err := New(config, deps)
+	require.NoError(t, err)
 
 	watcher := NewEventsWatcher(clientset, obs)
 
@@ -102,16 +101,16 @@ func TestEventsWatcher_Run_ReturnsImmediatelyIfContextAlreadyCancelled(t *testin
 
 // TestEventsWatcher_Run_CacheSyncFailure verifies error propagation
 func TestEventsWatcher_Run_CacheSyncFailure(t *testing.T) {
-	// Create empty clientset (simulates cache sync timeout)
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, intelligence.NewMock())
 
-	baseObs, err := base.NewBaseObserver("test-scheduler")
-	require.NoError(t, err)
-
-	obs := &SchedulerObserver{
-		BaseObserver: baseObs,
-		emitter:      intelligence.NewMock(),
+	config := Config{
+		SchedulerMetricsURL: "http://test:10251/metrics",
+		ScrapeInterval:      30 * time.Second,
 	}
+
+	obs, err := New(config, deps)
+	require.NoError(t, err)
 
 	watcher := NewEventsWatcher(clientset, obs)
 
@@ -129,14 +128,15 @@ func TestEventsWatcher_Run_CacheSyncFailure(t *testing.T) {
 // TestEventsWatcher_Run_InformerShutdown verifies informer cleanup
 func TestEventsWatcher_Run_InformerShutdown(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, intelligence.NewMock())
 
-	baseObs, err := base.NewBaseObserver("test-scheduler")
-	require.NoError(t, err)
-
-	obs := &SchedulerObserver{
-		BaseObserver: baseObs,
-		emitter:      intelligence.NewMock(),
+	config := Config{
+		SchedulerMetricsURL: "http://test:10251/metrics",
+		ScrapeInterval:      30 * time.Second,
 	}
+
+	obs, err := New(config, deps)
+	require.NoError(t, err)
 
 	watcher := NewEventsWatcher(clientset, obs)
 

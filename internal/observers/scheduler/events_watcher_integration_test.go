@@ -17,20 +17,17 @@ import (
 
 // TestEventsWatcher_Integration verifies complete Events API watcher workflow
 func TestEventsWatcher_Integration(t *testing.T) {
-	// Create fake K8s client
 	clientset := fake.NewSimpleClientset()
-
-	// Create mock emitter to capture events
 	mockEmitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, mockEmitter)
 
-	// Create Scheduler Observer with Events watcher
-	baseObs, err := base.NewBaseObserver("test-scheduler")
-	require.NoError(t, err)
-
-	obs := &SchedulerObserver{
-		BaseObserver: baseObs,
-		emitter:      mockEmitter,
+	config := Config{
+		SchedulerMetricsURL: "http://test:10251/metrics",
+		ScrapeInterval:      30 * time.Second,
 	}
+
+	obs, err := New(config, deps)
+	require.NoError(t, err)
 
 	// Create and start EventsWatcher
 	watcher := NewEventsWatcher(clientset, obs)
@@ -45,9 +42,6 @@ func TestEventsWatcher_Integration(t *testing.T) {
 	}()
 
 	// Give informer time to start and initialize cache
-	// NOTE: fake.NewSimpleClientset() requires async initialization before events
-	// can be processed. This is NOT flakiness - it's real async behavior we're testing.
-	// Alternative (retry loops) would add complexity for zero benefit.
 	time.Sleep(200 * time.Millisecond)
 
 	// Create initial event (should be skipped by OnAdd)
@@ -120,20 +114,20 @@ func TestEventsWatcher_Integration(t *testing.T) {
 func TestEventsWatcher_IgnoreNonScheduling(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	mockEmitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, mockEmitter)
 
-	baseObs, err := base.NewBaseObserver("test-scheduler")
-	require.NoError(t, err)
-
-	obs := &SchedulerObserver{
-		BaseObserver: baseObs,
-		emitter:      mockEmitter,
+	config := Config{
+		SchedulerMetricsURL: "http://test:10251/metrics",
+		ScrapeInterval:      30 * time.Second,
 	}
+
+	obs, err := New(config, deps)
+	require.NoError(t, err)
 
 	watcher := NewEventsWatcher(clientset, obs)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Run watcher in background
 	go func() {
 		if err := watcher.Run(ctx); err != nil {
 			t.Logf("watcher.Run() error: %v", err)
@@ -176,20 +170,20 @@ func TestEventsWatcher_IgnoreNonScheduling(t *testing.T) {
 func TestEventsWatcher_IgnoreNonPod(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	mockEmitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, mockEmitter)
 
-	baseObs, err := base.NewBaseObserver("test-scheduler")
-	require.NoError(t, err)
-
-	obs := &SchedulerObserver{
-		BaseObserver: baseObs,
-		emitter:      mockEmitter,
+	config := Config{
+		SchedulerMetricsURL: "http://test:10251/metrics",
+		ScrapeInterval:      30 * time.Second,
 	}
+
+	obs, err := New(config, deps)
+	require.NoError(t, err)
 
 	watcher := NewEventsWatcher(clientset, obs)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Run watcher in background
 	go func() {
 		if err := watcher.Run(ctx); err != nil {
 			t.Logf("watcher.Run() error: %v", err)
@@ -232,20 +226,20 @@ func TestEventsWatcher_IgnoreNonPod(t *testing.T) {
 func TestEventsWatcher_NoCountIncrease(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	mockEmitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, mockEmitter)
 
-	baseObs, err := base.NewBaseObserver("test-scheduler")
-	require.NoError(t, err)
-
-	obs := &SchedulerObserver{
-		BaseObserver: baseObs,
-		emitter:      mockEmitter,
+	config := Config{
+		SchedulerMetricsURL: "http://test:10251/metrics",
+		ScrapeInterval:      30 * time.Second,
 	}
+
+	obs, err := New(config, deps)
+	require.NoError(t, err)
 
 	watcher := NewEventsWatcher(clientset, obs)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Run watcher in background
 	go func() {
 		if err := watcher.Run(ctx); err != nil {
 			t.Logf("watcher.Run() error: %v", err)
