@@ -1,5 +1,4 @@
 //go:build linux
-// +build linux
 
 package network
 
@@ -434,8 +433,8 @@ func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.Obser
 	}
 }
 
-// enrichWithK8sContext lookups pod metadata by IP and populates NetworkEventData fields
-// Also publishes TapioEvent with graph entities to NATS (Enterprise path)
+// enrichWithK8sContext lookups pod metadata by IP and populates NetworkEventData fields.
+// NOTE: TapioEvent enrichment and NATS publishing is handled by intelligence.Service.Emit()
 func (n *NetworkObserver) enrichWithK8sContext(evt *domain.ObserverEvent) {
 	if evt.NetworkData == nil {
 		return
@@ -448,25 +447,6 @@ func (n *NetworkObserver) enrichWithK8sContext(evt *domain.ObserverEvent) {
 			// Populate K8s fields in NetworkEventData (for OTLP)
 			evt.NetworkData.PodName = podInfo.Name
 			evt.NetworkData.Namespace = podInfo.Namespace
-
-			// Build K8sContext for Enterprise graph enrichment
-			k8sCtx := &domain.K8sContext{
-				PodName:      podInfo.Name,
-				PodNamespace: podInfo.Namespace,
-				PodLabels:    podInfo.Labels,
-				PodIP:        podInfo.PodIP,
-				HostIP:       podInfo.HostIP,
-			}
-
-			// Enrich to TapioEvent with graph entities (Enterprise path)
-			tapioEvent, err := domain.EnrichWithK8sContext(evt, k8sCtx)
-			if err == nil && n.BaseObserver != nil {
-				// Publish to NATS (NoOp in OSS, real NATS in Enterprise)
-				// Only available when using legacy NewNetworkObserver constructor
-				if err := n.PublishEvent(context.Background(), "tapio.events.network", tapioEvent); err != nil {
-					log.Printf("[%s] failed to publish TapioEvent: %v", n.name, err)
-				}
-			}
 		}
 	}
 }
