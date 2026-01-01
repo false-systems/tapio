@@ -8,15 +8,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/internal/observers/container/bpf"
 	"github.com/yairfalse/tapio/pkg/domain"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/sync/errgroup"
 )
 
 // Config holds container observer configuration
@@ -31,7 +32,9 @@ type Config struct {
 
 // ContainerObserver tracks container exits and OOM kills using eBPF
 type ContainerObserver struct {
-	*base.BaseObserver
+	name          string
+	deps          *base.Deps
+	logger        zerolog.Logger
 	config        Config
 	cgroupMonitor *CgroupMonitor
 
@@ -46,12 +49,9 @@ type ContainerObserver struct {
 	enrichmentErrors  *prometheus.Counter
 }
 
-// NewContainerObserver creates a new container observer
-func NewContainerObserver(name string, config Config) (*ContainerObserver, error) {
-	baseObs, err := base.NewBaseObserver(name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create base observer: %w", err)
-	}
+// New creates a container observer with dependency injection.
+func New(config Config, deps *base.Deps) (*ContainerObserver, error) {
+	name := "container"
 
 	// Create meter for cgroup monitor
 	meter := otel.Meter(fmt.Sprintf("tapio.observer.%s", name))
@@ -67,7 +67,9 @@ func NewContainerObserver(name string, config Config) (*ContainerObserver, error
 	}
 
 	obs := &ContainerObserver{
-		BaseObserver:  baseObs,
+		name:          name,
+		deps:          deps,
+		logger:        base.NewLogger(name),
 		config:        config,
 		cgroupMonitor: cgroupMonitor,
 	}
@@ -97,8 +99,10 @@ func (c *ContainerObserver) initMetrics(name string) error {
 		Build()
 }
 
-// Start implements the Observer interface - sets up pipeline stages
-func (c *ContainerObserver) Start(ctx context.Context) error {
+// Run starts the container observer and blocks until context is cancelled.
+func (c *ContainerObserver) Run(ctx context.Context) error {
+	c.logger.Info().Msg("starting container observer")
+
 	// Check kernel compatibility
 	if err := checkKernelCompatibility(); err != nil {
 		return fmt.Errorf("kernel compatibility check failed: %w", err)
@@ -111,18 +115,21 @@ func (c *ContainerObserver) Start(ctx context.Context) error {
 	}
 	eventCh := make(chan ContainerEventBPF, channelSize)
 
+	g, ctx := errgroup.WithContext(ctx)
+
 	// Stage 1: Load and attach eBPF program
-	c.AddStage(func(ctx context.Context) error {
+	g.Go(func() error {
 		return c.loadAndAttachStage(ctx, eventCh)
 	})
 
 	// Stage 2: Process events from channel
-	c.AddStage(func(ctx context.Context) error {
+	g.Go(func() error {
 		return c.processEventsStage(ctx, eventCh)
 	})
 
-	// Let BaseObserver run the pipeline
-	return c.BaseObserver.Start(ctx)
+	err := g.Wait()
+	c.logger.Info().Msg("container observer stopped")
+	return err
 }
 
 // loadAndAttachStage loads eBPF program, attaches to tracepoints, reads ring buffer
@@ -136,7 +143,7 @@ func (c *ContainerObserver) loadAndAttachStage(ctx context.Context, eventCh chan
 	}
 	defer func() {
 		if err := objs.Close(); err != nil {
-			log.Printf("[%s] Error closing eBPF objects: %v", c.Name(), err)
+			c.logger.Error().Err(err).Msg("error closing eBPF objects")
 		}
 	}()
 
@@ -144,7 +151,7 @@ func (c *ContainerObserver) loadAndAttachStage(ctx context.Context, eventCh chan
 	ebpfMgr := base.NewEBPFManagerFromCollection(nil)
 	defer func() {
 		if err := ebpfMgr.Close(); err != nil {
-			log.Printf("[%s] Error closing eBPF manager: %v", c.Name(), err)
+			c.logger.Error().Err(err).Msg("error closing eBPF manager")
 		}
 	}()
 
@@ -158,13 +165,13 @@ func (c *ContainerObserver) loadAndAttachStage(ctx context.Context, eventCh chan
 		return fmt.Errorf("failed to attach sched/sched_process_exit: %w", err)
 	}
 
-	log.Printf("[%s] eBPF programs loaded and attached (2 tracepoints: oom/mark_victim, sched/sched_process_exit)", c.Name())
+	c.logger.Info().Msg("eBPF programs loaded and attached (2 tracepoints: oom/mark_victim, sched/sched_process_exit)")
 
 	// Close eBPF manager when context is cancelled
 	go func() {
 		<-ctx.Done()
 		if err := ebpfMgr.Close(); err != nil {
-			log.Printf("[%s] Error closing eBPF manager in cleanup: %v", c.Name(), err)
+			c.logger.Error().Err(err).Msg("error closing eBPF manager in cleanup")
 		}
 	}()
 
@@ -175,7 +182,7 @@ func (c *ContainerObserver) loadAndAttachStage(ctx context.Context, eventCh chan
 	}
 	defer func() {
 		if err := reader.Close(); err != nil {
-			log.Printf("[%s] Error closing ring buffer reader: %v", c.Name(), err)
+			c.logger.Error().Err(err).Msg("error closing ring buffer reader")
 		}
 	}()
 
@@ -184,19 +191,19 @@ func (c *ContainerObserver) loadAndAttachStage(ctx context.Context, eventCh chan
 		record, err := reader.Read()
 		if err != nil {
 			if errors.Is(err, ringbuf.ErrClosed) {
-				log.Printf("[%s] Ring buffer closed, shutting down", c.Name())
+				c.logger.Info().Msg("ring buffer closed, shutting down")
 				return nil
 			}
-			log.Printf("[%s] Error reading ring buffer: %v", c.Name(), err)
-			c.RecordError(ctx, nil)
+			c.logger.Error().Err(err).Msg("error reading ring buffer")
+			c.deps.Metrics.RecordError(c.name, "container", "ring_buffer_read")
 			continue
 		}
 
 		// Parse event
 		var evt ContainerEventBPF
 		if err := binary.Read(bytes.NewReader(record.RawSample), binary.LittleEndian, &evt); err != nil {
-			log.Printf("[%s] Error parsing event: %v", c.Name(), err)
-			c.RecordError(ctx, nil)
+			c.logger.Error().Err(err).Msg("error parsing event")
+			c.deps.Metrics.RecordError(c.name, "container", "parse_error")
 			continue
 		}
 
@@ -206,7 +213,7 @@ func (c *ContainerObserver) loadAndAttachStage(ctx context.Context, eventCh chan
 			// Event sent
 		default:
 			// Channel full - drop event
-			c.RecordDrop(ctx, "container_event")
+			c.deps.Metrics.RecordDrop(c.name, "container_event")
 		}
 	}
 }
@@ -216,12 +223,12 @@ func (c *ContainerObserver) processEventsStage(ctx context.Context, eventCh chan
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("[%s] Shutting down event processor", c.Name())
+			c.logger.Info().Msg("shutting down event processor")
 			return nil
 
 		case evt, ok := <-eventCh:
 			if !ok {
-				log.Printf("[%s] Event channel closed, processor exiting", c.Name())
+				c.logger.Info().Msg("event channel closed, processor exiting")
 				return nil
 			}
 
@@ -244,7 +251,9 @@ func (c *ContainerObserver) processEvent(ctx context.Context, evt ContainerEvent
 	// Issue #566: Fallback to cgroup ID cache if path parsing failed
 	// This handles the race condition where cgroup is deleted before we can read it
 	if containerID == "" && evt.CgroupID != 0 {
-		containerID, _ = c.cgroupMonitor.GetContainerIDByCgroupID(evt.CgroupID)
+		if cachedID, ok := c.cgroupMonitor.GetContainerIDByCgroupID(evt.CgroupID); ok {
+			containerID = cachedID
+		}
 	}
 
 	// Cache cgroup ID → container ID mapping for future lookups
@@ -326,16 +335,24 @@ func (c *ContainerObserver) processEvent(ctx context.Context, evt ContainerEvent
 // emitDomainEvent outputs domain events (following network observer pattern)
 func (c *ContainerObserver) emitDomainEvent(ctx context.Context, evt *domain.ObserverEvent) {
 	// Record OTEL metrics
-	c.RecordEvent(ctx)
+	c.deps.Metrics.RecordEvent(c.name, evt.Type)
 
 	// Validate event has container data
 	if evt.ContainerData == nil {
-		log.Printf("[%s] %s.%s: missing container data", c.Name(), evt.Type, evt.Subtype)
+		c.logger.Warn().
+			Str("type", evt.Type).
+			Str("subtype", evt.Subtype).
+			Msg("missing container data")
 		return
 	}
 
-	// Send to OTLP (Community path - structured logs)
-	c.SendObserverEvent(ctx, evt)
+	// Send to intelligence service if available
+	if c.deps.Emitter != nil {
+		if err := c.deps.Emitter.Emit(ctx, evt); err != nil {
+			c.logger.Error().Err(err).Msg("failed to emit event")
+			c.deps.Metrics.RecordError(c.name, evt.Type, "emit_failed")
+		}
+	}
 }
 
 // classificationToSeverity maps exit category to severity

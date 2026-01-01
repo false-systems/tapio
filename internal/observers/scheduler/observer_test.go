@@ -8,28 +8,31 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-// TestNewSchedulerObserver_Minimal tests creating observer with minimal config
-func TestNewSchedulerObserver_Minimal(t *testing.T) {
+// TestNew_Minimal tests creating observer with minimal config
+func TestNew_Minimal(t *testing.T) {
 	config := Config{
 		SchedulerMetricsURL: "http://localhost:10251/metrics",
 		ScrapeInterval:      30 * time.Second,
 	}
+	deps := base.NewDeps(nil, nil)
 
-	obs, err := NewSchedulerObserver("test-scheduler", config)
+	obs, err := New(config, deps)
 	require.NoError(t, err)
 	require.NotNil(t, obs)
 
-	// Verify base observer
-	assert.NotNil(t, obs.BaseObserver)
+	// Verify fields
+	assert.Equal(t, "scheduler", obs.name)
+	assert.NotNil(t, obs.deps)
 
 	// Verify Prometheus scraper created
 	assert.NotNil(t, obs.promScraper)
 
-	// Verify OTEL metrics created
+	// Verify metrics created
 	assert.NotNil(t, obs.schedulingAttemptsTotal)
 	assert.NotNil(t, obs.schedulingErrorsTotal)
 	assert.NotNil(t, obs.pendingPodsGauge)
@@ -37,15 +40,16 @@ func TestNewSchedulerObserver_Minimal(t *testing.T) {
 	assert.NotNil(t, obs.pluginDurationMs)
 }
 
-// TestNewSchedulerObserver_WithK8sClient tests observer with K8s client
-func TestNewSchedulerObserver_WithK8sClient(t *testing.T) {
+// TestNew_WithK8sClient tests observer with K8s client
+func TestNew_WithK8sClient(t *testing.T) {
 	config := Config{
 		SchedulerMetricsURL: "http://localhost:10251/metrics",
 		ScrapeInterval:      30 * time.Second,
 		K8sClientset:        fake.NewSimpleClientset(),
 	}
+	deps := base.NewDeps(nil, nil)
 
-	obs, err := NewSchedulerObserver("test-scheduler", config)
+	obs, err := New(config, deps)
 	require.NoError(t, err)
 	require.NotNil(t, obs)
 
@@ -53,95 +57,74 @@ func TestNewSchedulerObserver_WithK8sClient(t *testing.T) {
 	assert.NotNil(t, obs.eventsWatcher)
 }
 
-// TestNewSchedulerObserver_WithEmitter tests observer with emitter
-func TestNewSchedulerObserver_WithEmitter(t *testing.T) {
+// TestNew_WithEmitter tests observer with emitter
+func TestNew_WithEmitter(t *testing.T) {
 	config := Config{
 		SchedulerMetricsURL: "http://localhost:10251/metrics",
 		ScrapeInterval:      30 * time.Second,
-		Emitter:             intelligence.NewMock(),
 	}
+	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
-	obs, err := NewSchedulerObserver("test-scheduler", config)
+	obs, err := New(config, deps)
 	require.NoError(t, err)
 	require.NotNil(t, obs)
 
-	assert.NotNil(t, obs.emitter)
+	assert.NotNil(t, obs.deps.Emitter)
 }
 
-// TestSchedulerObserver_StartStop tests lifecycle
-func TestSchedulerObserver_StartStop(t *testing.T) {
+// TestSchedulerObserver_Run tests lifecycle
+func TestSchedulerObserver_Run(t *testing.T) {
 	config := Config{
 		SchedulerMetricsURL: "http://localhost:10251/metrics",
 		ScrapeInterval:      30 * time.Second,
 	}
+	deps := base.NewDeps(nil, nil)
 
-	obs, err := NewSchedulerObserver("test-scheduler", config)
+	obs, err := New(config, deps)
 	require.NoError(t, err)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	// Start observer in background
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- obs.Start(ctx)
-	}()
-
-	// Give observer time to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Stop observer
-	err = obs.Stop()
+	// Run blocks until context cancelled
+	err = obs.Run(ctx)
 	assert.NoError(t, err)
-
-	// Wait for Start to complete
-	select {
-	case err := <-errCh:
-		assert.NoError(t, err)
-	case <-time.After(1 * time.Second):
-		t.Fatal("observer did not stop within timeout")
-	}
 }
 
-// TestSchedulerObserver_StartStop_WithEventsWatcher tests lifecycle with Events API watcher
-func TestSchedulerObserver_StartStop_WithEventsWatcher(t *testing.T) {
+// TestSchedulerObserver_Run_WithEventsWatcher tests lifecycle with Events API watcher
+func TestSchedulerObserver_Run_WithEventsWatcher(t *testing.T) {
 	config := Config{
 		SchedulerMetricsURL: "http://localhost:10251/metrics",
 		ScrapeInterval:      30 * time.Second,
 		K8sClientset:        fake.NewSimpleClientset(), // Adds Events API watcher
 	}
+	deps := base.NewDeps(nil, nil)
 
-	obs, err := NewSchedulerObserver("test-scheduler", config)
+	obs, err := New(config, deps)
 	require.NoError(t, err)
 	require.NotNil(t, obs.eventsWatcher, "Events watcher should be created with K8s client")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	// Start observer in background
+	// Run in background
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- obs.Start(ctx)
+		errCh <- obs.Run(ctx)
 	}()
 
-	// Give observer time to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Stop observer
-	err = obs.Stop()
-	assert.NoError(t, err)
-
-	// Wait for Start to complete or timeout
+	// Wait for completion or timeout
 	select {
 	case err := <-errCh:
 		// Expected outcomes:
 		// - nil: clean shutdown
-		// - context.Canceled: Stop() was called
+		// - context.Canceled/DeadlineExceeded: normal timeout
 		// - cache sync failure: fake.NewSimpleClientset() doesn't support informer sync
-		if err != nil && err != context.Canceled && !strings.Contains(err.Error(), "cache") {
+		if err != nil && err != context.Canceled && err != context.DeadlineExceeded && !strings.Contains(err.Error(), "cache") {
 			t.Errorf("unexpected error: %v", err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("observer did not stop within timeout")
 	}
 }

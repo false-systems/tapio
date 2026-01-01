@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/intelligence"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -17,107 +18,85 @@ import (
 
 // TDD Cycle 1: Observer constructor + validation
 
-// TestNewObserver_Success verifies constructor with valid config
-func TestNewObserver_Success(t *testing.T) {
+// TestNew_Success verifies constructor with valid config
+func TestNew_Success(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	cfg := Config{
 		Clientset: clientset,
-		Emitter:   emitter,
 	}
 
-	observer, err := NewObserver("test-observer", cfg)
+	observer, err := New(cfg, deps)
 	require.NoError(t, err)
 	require.NotNil(t, observer)
-	assert.Equal(t, "test-observer", observer.Name())
-	// IsHealthy() is false until Start() is called (BaseObserver behavior)
+	assert.Equal(t, "node", observer.name)
 }
 
-// TestNewObserver_MissingClientset verifies error when clientset is nil
-func TestNewObserver_MissingClientset(t *testing.T) {
+// TestNew_MissingClientset verifies error when clientset is nil
+func TestNew_MissingClientset(t *testing.T) {
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	cfg := Config{
 		Clientset: nil,
-		Emitter:   emitter,
 	}
 
-	observer, err := NewObserver("test-observer", cfg)
+	observer, err := New(cfg, deps)
 	require.Error(t, err)
 	assert.Nil(t, observer)
 	assert.Contains(t, err.Error(), "clientset is required")
 }
 
-// TestNewObserver_MissingEmitter verifies error when emitter is nil
-func TestNewObserver_MissingEmitter(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
+// TDD Cycle 2: Run lifecycle + event handlers
 
-	cfg := Config{
-		Clientset: clientset,
-		Emitter:   nil,
-	}
-
-	observer, err := NewObserver("test-observer", cfg)
-	require.Error(t, err)
-	assert.Nil(t, observer)
-	assert.Contains(t, err.Error(), "emitter is required")
-}
-
-// TDD Cycle 2: Start/Stop lifecycle + event handlers
-
-// TestObserver_StartStop verifies observer lifecycle
-func TestObserver_StartStop(t *testing.T) {
+// TestObserver_Run verifies observer lifecycle
+func TestObserver_Run(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	cfg := Config{
 		Clientset: clientset,
-		Emitter:   emitter,
 	}
 
-	observer, err := NewObserver("test-observer", cfg)
+	observer, err := New(cfg, deps)
 	require.NoError(t, err)
 
-	// Observer is not healthy until Start() is called
-	assert.False(t, observer.IsHealthy())
+	// Run should block until context is cancelled
+	ctx, cancel := context.WithCancel(context.Background())
 
-	// Start should succeed
-	ctx := context.Background()
-	err = observer.Start(ctx)
-	require.NoError(t, err)
+	// Run in background
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- observer.Run(ctx)
+	}()
 
-	// Observer should be healthy after Start
-	assert.True(t, observer.IsHealthy())
+	// Cancel context
+	cancel()
 
-	// Stop should succeed
-	err = observer.Stop()
-	require.NoError(t, err)
-
-	// Observer should be unhealthy after Stop
-	assert.False(t, observer.IsHealthy())
+	// Run should return without error
+	err = <-errCh
+	assert.NoError(t, err)
 }
 
-// TestObserver_StartRegistersHandlers verifies event handlers are registered
-func TestObserver_StartRegistersHandlers(t *testing.T) {
+// TestObserver_RunRegistersHandlers verifies event handlers are registered
+func TestObserver_RunRegistersHandlers(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	cfg := Config{
 		Clientset: clientset,
-		Emitter:   emitter,
 	}
 
-	observer, err := NewObserver("test-observer", cfg)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-	err = observer.Start(ctx)
+	observer, err := New(cfg, deps)
 	require.NoError(t, err)
 
 	// Verify informer has handlers registered (non-zero handler count)
 	// Note: K8s fake client doesn't actually run informers, so this just
-	// verifies Start() doesn't panic and completes successfully
+	// verifies constructor doesn't panic and completes successfully
 	assert.NotNil(t, observer.informer)
 }
 
@@ -127,13 +106,13 @@ func TestObserver_StartRegistersHandlers(t *testing.T) {
 func TestHandleNode_NodeReady(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	cfg := Config{
 		Clientset: clientset,
-		Emitter:   emitter,
 	}
 
-	observer, err := NewObserver("test-observer", cfg)
+	observer, err := New(cfg, deps)
 	require.NoError(t, err)
 
 	// Create a node that becomes Ready
@@ -189,13 +168,13 @@ func TestHandleNode_NodeReady(t *testing.T) {
 func TestHandleNode_NodeNotReady(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	cfg := Config{
 		Clientset: clientset,
-		Emitter:   emitter,
 	}
 
-	observer, err := NewObserver("test-observer", cfg)
+	observer, err := New(cfg, deps)
 	require.NoError(t, err)
 
 	// Create a node that becomes NotReady
@@ -250,13 +229,13 @@ func TestHandleNode_NodeNotReady(t *testing.T) {
 func TestHandleNode_MemoryPressure(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	cfg := Config{
 		Clientset: clientset,
-		Emitter:   emitter,
 	}
 
-	observer, err := NewObserver("test-observer", cfg)
+	observer, err := New(cfg, deps)
 	require.NoError(t, err)
 
 	// Node with memory pressure
@@ -299,13 +278,13 @@ func TestHandleNode_MemoryPressure(t *testing.T) {
 func TestHandleNode_DiskPressure(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	cfg := Config{
 		Clientset: clientset,
-		Emitter:   emitter,
 	}
 
-	observer, err := NewObserver("test-observer", cfg)
+	observer, err := New(cfg, deps)
 	require.NoError(t, err)
 
 	// Node with disk pressure
@@ -337,13 +316,13 @@ func TestHandleNode_DiskPressure(t *testing.T) {
 func TestHandleNode_PIDPressure(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	cfg := Config{
 		Clientset: clientset,
-		Emitter:   emitter,
 	}
 
-	observer, err := NewObserver("test-observer", cfg)
+	observer, err := New(cfg, deps)
 	require.NoError(t, err)
 
 	// Node with PID pressure
@@ -377,13 +356,13 @@ func TestHandleNode_PIDPressure(t *testing.T) {
 func TestCreateNodeEvent_IncludesResources(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	cfg := Config{
 		Clientset: clientset,
-		Emitter:   emitter,
 	}
 
-	observer, err := NewObserver("test-observer", cfg)
+	observer, err := New(cfg, deps)
 	require.NoError(t, err)
 
 	// Node with resource capacity

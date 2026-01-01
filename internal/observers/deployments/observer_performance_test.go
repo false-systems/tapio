@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -53,14 +54,14 @@ func BenchmarkCreateDomainEvent(b *testing.B) {
 func BenchmarkHandleAdd(b *testing.B) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -76,14 +77,14 @@ func BenchmarkHandleAdd(b *testing.B) {
 func BenchmarkHandleUpdate(b *testing.B) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -100,14 +101,14 @@ func BenchmarkHandleUpdate(b *testing.B) {
 func BenchmarkHandleDelete(b *testing.B) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -124,14 +125,14 @@ func BenchmarkHandleDelete(b *testing.B) {
 func BenchmarkFullEventPipeline(b *testing.B) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	_, err := NewDeploymentsObserver("deployments", config)
+	_, err := New(config, deps)
 	if err != nil {
 		b.Fatal(err)
 	}

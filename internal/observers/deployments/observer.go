@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -23,9 +23,6 @@ type Config struct {
 
 	// Namespace to watch (empty = all namespaces)
 	Namespace string
-
-	// Intelligence service for event emission
-	Emitter intelligence.Service
 }
 
 // Validate checks config is valid
@@ -38,10 +35,11 @@ func (c *Config) Validate() error {
 
 // DeploymentsObserver monitors Kubernetes deployments using informers
 type DeploymentsObserver struct {
-	*base.BaseObserver
+	name     string
+	deps     *base.Deps
+	logger   zerolog.Logger
 	config   Config
 	informer cache.SharedIndexInformer
-	emitter  intelligence.Service
 
 	// Deployment-specific Prometheus metrics
 	deploymentUpdates *prometheus.Counter
@@ -50,35 +48,27 @@ type DeploymentsObserver struct {
 	imageUpdates      *prometheus.Counter
 }
 
-// NewDeploymentsObserver creates a new deployments observer
-func NewDeploymentsObserver(name string, config Config) (*DeploymentsObserver, error) {
-	// Validate config
+// New creates a deployments observer with dependency injection.
+func New(config Config, deps *base.Deps) (*DeploymentsObserver, error) {
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Create base observer
-	baseObs, err := base.NewBaseObserver(name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create base observer: %w", err)
-	}
-
 	obs := &DeploymentsObserver{
-		BaseObserver: baseObs,
-		config:       config,
-		emitter:      config.Emitter,
+		name:   "deployments",
+		deps:   deps,
+		logger: base.NewLogger("deployments"),
+		config: config,
 	}
 
 	// Create deployment-specific Prometheus metrics
-	err = base.NewPromMetricBuilder(base.GlobalRegistry, name).
-		Counter(&obs.deploymentUpdates, "deployment_updates_total", "Deployment update events").
-		Counter(&obs.replicaChanges, "replica_changes_total", "Replica count changes").
-		Counter(&obs.conditionChanges, "condition_changes_total", "Deployment condition changes").
-		Counter(&obs.imageUpdates, "image_updates_total", "Container image updates").
-		Build()
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create metrics: %w", err)
+	builder := base.NewPromMetricBuilder(base.GlobalRegistry, "deployments")
+	builder.Counter(&obs.deploymentUpdates, "deployment_updates_total", "Deployment update events")
+	builder.Counter(&obs.replicaChanges, "replica_changes_total", "Replica count changes")
+	builder.Counter(&obs.conditionChanges, "condition_changes_total", "Deployment condition changes")
+	builder.Counter(&obs.imageUpdates, "image_updates_total", "Container image updates")
+	if err := builder.Build(); err != nil {
+		obs.logger.Warn().Err(err).Msg("failed to register deployment metrics")
 	}
 
 	// Create informer for deployments
@@ -102,33 +92,12 @@ func NewDeploymentsObserver(name string, config Config) (*DeploymentsObserver, e
 	return obs, nil
 }
 
-// Start initiates the deployments observer
-func (o *DeploymentsObserver) Start(ctx context.Context) error {
-	logger := o.Logger(ctx)
-
-	// Add informer to pipeline
-	o.AddStage(func(ctx context.Context) error {
-		logger.Info().Msg("Starting deployments informer")
-		o.informer.Run(ctx.Done())
-		return ctx.Err()
-	})
-
-	// Start base observer (runs pipeline via errgroup)
-	if err := o.BaseObserver.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start base observer: %w", err)
-	}
-
-	logger.Info().Msg("Deployments observer started")
+// Run executes the observer until context is cancelled.
+func (o *DeploymentsObserver) Run(ctx context.Context) error {
+	o.logger.Info().Msg("starting deployments informer")
+	o.informer.Run(ctx.Done())
+	o.logger.Info().Msg("deployments observer stopped")
 	return nil
-}
-
-// Stop gracefully stops the deployments observer
-func (o *DeploymentsObserver) Stop() error {
-	ctx := context.Background()
-	logger := o.Logger(ctx)
-	logger.Info().Msg("Stopping deployments observer")
-
-	return o.BaseObserver.Stop()
 }
 
 // handleAdd processes deployment creation
@@ -194,20 +163,17 @@ func (o *DeploymentsObserver) handleDelete(obj interface{}) {
 
 // emitEvent emits a domain event
 func (o *DeploymentsObserver) emitEvent(ctx context.Context, evt *domain.ObserverEvent) {
-	if o.emitter == nil {
-		return
-	}
-
 	if evt.Source == "" {
 		evt.Source = "deployments"
 	}
 
-	o.RecordEvent(ctx)
+	o.deps.Metrics.RecordEvent(o.name, evt.Type)
 
-	if err := o.emitter.Emit(ctx, evt); err != nil {
-		logger := o.Logger(ctx)
-		logger.Error().Err(err).Msg("Failed to emit event")
-		o.RecordError(ctx, evt)
+	if o.deps.Emitter != nil {
+		if err := o.deps.Emitter.Emit(ctx, evt); err != nil {
+			o.logger.Error().Err(err).Msg("failed to emit event")
+			o.deps.Metrics.RecordError(o.name, evt.Type, "emit_failed")
+		}
 	}
 }
 

@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -20,7 +20,6 @@ import (
 // Config for node observer
 type Config struct {
 	Clientset kubernetes.Interface
-	Emitter   intelligence.Service
 }
 
 // Validate checks config is valid
@@ -28,31 +27,23 @@ func (c *Config) Validate() error {
 	if c.Clientset == nil {
 		return fmt.Errorf("clientset is required")
 	}
-	if c.Emitter == nil {
-		return fmt.Errorf("emitter is required")
-	}
 	return nil
 }
 
 // Observer watches Kubernetes nodes for health and resource changes
 type Observer struct {
-	*base.BaseObserver
+	name     string
+	deps     *base.Deps
+	logger   zerolog.Logger
 	config   Config
 	informer cache.SharedIndexInformer
-	emitter  intelligence.Service
 }
 
-// NewObserver creates a new node observer
-func NewObserver(name string, cfg Config) (*Observer, error) {
+// New creates a node observer with dependency injection.
+func New(cfg Config, deps *base.Deps) (*Observer, error) {
 	// Validate config
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
-	}
-
-	// Create base observer
-	baseObs, err := base.NewBaseObserver(name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create base observer: %w", err)
 	}
 
 	// Create informer factory (cluster-wide)
@@ -60,10 +51,11 @@ func NewObserver(name string, cfg Config) (*Observer, error) {
 	informer := informerFactory.Core().V1().Nodes().Informer()
 
 	observer := &Observer{
-		BaseObserver: baseObs,
-		config:       cfg,
-		informer:     informer,
-		emitter:      cfg.Emitter,
+		name:     "node",
+		deps:     deps,
+		logger:   base.NewLogger("node"),
+		config:   cfg,
+		informer: informer,
 	}
 
 	// Register event handlers
@@ -97,28 +89,26 @@ func NewObserver(name string, cfg Config) (*Observer, error) {
 	return observer, nil
 }
 
-// Start starts the node observer
-func (o *Observer) Start(ctx context.Context) error {
-	logger := o.Logger(ctx)
+// Run starts the node observer and blocks until context is cancelled.
+func (o *Observer) Run(ctx context.Context) error {
+	o.logger.Info().Msg("starting node observer")
 
 	// Start informer in background
 	go o.informer.Run(ctx.Done())
 
 	// Wait for cache sync
-	logger.Info().Msg("Waiting for node informer cache sync")
+	o.logger.Info().Msg("waiting for node informer cache sync")
 	if !cache.WaitForCacheSync(ctx.Done(), o.informer.HasSynced) {
 		return fmt.Errorf("failed to sync informer cache")
 	}
 
-	logger.Info().Msg("Node informer cache synced")
+	o.logger.Info().Msg("node informer cache synced")
 
-	// Start base observer (for lifecycle management)
-	return o.BaseObserver.Start(ctx)
-}
+	// Block until context is cancelled
+	<-ctx.Done()
 
-// Stop stops the node observer
-func (o *Observer) Stop() error {
-	return o.BaseObserver.Stop()
+	o.logger.Info().Msg("node observer stopped")
+	return nil
 }
 
 // handleNode processes node changes and emits events
@@ -126,8 +116,6 @@ func (o *Observer) handleNode(ctx context.Context, oldNode, newNode *corev1.Node
 	if newNode == nil {
 		return
 	}
-
-	logger := o.Logger(ctx)
 
 	// Check for condition changes
 	for _, condition := range newNode.Status.Conditions {
@@ -137,19 +125,21 @@ func (o *Observer) handleNode(ctx context.Context, oldNode, newNode *corev1.Node
 		if conditionChanged(oldCondition, &condition) {
 			event := o.createNodeEvent(newNode, &condition)
 			if event != nil {
-				if err := o.emitter.Emit(ctx, event); err != nil {
-					o.RecordError(ctx, event)
-					logger.Error().Err(err).
-						Str("node", newNode.Name).
-						Str("condition", string(condition.Type)).
-						Msg("Failed to emit node event")
-				} else {
-					o.RecordEvent(ctx)
-					logger.Debug().
-						Str("node", newNode.Name).
-						Str("condition", string(condition.Type)).
-						Str("status", string(condition.Status)).
-						Msg("Emitted node event")
+				o.deps.Metrics.RecordEvent(o.name, event.Type)
+				if o.deps.Emitter != nil {
+					if err := o.deps.Emitter.Emit(ctx, event); err != nil {
+						o.deps.Metrics.RecordError(o.name, event.Type, "emit_failed")
+						o.logger.Error().Err(err).
+							Str("node", newNode.Name).
+							Str("condition", string(condition.Type)).
+							Msg("failed to emit node event")
+					} else {
+						o.logger.Debug().
+							Str("node", newNode.Name).
+							Str("condition", string(condition.Type)).
+							Str("status", string(condition.Status)).
+							Msg("emitted node event")
+					}
 				}
 			}
 		}
@@ -215,7 +205,7 @@ func (o *Observer) createNodeEvent(node *corev1.Node, condition *corev1.NodeCond
 		ID:        uuid.NewString(),
 		Type:      "node",
 		Subtype:   subtype,
-		Source:    o.Name(),
+		Source:    o.name,
 		Timestamp: time.Now(),
 		NodeData: &domain.NodeEventData{
 			NodeName:  node.Name,

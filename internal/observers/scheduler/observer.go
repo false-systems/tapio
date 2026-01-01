@@ -7,9 +7,9 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -25,19 +25,17 @@ type Config struct {
 	// NATS KV storage for scheduler metadata
 	NATSConn *nats.Conn // NATS connection for storing metadata
 	KVBucket string     // KV bucket name for metadata storage
-
-	// Intelligence service for event emission
-	Emitter intelligence.Service
 }
 
 // SchedulerObserver monitors Kubernetes scheduler using Prometheus + Events API
 type SchedulerObserver struct {
-	*base.BaseObserver
+	name          string
+	deps          *base.Deps
+	logger        zerolog.Logger
 	config        Config
 	promScraper   *PrometheusScraper
-	eventsWatcher *EventsWatcher       // K8s Events API watcher
-	kv            nats.KeyValue        // NATS KV for metadata storage
-	emitter       intelligence.Service // Intelligence service for events
+	eventsWatcher *EventsWatcher // K8s Events API watcher
+	kv            nats.KeyValue  // NATS KV for metadata storage
 
 	// Scheduler-specific Prometheus metrics
 	schedulingAttemptsTotal *prometheus.Counter   // scheduling_attempts_total
@@ -47,14 +45,8 @@ type SchedulerObserver struct {
 	pluginDurationMs        *prometheus.Histogram // plugin_duration_ms
 }
 
-// NewSchedulerObserver creates a new scheduler observer with BaseObserver
-func NewSchedulerObserver(name string, config Config) (*SchedulerObserver, error) {
-	// Create base observer with event publisher
-	baseObs, err := base.NewBaseObserver(name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create base observer: %w", err)
-	}
-
+// New creates a scheduler observer with dependency injection.
+func New(config Config, deps *base.Deps) (*SchedulerObserver, error) {
 	// Create Prometheus scraper
 	promConfig := PrometheusConfig{
 		SchedulerMetricsURL: config.SchedulerMetricsURL,
@@ -83,24 +75,23 @@ func NewSchedulerObserver(name string, config Config) (*SchedulerObserver, error
 	}
 
 	obs := &SchedulerObserver{
-		BaseObserver: baseObs,
-		config:       config,
-		promScraper:  promScraper,
-		kv:           kv,
-		emitter:      config.Emitter,
+		name:        "scheduler",
+		deps:        deps,
+		logger:      base.NewLogger("scheduler"),
+		config:      config,
+		promScraper: promScraper,
+		kv:          kv,
 	}
 
 	// Create scheduler-specific Prometheus metrics using fluent API
-	err = base.NewPromMetricBuilder(base.GlobalRegistry, name).
-		Counter(&obs.schedulingAttemptsTotal, "scheduling_attempts_total", "Pod scheduling attempts").
-		Counter(&obs.schedulingErrorsTotal, "scheduling_errors_total", "Pod scheduling errors").
-		Gauge(&obs.pendingPodsGauge, "pending_pods_current", "Current number of pending pods waiting to be scheduled").
-		Counter(&obs.preemptionEventsTotal, "preemption_events_total", "Pod preemption events").
-		Histogram(&obs.pluginDurationMs, "plugin_duration_ms", "Scheduler plugin execution duration in milliseconds", prometheus.DefBuckets).
-		Build()
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create metrics: %w", err)
+	builder := base.NewPromMetricBuilder(base.GlobalRegistry, "scheduler")
+	builder.Counter(&obs.schedulingAttemptsTotal, "scheduling_attempts_total", "Pod scheduling attempts")
+	builder.Counter(&obs.schedulingErrorsTotal, "scheduling_errors_total", "Pod scheduling errors")
+	builder.Gauge(&obs.pendingPodsGauge, "pending_pods_current", "Current number of pending pods waiting to be scheduled")
+	builder.Counter(&obs.preemptionEventsTotal, "preemption_events_total", "Pod preemption events")
+	builder.Histogram(&obs.pluginDurationMs, "plugin_duration_ms", "Scheduler plugin execution duration in milliseconds", prometheus.DefBuckets)
+	if err := builder.Build(); err != nil {
+		obs.logger.Warn().Err(err).Msg("failed to register scheduler metrics")
 	}
 
 	// Create Events API watcher if K8s client provided
@@ -111,49 +102,38 @@ func NewSchedulerObserver(name string, config Config) (*SchedulerObserver, error
 	return obs, nil
 }
 
-// Start initiates the scheduler observer
-func (o *SchedulerObserver) Start(ctx context.Context) error {
-	logger := o.Logger(ctx)
+// Run executes the observer until context is cancelled.
+func (o *SchedulerObserver) Run(ctx context.Context) error {
+	o.logger.Info().Msg("starting scheduler observer")
 
-	// Add Events API watcher to pipeline if configured
+	// Run Events API watcher if configured
 	if o.eventsWatcher != nil {
-		o.AddStage(func(ctx context.Context) error {
-			logger.Info().Msg("Starting Events API watcher")
-			return o.eventsWatcher.Run(ctx)
-		})
+		o.logger.Info().Msg("starting Events API watcher")
+		if err := o.eventsWatcher.Run(ctx); err != nil {
+			return err
+		}
 	}
 
-	// Start base observer (runs pipeline via errgroup)
-	if err := o.BaseObserver.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start base observer: %w", err)
-	}
-
-	logger.Info().Msg("Scheduler observer started")
-
+	// Block until context cancelled
+	<-ctx.Done()
+	o.logger.Info().Msg("scheduler observer stopped")
 	return nil
-}
-
-// Stop gracefully stops the scheduler observer
-func (o *SchedulerObserver) Stop() error {
-	ctx := context.Background()
-	logger := o.Logger(ctx)
-	logger.Info().Msg("Stopping scheduler observer")
-
-	// Stop base observer (cancels context, all pipeline stages stop)
-	return o.BaseObserver.Stop()
 }
 
 // emitDomainEvent emits a domain event (exposed for EventsWatcher)
 func (o *SchedulerObserver) emitDomainEvent(ctx context.Context, evt *domain.ObserverEvent) error {
-	if o.emitter == nil {
-		return nil
-	}
-
 	if evt.Source == "" {
 		evt.Source = "scheduler"
 	}
 
-	o.RecordEvent(ctx)
+	o.deps.Metrics.RecordEvent(o.name, evt.Type)
 
-	return o.emitter.Emit(ctx, evt)
+	if o.deps.Emitter != nil {
+		if err := o.deps.Emitter.Emit(ctx, evt); err != nil {
+			o.logger.Error().Err(err).Msg("failed to emit event")
+			o.deps.Metrics.RecordError(o.name, evt.Type, "emit_failed")
+			return err
+		}
+	}
+	return nil
 }
