@@ -2,10 +2,8 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/yairfalse/tapio/internal/base"
@@ -21,10 +19,6 @@ type Config struct {
 
 	// K8s Events API watcher config
 	K8sClientset kubernetes.Interface // K8s client for Events API
-
-	// NATS KV storage for scheduler metadata
-	NATSConn *nats.Conn // NATS connection for storing metadata
-	KVBucket string     // KV bucket name for metadata storage
 }
 
 // SchedulerObserver monitors Kubernetes scheduler using Prometheus + Events API
@@ -35,7 +29,6 @@ type SchedulerObserver struct {
 	config        Config
 	promScraper   *PrometheusScraper
 	eventsWatcher *EventsWatcher // K8s Events API watcher
-	kv            nats.KeyValue  // NATS KV for metadata storage
 
 	// Scheduler-specific Prometheus metrics
 	schedulingAttemptsTotal *prometheus.Counter   // scheduling_attempts_total
@@ -54,33 +47,12 @@ func New(config Config, deps *base.Deps) (*SchedulerObserver, error) {
 	}
 	promScraper := NewPrometheusScraper(promConfig)
 
-	// Get or create NATS KV bucket for metadata storage
-	var kv nats.KeyValue
-	if config.NATSConn != nil && config.KVBucket != "" {
-		js, err := config.NATSConn.JetStream()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get JetStream context: %w", err)
-		}
-
-		kv, err = js.KeyValue(config.KVBucket)
-		if err != nil {
-			// Bucket doesn't exist, create it
-			kv, err = js.CreateKeyValue(&nats.KeyValueConfig{
-				Bucket: config.KVBucket,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to get/create KV bucket %s: %w", config.KVBucket, err)
-			}
-		}
-	}
-
 	obs := &SchedulerObserver{
 		name:        "scheduler",
 		deps:        deps,
 		logger:      base.NewLogger("scheduler"),
 		config:      config,
 		promScraper: promScraper,
-		kv:          kv,
 	}
 
 	// Create scheduler-specific Prometheus metrics using fluent API
