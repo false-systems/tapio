@@ -5,7 +5,7 @@ go 1.24.0
 require (
 	github.com/cilium/ebpf v0.20.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/nats-io/nats.go v1.47.0
+	github.com/nats-io/nats.go v1.48.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
