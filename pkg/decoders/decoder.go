@@ -26,7 +26,6 @@ type Set struct {
 }
 
 // NewSet creates a Set with basic decoders
-// K8s decoders will be registered separately (need NATS KV dependency)
 func NewSet(skipCacheSize int) (*Set, error) {
 	s := &Set{
 		decoders: map[string]DecoderFunc{
