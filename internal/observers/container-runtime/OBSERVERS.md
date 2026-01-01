@@ -26,7 +26,7 @@ This package contains **two complementary container observers**, each solving di
 
 **Purpose**: Runtime forensics and kernel-level container monitoring
 
-**Constructor**: `NewRuntimeObserver(name string) *RuntimeObserver`
+**Constructor**: `New(cfg Config, deps *base.Deps) (*RuntimeObserver, error)`
 
 **Capabilities**:
 - **Kernel-level monitoring** - eBPF tracepoints capture container exits at the source
@@ -47,10 +47,10 @@ This package contains **two complementary container observers**, each solving di
 
 **Example**:
 ```go
-observer := NewRuntimeObserver("container-forensics")
-err := observer.Start(ctx, "/path/to/container_monitor.o")
-// Start Run() goroutine to process eBPF events
-go observer.Run(ctx)
+cfg := Config{BPFPath: "/path/to/container_monitor.o"}
+observer, err := New(cfg, deps)
+// Run blocks until context is cancelled
+err = observer.Run(ctx)
 ```
 
 **Event Structure** (eBPF):
@@ -69,7 +69,7 @@ domain.ContainerEventData{
 
 **Purpose**: Cluster-level container monitoring via K8s API
 
-**Constructor**: `NewAPIObserver(name string, cfg APIObserverConfig) (*APIObserver, error)`
+**Constructor**: `New(cfg Config, deps *base.Deps) (*APIObserver, error)`
 
 **Capabilities**:
 - **K8s API integration** - Uses Informers to watch Pod updates
@@ -91,14 +91,13 @@ domain.ContainerEventData{
 
 **Example**:
 ```go
-cfg := APIObserverConfig{
+cfg := Config{
     Clientset: k8sClient,
     Namespace: "production",  // or "" for all namespaces
-    Emitter:   natsEmitter,
 }
-observer, err := NewAPIObserver("container-k8s", cfg)
-err = observer.Start(ctx)
-// Informer runs in background
+observer, err := New(cfg, deps)
+// Run blocks until context is cancelled
+err = observer.Run(ctx)
 ```
 
 **Event Structure** (K8s):
