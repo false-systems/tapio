@@ -67,8 +67,9 @@ func New(config Config, deps *base.Deps) (*DeploymentsObserver, error) {
 	builder.Counter(&obs.replicaChanges, "replica_changes_total", "Replica count changes")
 	builder.Counter(&obs.conditionChanges, "condition_changes_total", "Deployment condition changes")
 	builder.Counter(&obs.imageUpdates, "image_updates_total", "Container image updates")
-	//nolint:errcheck // metrics registration errors are non-fatal
-	builder.Build()
+	if err := builder.Build(); err != nil {
+		obs.logger.Warn().Err(err).Msg("failed to register deployment metrics")
+	}
 
 	// Create informer for deployments
 	factory := informers.NewSharedInformerFactoryWithOptions(

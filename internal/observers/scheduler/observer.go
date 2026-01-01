@@ -90,8 +90,9 @@ func New(config Config, deps *base.Deps) (*SchedulerObserver, error) {
 	builder.Gauge(&obs.pendingPodsGauge, "pending_pods_current", "Current number of pending pods waiting to be scheduled")
 	builder.Counter(&obs.preemptionEventsTotal, "preemption_events_total", "Pod preemption events")
 	builder.Histogram(&obs.pluginDurationMs, "plugin_duration_ms", "Scheduler plugin execution duration in milliseconds", prometheus.DefBuckets)
-	//nolint:errcheck // metrics registration errors are non-fatal
-	builder.Build()
+	if err := builder.Build(); err != nil {
+		obs.logger.Warn().Err(err).Msg("failed to register scheduler metrics")
+	}
 
 	// Create Events API watcher if K8s client provided
 	if config.K8sClientset != nil {
