@@ -71,15 +71,13 @@ func TestOnDelete_SkipsEvents(t *testing.T) {
 
 // TestOnUpdate_InvalidOldType verifies type assertion error handling
 func TestOnUpdate_InvalidOldType(t *testing.T) {
-	baseObs, err := base.NewBaseObserver("test-invalid-old")
+	deps := base.NewDeps(nil, nil)
+	config := Config{SchedulerMetricsURL: "http://test:10251/metrics", ScrapeInterval: 30 * time.Second}
+	obs, err := New(config, deps)
 	require.NoError(t, err)
 
 	handler := &eventsEventHandler{
-		watcher: &EventsWatcher{
-			observer: &SchedulerObserver{
-				BaseObserver: baseObs,
-			},
-		},
+		watcher: &EventsWatcher{observer: obs},
 	}
 
 	// Pass wrong type - should log error and return
@@ -89,15 +87,13 @@ func TestOnUpdate_InvalidOldType(t *testing.T) {
 
 // TestOnUpdate_InvalidNewType verifies type assertion error handling
 func TestOnUpdate_InvalidNewType(t *testing.T) {
-	baseObs, err := base.NewBaseObserver("test-invalid-new")
+	deps := base.NewDeps(nil, nil)
+	config := Config{SchedulerMetricsURL: "http://test:10251/metrics", ScrapeInterval: 30 * time.Second}
+	obs, err := New(config, deps)
 	require.NoError(t, err)
 
 	handler := &eventsEventHandler{
-		watcher: &EventsWatcher{
-			observer: &SchedulerObserver{
-				BaseObserver: baseObs,
-			},
-		},
+		watcher: &EventsWatcher{observer: obs},
 	}
 
 	// Pass wrong type for new object - should log error and return

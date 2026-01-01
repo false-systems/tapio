@@ -76,9 +76,7 @@ func (h *eventsEventHandler) OnAdd(obj interface{}, isInInitialList bool) {
 func (h *eventsEventHandler) OnUpdate(oldObj, newObj interface{}) {
 	oldEvent, ok := oldObj.(*corev1.Event)
 	if !ok {
-		ctx := context.Background()
-		logger := h.watcher.observer.Logger(ctx)
-		logger.Error().
+		h.watcher.observer.logger.Error().
 			Str("handler", "OnUpdate").
 			Str("unexpected_type", fmt.Sprintf("%T", oldObj)).
 			Str("object", "old").
@@ -88,9 +86,7 @@ func (h *eventsEventHandler) OnUpdate(oldObj, newObj interface{}) {
 
 	newEvent, ok := newObj.(*corev1.Event)
 	if !ok {
-		ctx := context.Background()
-		logger := h.watcher.observer.Logger(ctx)
-		logger.Error().
+		h.watcher.observer.logger.Error().
 			Str("handler", "OnUpdate").
 			Str("unexpected_type", fmt.Sprintf("%T", newObj)).
 			Str("object", "new").
@@ -123,8 +119,6 @@ func (w *EventsWatcher) processEvent(event *corev1.Event) {
 	}
 
 	ctx := context.Background()
-	logger := w.observer.Logger(ctx)
-
 	failure := parseSchedulingFailure(event.Message)
 
 	observerEvent := &domain.ObserverEvent{
@@ -150,7 +144,7 @@ func (w *EventsWatcher) processEvent(event *corev1.Event) {
 	}
 
 	if err := w.observer.emitDomainEvent(ctx, observerEvent); err != nil {
-		logger.Error().
+		w.observer.logger.Error().
 			Err(err).
 			Str("pod", event.InvolvedObject.Name).
 			Str("namespace", event.InvolvedObject.Namespace).

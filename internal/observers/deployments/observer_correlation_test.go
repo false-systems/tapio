@@ -5,25 +5,24 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-// TDD: Metrics increment tests
+// TDD: Event emission tests
 
-func TestDeploymentsObserver_IncrementsMetricsOnUpdate(t *testing.T) {
+func TestDeploymentsObserver_EmitsEventOnUpdate(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-
-	// Create emitter that captures events
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	require.NoError(t, err)
 
 	// Simulate deployment update
@@ -31,22 +30,21 @@ func TestDeploymentsObserver_IncrementsMetricsOnUpdate(t *testing.T) {
 	new := createDeployment("app", 1, 1)
 	observer.handleUpdate(old, new)
 
-	// Verify metrics were incremented
-	stats := observer.Stats()
-	assert.Equal(t, int64(1), stats.EventsProcessed, "deploymentUpdates metric should increment")
+	// Verify event was emitted
+	require.Len(t, emitter.Events(), 1, "Should emit event for update")
 }
 
-func TestDeploymentsObserver_IncrementsReplicaChangeMetric(t *testing.T) {
+func TestDeploymentsObserver_EmitsReplicaChangeEvent(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	require.NoError(t, err)
 
 	// Simulate replica change
@@ -59,17 +57,17 @@ func TestDeploymentsObserver_IncrementsReplicaChangeMetric(t *testing.T) {
 	assert.Equal(t, "deployment_scaled", emitter.Events()[0].Type)
 }
 
-func TestDeploymentsObserver_IncrementsConditionChangeMetric(t *testing.T) {
+func TestDeploymentsObserver_EmitsConditionChangeEvent(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	require.NoError(t, err)
 
 	// Simulate condition change
@@ -82,17 +80,17 @@ func TestDeploymentsObserver_IncrementsConditionChangeMetric(t *testing.T) {
 	assert.Equal(t, "deployment_available", emitter.Events()[0].Type)
 }
 
-func TestDeploymentsObserver_IncrementsMetricsOnAdd(t *testing.T) {
+func TestDeploymentsObserver_EmitsEventOnAdd(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	require.NoError(t, err)
 
 	// Simulate deployment creation
@@ -104,17 +102,17 @@ func TestDeploymentsObserver_IncrementsMetricsOnAdd(t *testing.T) {
 	assert.Equal(t, "deployment_created", emitter.Events()[0].Type)
 }
 
-func TestDeploymentsObserver_IncrementsMetricsOnDelete(t *testing.T) {
+func TestDeploymentsObserver_EmitsEventOnDelete(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	require.NoError(t, err)
 
 	// Simulate deployment deletion
@@ -126,17 +124,17 @@ func TestDeploymentsObserver_IncrementsMetricsOnDelete(t *testing.T) {
 	assert.Equal(t, "deployment_deleted", emitter.Events()[0].Type)
 }
 
-func TestDeploymentsObserver_IncrementsImageUpdateMetric(t *testing.T) {
+func TestDeploymentsObserver_EmitsImageUpdateEvent(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	require.NoError(t, err)
 
 	// Simulate image change

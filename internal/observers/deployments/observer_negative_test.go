@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/intelligence"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -14,62 +15,57 @@ import (
 
 func TestDeploymentsObserver_HandlesNilEmitter(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, nil) // Nil emitter
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   nil, // Nil emitter should not crash
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	require.NoError(t, err)
 
 	// Simulate deployment creation with nil emitter
 	deploy := createDeployment("app", 3, 3)
 	observer.handleAdd(deploy)
 
-	// Should not crash, emitEvent handles nil emitter gracefully
-	stats := observer.Stats()
-	assert.Equal(t, int64(0), stats.EventsProcessed, "No events should be processed with nil emitter")
+	// Should not crash - emitEvent handles nil emitter gracefully
 }
 
 func TestDeploymentsObserver_HandlesEmitterError(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-
-	// Create emitter that fails
 	emitter := intelligence.NewMock()
 	emitter.SetEmitError(errors.New("emit failed"))
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	require.NoError(t, err)
 
 	// Simulate deployment creation
 	deploy := createDeployment("app", 3, 3)
 	observer.handleAdd(deploy)
 
-	// Should handle error gracefully
-	stats := observer.Stats()
-	assert.Equal(t, int64(1), stats.EventsProcessed, "Event should be recorded")
-	assert.Equal(t, int64(1), stats.ErrorsTotal, "Error should be recorded")
+	// Should handle error gracefully (logs but doesn't crash)
+	// Emitter received the event attempt even though it failed
+	assert.Len(t, emitter.Events(), 0, "Failed events should not be in mock")
 }
 
 func TestDeploymentsObserver_HandlesInvalidObjectType(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	require.NoError(t, err)
 
 	// Pass invalid object type (not *appsv1.Deployment)
@@ -82,14 +78,14 @@ func TestDeploymentsObserver_HandlesInvalidObjectType(t *testing.T) {
 func TestDeploymentsObserver_HandlesInvalidUpdateObjects(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	require.NoError(t, err)
 
 	// Pass invalid old object
@@ -105,14 +101,14 @@ func TestDeploymentsObserver_HandlesInvalidUpdateObjects(t *testing.T) {
 func TestDeploymentsObserver_HandlesInvalidDeleteObject(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewDeploymentsObserver("deployments", config)
+	observer, err := New(config, deps)
 	require.NoError(t, err)
 
 	// Pass invalid object type

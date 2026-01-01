@@ -6,14 +6,13 @@ import (
 	"context"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
@@ -373,76 +372,59 @@ func TestCreateDomainEvent_InitContainer(t *testing.T) {
 
 // TDD Cycle 6: Observer struct and constructor
 
-func TestNewAPIObserver_Success(t *testing.T) {
+func TestNew_Success(t *testing.T) {
 	// Create observer with valid config
 	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewAPIObserver("test-observer", config)
+	observer, err := New(config, deps)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, observer)
-	assert.Equal(t, "test-observer", observer.Name())
+	assert.Equal(t, "container-api", observer.name)
 	assert.Equal(t, "default", observer.config.Namespace)
 	assert.NotNil(t, observer.informer)
 }
 
-func TestNewAPIObserver_AllNamespaces(t *testing.T) {
+func TestNew_AllNamespaces(t *testing.T) {
 	// Empty namespace = watch all namespaces
 	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewAPIObserver("test-observer", config)
+	observer, err := New(config, deps)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, observer)
 	assert.Equal(t, "", observer.config.Namespace)
 }
 
-func TestNewAPIObserver_NilClientset(t *testing.T) {
+func TestNew_NilClientset(t *testing.T) {
 	// Nil clientset should return error
 	emitter := intelligence.NewMock()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: nil,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewAPIObserver("test-observer", config)
+	observer, err := New(config, deps)
 
 	assert.Error(t, err)
 	assert.Nil(t, observer)
 	assert.Contains(t, err.Error(), "clientset")
-}
-
-func TestNewAPIObserver_NilEmitter(t *testing.T) {
-	// Nil emitter should return error
-	clientset := fake.NewSimpleClientset()
-
-	config := Config{
-		Clientset: clientset,
-		Namespace: "default",
-		Emitter:   nil,
-	}
-
-	observer, err := NewAPIObserver("test-observer", config)
-
-	assert.Error(t, err)
-	assert.Nil(t, observer)
-	assert.Contains(t, err.Error(), "emitter")
 }
 
 // TDD Cycle 7: handleUpdate with event emission
@@ -451,14 +433,14 @@ func TestHandleUpdate_ContainerOOMKilled(t *testing.T) {
 	// Pod updated: container OOMKilled
 	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewAPIObserver("test", config)
+	observer, err := New(config, deps)
 	assert.NoError(t, err)
 
 	oldPod := createPodWithContainer("web-7d4b5", "default", "app", "Running", "", 0)
@@ -477,14 +459,14 @@ func TestHandleUpdate_NoChange(t *testing.T) {
 	// Pod updated but container state unchanged
 	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewAPIObserver("test", config)
+	observer, err := New(config, deps)
 	assert.NoError(t, err)
 
 	oldPod := createPodWithContainer("web-7d4b5", "default", "app", "Running", "", 0)
@@ -499,14 +481,14 @@ func TestHandleUpdate_MultipleContainers(t *testing.T) {
 	// Pod with 2 containers: 1 crashes, 1 OK
 	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewAPIObserver("test", config)
+	observer, err := New(config, deps)
 	assert.NoError(t, err)
 
 	oldPod := &corev1.Pod{
@@ -573,95 +555,52 @@ func createPodWithContainer(name, namespace, containerName, state, reason string
 	return pod
 }
 
-// TDD Cycle 8: Start/Stop lifecycle
+// TDD Cycle 8: Run lifecycle
 
-func TestStart_Success(t *testing.T) {
-	// Start observer successfully
+func TestRun_Success(t *testing.T) {
+	// Run observer successfully
 	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewAPIObserver("test", config)
+	observer, err := New(config, deps)
 	assert.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
 
-	err = observer.Start(ctx)
+	// Run in background
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- observer.Run(ctx)
+	}()
+
+	// Cancel context
+	cancel()
+
+	// Run should return without error
+	err = <-errCh
 	assert.NoError(t, err)
-
-	// Stop observer
-	err = observer.Stop()
-	assert.NoError(t, err)
-}
-
-func TestStop_WithoutStart(t *testing.T) {
-	// Calling Stop without Start returns error from BaseObserver
-	emitter := intelligence.NewMock()
-	clientset := fake.NewSimpleClientset()
-
-	config := Config{
-		Clientset: clientset,
-		Namespace: "default",
-		Emitter:   emitter,
-	}
-
-	observer, err := NewAPIObserver("test", config)
-	assert.NoError(t, err)
-
-	err = observer.Stop()
-	assert.Error(t, err) // BaseObserver returns error when not running
-	assert.Contains(t, err.Error(), "not running")
-}
-
-func TestIsHealthy(t *testing.T) {
-	emitter := intelligence.NewMock()
-	clientset := fake.NewSimpleClientset()
-
-	config := Config{
-		Clientset: clientset,
-		Namespace: "default",
-		Emitter:   emitter,
-	}
-
-	observer, err := NewAPIObserver("test", config)
-	assert.NoError(t, err)
-
-	// Before start: healthy (not started yet)
-	assert.True(t, observer.IsHealthy())
-
-	// After start: healthy
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	err = observer.Start(ctx)
-	require.NoError(t, err)
-	assert.True(t, observer.IsHealthy())
-
-	// After stop: not healthy
-	err = observer.Stop()
-	require.NoError(t, err)
-	assert.False(t, observer.IsHealthy())
 }
 
 // TDD Cycle 9: OTEL metrics
 
 func TestOTELMetrics_Created(t *testing.T) {
-	// Observer should create OTEL metrics without error
+	// Observer should create without error
 	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewAPIObserver("test", config)
+	observer, err := New(config, deps)
 	assert.NoError(t, err)
 	assert.NotNil(t, observer)
 
@@ -674,14 +613,14 @@ func TestOTELMetrics_EmitIncrementsCounter(t *testing.T) {
 	// When an event is emitted, metrics should be updated (no panic)
 	emitter := intelligence.NewMock()
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewAPIObserver("test", config)
+	observer, err := New(config, deps)
 	assert.NoError(t, err)
 
 	// Create pods with OOMKilled container
@@ -702,14 +641,14 @@ func TestOTELMetrics_ErrorIncrementsErrorCounter(t *testing.T) {
 	emitter := intelligence.NewMock()
 	emitter.SetEmitError(fmt.Errorf("emit failed"))
 	clientset := fake.NewSimpleClientset()
+	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
 		Clientset: clientset,
 		Namespace: "default",
-		Emitter:   emitter,
 	}
 
-	observer, err := NewAPIObserver("test", config)
+	observer, err := New(config, deps)
 	assert.NoError(t, err)
 
 	// Create pods with crashed container
