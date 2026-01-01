@@ -12,6 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// mockObserver is a test-only observer for readiness checks
+type mockObserver struct {
+	name    string
+	healthy bool
+}
+
+func (m *mockObserver) Start(_ context.Context) error { return nil }
+func (m *mockObserver) Stop() error                   { return nil }
+func (m *mockObserver) Name() string                  { return m.name }
+func (m *mockObserver) IsHealthy() bool               { return m.healthy }
+
 // waitForEndpoint polls an HTTP endpoint until it responds or timeout is reached
 func waitForEndpoint(url string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
@@ -85,13 +96,8 @@ func TestHealthEndpoint_AlwaysReturns200(t *testing.T) {
 // TestReadyEndpoint_AllObserversHealthy tests /ready when all observers are healthy
 func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
 	// Setup: Create mock healthy observers
-	obs1, err := NewBaseObserver("test-observer-1")
-	require.NoError(t, err)
-	obs1.running.Store(true) // Mark as running
-
-	obs2, err := NewBaseObserver("test-observer-2")
-	require.NoError(t, err)
-	obs2.running.Store(true)
+	obs1 := &mockObserver{name: "test-observer-1", healthy: true}
+	obs2 := &mockObserver{name: "test-observer-2", healthy: true}
 
 	observers := []Observer{obs1, obs2}
 
@@ -139,13 +145,8 @@ func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
 // TestReadyEndpoint_OneObserverUnhealthy tests /ready when one observer is unhealthy
 func TestReadyEndpoint_OneObserverUnhealthy(t *testing.T) {
 	// Setup: Create observers (one healthy, one unhealthy)
-	obs1, err := NewBaseObserver("test-observer-1")
-	require.NoError(t, err)
-	obs1.running.Store(true) // Healthy
-
-	obs2, err := NewBaseObserver("test-observer-2")
-	require.NoError(t, err)
-	obs2.running.Store(false) // Unhealthy
+	obs1 := &mockObserver{name: "test-observer-1", healthy: true}
+	obs2 := &mockObserver{name: "test-observer-2", healthy: false}
 
 	observers := []Observer{obs1, obs2}
 
