@@ -12,17 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockObserver is a test-only observer for readiness checks
-type mockObserver struct {
-	name    string
-	healthy bool
-}
-
-func (m *mockObserver) Start(_ context.Context) error { return nil }
-func (m *mockObserver) Stop() error                   { return nil }
-func (m *mockObserver) Name() string                  { return m.name }
-func (m *mockObserver) IsHealthy() bool               { return m.healthy }
-
 // waitForEndpoint polls an HTTP endpoint until it responds or timeout is reached
 func waitForEndpoint(url string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
@@ -52,7 +41,6 @@ func getFreePort(t *testing.T) int {
 
 // TestHealthEndpoint_AlwaysReturns200 tests that /health always returns 200 OK
 func TestHealthEndpoint_AlwaysReturns200(t *testing.T) {
-	// Setup: Start telemetry with Prometheus enabled
 	port := getFreePort(t)
 	config := &TelemetryConfig{
 		OTLPEndpoint:      "localhost:4317",
@@ -68,7 +56,7 @@ func TestHealthEndpoint_AlwaysReturns200(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	shutdown, err := InitTelemetry(ctx, config, nil) // No observers
+	shutdown, err := InitTelemetry(ctx, config)
 	require.NoError(t, err)
 	defer func() {
 		if err := shutdown.Shutdown(ctx); err != nil {
@@ -76,11 +64,9 @@ func TestHealthEndpoint_AlwaysReturns200(t *testing.T) {
 		}
 	}()
 
-	// Wait for HTTP server to start (poll with timeout)
 	healthURL := fmt.Sprintf("http://localhost:%d/health", port)
 	require.NoError(t, waitForEndpoint(healthURL, 2*time.Second))
 
-	// Test: GET /health
 	resp, err := http.Get(healthURL)
 	require.NoError(t, err)
 	defer func() {
@@ -89,19 +75,11 @@ func TestHealthEndpoint_AlwaysReturns200(t *testing.T) {
 		}
 	}()
 
-	// Assert: Always returns 200 OK
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "/health should always return 200")
 }
 
-// TestReadyEndpoint_AllObserversHealthy tests /ready when all observers are healthy
-func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
-	// Setup: Create mock healthy observers
-	obs1 := &mockObserver{name: "test-observer-1", healthy: true}
-	obs2 := &mockObserver{name: "test-observer-2", healthy: true}
-
-	observers := []Observer{obs1, obs2}
-
-	// Setup: Start telemetry with observers
+// TestReadyEndpoint_AlwaysReturns200 tests that /ready always returns 200 OK
+func TestReadyEndpoint_AlwaysReturns200(t *testing.T) {
 	port := getFreePort(t)
 	config := &TelemetryConfig{
 		OTLPEndpoint:      "localhost:4317",
@@ -117,7 +95,7 @@ func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	shutdown, err := InitTelemetry(ctx, config, observers)
+	shutdown, err := InitTelemetry(ctx, config)
 	require.NoError(t, err)
 	defer func() {
 		if err := shutdown.Shutdown(ctx); err != nil {
@@ -125,11 +103,9 @@ func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
 		}
 	}()
 
-	// Wait for HTTP server to start (poll with timeout)
 	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
 	require.NoError(t, waitForEndpoint(readyURL, 2*time.Second))
 
-	// Test: GET /ready
 	resp, err := http.Get(readyURL)
 	require.NoError(t, err)
 	defer func() {
@@ -138,98 +114,5 @@ func TestReadyEndpoint_AllObserversHealthy(t *testing.T) {
 		}
 	}()
 
-	// Assert: Returns 200 when all observers healthy
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "/ready should return 200 when all observers healthy")
-}
-
-// TestReadyEndpoint_OneObserverUnhealthy tests /ready when one observer is unhealthy
-func TestReadyEndpoint_OneObserverUnhealthy(t *testing.T) {
-	// Setup: Create observers (one healthy, one unhealthy)
-	obs1 := &mockObserver{name: "test-observer-1", healthy: true}
-	obs2 := &mockObserver{name: "test-observer-2", healthy: false}
-
-	observers := []Observer{obs1, obs2}
-
-	// Setup: Start telemetry with observers
-	port := getFreePort(t)
-	config := &TelemetryConfig{
-		OTLPEndpoint:      "localhost:4317",
-		Insecure:          true,
-		PrometheusEnabled: true,
-		PrometheusPort:    port,
-		ServiceName:       "test-service",
-		Version:           "test",
-		TraceSampleRate:   0.1,
-		MetricInterval:    10 * time.Second,
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	shutdown, err := InitTelemetry(ctx, config, observers)
-	require.NoError(t, err)
-	defer func() {
-		if err := shutdown.Shutdown(ctx); err != nil {
-			t.Logf("telemetry shutdown error: %v", err)
-		}
-	}()
-
-	// Wait for HTTP server to start (poll with timeout)
-	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
-	require.NoError(t, waitForEndpoint(readyURL, 2*time.Second))
-
-	// Test: GET /ready
-	resp, err := http.Get(readyURL)
-	require.NoError(t, err)
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			t.Logf("failed to close response body: %v", err)
-		}
-	}()
-
-	// Assert: Returns 503 when any observer unhealthy
-	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "/ready should return 503 when any observer unhealthy")
-}
-
-// TestReadyEndpoint_NoObservers tests /ready when no observers provided
-func TestReadyEndpoint_NoObservers(t *testing.T) {
-	// Setup: Start telemetry without observers
-	port := getFreePort(t)
-	config := &TelemetryConfig{
-		OTLPEndpoint:      "localhost:4317",
-		Insecure:          true,
-		PrometheusEnabled: true,
-		PrometheusPort:    port,
-		ServiceName:       "test-service",
-		Version:           "test",
-		TraceSampleRate:   0.1,
-		MetricInterval:    10 * time.Second,
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	shutdown, err := InitTelemetry(ctx, config, nil)
-	require.NoError(t, err)
-	defer func() {
-		if err := shutdown.Shutdown(ctx); err != nil {
-			t.Logf("telemetry shutdown error: %v", err)
-		}
-	}()
-
-	// Wait for HTTP server to start (poll with timeout)
-	readyURL := fmt.Sprintf("http://localhost:%d/ready", port)
-	require.NoError(t, waitForEndpoint(readyURL, 2*time.Second))
-
-	// Test: GET /ready
-	resp, err := http.Get(readyURL)
-	require.NoError(t, err)
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			t.Logf("failed to close response body: %v", err)
-		}
-	}()
-
-	// Assert: Returns 200 when no observers (nothing to check)
-	assert.Equal(t, http.StatusOK, resp.StatusCode, "/ready should return 200 when no observers")
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "/ready should always return 200")
 }
