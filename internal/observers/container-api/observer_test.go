@@ -375,7 +375,7 @@ func TestCreateDomainEvent_InitContainer(t *testing.T) {
 func TestNew_Success(t *testing.T) {
 	// Create observer with valid config
 	emitter := intelligence.NewMock()
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
@@ -395,7 +395,7 @@ func TestNew_Success(t *testing.T) {
 func TestNew_AllNamespaces(t *testing.T) {
 	// Empty namespace = watch all namespaces
 	emitter := intelligence.NewMock()
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
@@ -432,7 +432,7 @@ func TestNew_NilClientset(t *testing.T) {
 func TestHandleUpdate_ContainerOOMKilled(t *testing.T) {
 	// Pod updated: container OOMKilled
 	emitter := intelligence.NewMock()
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
@@ -458,7 +458,7 @@ func TestHandleUpdate_ContainerOOMKilled(t *testing.T) {
 func TestHandleUpdate_NoChange(t *testing.T) {
 	// Pod updated but container state unchanged
 	emitter := intelligence.NewMock()
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
@@ -480,7 +480,7 @@ func TestHandleUpdate_NoChange(t *testing.T) {
 func TestHandleUpdate_MultipleContainers(t *testing.T) {
 	// Pod with 2 containers: 1 crashes, 1 OK
 	emitter := intelligence.NewMock()
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
@@ -560,7 +560,7 @@ func createPodWithContainer(name, namespace, containerName, state, reason string
 func TestRun_Success(t *testing.T) {
 	// Run observer successfully
 	emitter := intelligence.NewMock()
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
@@ -592,7 +592,7 @@ func TestRun_Success(t *testing.T) {
 func TestOTELMetrics_Created(t *testing.T) {
 	// Observer should create without error
 	emitter := intelligence.NewMock()
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
@@ -612,7 +612,7 @@ func TestOTELMetrics_Created(t *testing.T) {
 func TestOTELMetrics_EmitIncrementsCounter(t *testing.T) {
 	// When an event is emitted, metrics should be updated (no panic)
 	emitter := intelligence.NewMock()
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
@@ -640,7 +640,7 @@ func TestOTELMetrics_ErrorIncrementsErrorCounter(t *testing.T) {
 	// When emit fails, error counter should be incremented (no panic)
 	emitter := intelligence.NewMock()
 	emitter.SetEmitError(fmt.Errorf("emit failed"))
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 	deps := base.NewDeps(nil, emitter)
 
 	config := Config{
