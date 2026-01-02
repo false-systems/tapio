@@ -1,6 +1,12 @@
 package k8scontext
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
+
+// DefaultTombstoneTTL is the default TTL for deleted pods.
+const DefaultTombstoneTTL = 30 * time.Second
 
 // Store is a multi-index in-memory store for K8s metadata.
 // All lookups are O(1). Uses RWMutex for simplicity (KISS).
@@ -17,18 +23,22 @@ type Store struct {
 	podByName map[string]string // "default/nginx" -> UID
 	svcByIP   map[string]string // ClusterIP -> UID
 	svcByName map[string]string // "default/nginx-svc" -> UID
+
+	// Tombstone cache for trailing traffic
+	tombstones *TombstoneCache
 }
 
 // NewStore creates an empty store.
 func NewStore() *Store {
 	return &Store{
-		pods:      make(map[string]*PodMeta),
-		services:  make(map[string]*ServiceMeta),
-		podByIP:   make(map[string]string),
-		podByCID:  make(map[string]string),
-		podByName: make(map[string]string),
-		svcByIP:   make(map[string]string),
-		svcByName: make(map[string]string),
+		pods:       make(map[string]*PodMeta),
+		services:   make(map[string]*ServiceMeta),
+		podByIP:    make(map[string]string),
+		podByCID:   make(map[string]string),
+		podByName:  make(map[string]string),
+		svcByIP:    make(map[string]string),
+		svcByName:  make(map[string]string),
+		tombstones: NewTombstoneCache(DefaultTombstoneTTL),
 	}
 }
 
@@ -57,13 +67,16 @@ func (s *Store) AddPod(pod *PodMeta) {
 	s.podByName[pod.NamespacedName()] = pod.UID
 }
 
-// DeletePod removes a pod from the store.
+// DeletePod removes a pod from the store and adds it to tombstones.
 func (s *Store) DeletePod(pod *PodMeta) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.removePodIndexes(pod)
 	delete(s.pods, pod.UID)
+
+	// Add to tombstone cache for trailing traffic
+	s.tombstones.Add(pod)
 }
 
 func (s *Store) removePodIndexes(pod *PodMeta) {
@@ -75,27 +88,35 @@ func (s *Store) removePodIndexes(pod *PodMeta) {
 }
 
 // PodByIP looks up a pod by its IP address.
+// Falls back to tombstone cache for trailing traffic.
 func (s *Store) PodByIP(ip string) (*PodMeta, bool) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	uid, ok := s.podByIP[ip]
-	if !ok {
-		return nil, false
+	if ok {
+		pod := s.pods[uid]
+		s.mu.RUnlock()
+		return pod, true
 	}
-	return s.pods[uid], true
+	s.mu.RUnlock()
+
+	// Check tombstones for trailing traffic
+	return s.tombstones.GetByIP(ip)
 }
 
 // PodByContainerID looks up a pod by container ID.
+// Falls back to tombstone cache for trailing traffic.
 func (s *Store) PodByContainerID(cid string) (*PodMeta, bool) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	uid, ok := s.podByCID[cid]
-	if !ok {
-		return nil, false
+	if ok {
+		pod := s.pods[uid]
+		s.mu.RUnlock()
+		return pod, true
 	}
-	return s.pods[uid], true
+	s.mu.RUnlock()
+
+	// Check tombstones for trailing traffic
+	return s.tombstones.GetByContainerID(cid)
 }
 
 // PodByName looks up a pod by namespace and name.

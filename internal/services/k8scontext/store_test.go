@@ -54,11 +54,17 @@ func TestStore_DeletePod(t *testing.T) {
 	s.AddPod(pod)
 	s.DeletePod(pod)
 
-	_, ok := s.PodByIP("10.0.1.5")
-	assert.False(t, ok)
+	// Deleted pods are still found via tombstone (for trailing traffic)
+	got, ok := s.PodByIP("10.0.1.5")
+	assert.True(t, ok, "should find in tombstone")
+	assert.True(t, got.Terminating, "should be marked as terminating")
 
-	_, ok = s.PodByContainerID("abc123")
-	assert.False(t, ok)
+	got, ok = s.PodByContainerID("abc123")
+	assert.True(t, ok, "should find in tombstone by CID")
+	assert.True(t, got.Terminating)
+
+	// But not in primary store
+	assert.Equal(t, 0, s.PodCount())
 }
 
 func TestStore_AddService(t *testing.T) {
@@ -91,4 +97,32 @@ func TestStore_Counts(t *testing.T) {
 
 	assert.Equal(t, 2, s.PodCount())
 	assert.Equal(t, 1, s.ServiceCount())
+}
+
+func TestStore_TombstoneFallback(t *testing.T) {
+	s := NewStore()
+
+	pod := &PodMeta{
+		UID:       "uid-1",
+		Name:      "nginx",
+		Namespace: "default",
+		PodIP:     "10.0.1.5",
+		Containers: []ContainerMeta{
+			{Name: "nginx", ContainerID: "abc123"},
+		},
+	}
+
+	s.AddPod(pod)
+	s.DeletePod(pod)
+
+	// Should still find via tombstone
+	got, ok := s.PodByIP("10.0.1.5")
+	require.True(t, ok, "should find in tombstone")
+	assert.Equal(t, "nginx", got.Name)
+	assert.True(t, got.Terminating, "should be marked as terminating")
+
+	// Same for container ID
+	got, ok = s.PodByContainerID("abc123")
+	require.True(t, ok, "should find in tombstone by CID")
+	assert.True(t, got.Terminating)
 }
