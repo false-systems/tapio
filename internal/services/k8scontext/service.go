@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -77,6 +78,9 @@ func (s *Service) Start(ctx context.Context) error {
 	s.podFactory.Start(ctx.Done())
 	s.svcFactory.Start(ctx.Done())
 
+	// Start tombstone cleanup loop
+	go s.store.Tombstones().StartCleanupLoop(ctx, 10*time.Second)
+
 	// Wait for sync in background
 	go func() {
 		if !cache.WaitForCacheSync(ctx.Done(),
@@ -85,6 +89,7 @@ func (s *Service) Start(ctx context.Context) error {
 			return
 		}
 		s.ready.Store(true)
+		InformerSynced.Set(1)
 	}()
 
 	return nil
@@ -138,6 +143,8 @@ func (s *Service) onPodAdd(obj interface{}) {
 		return
 	}
 	s.store.AddPod(TransformPod(pod))
+	RecordInformerEvent("pod", "add")
+	UpdateCacheSize("pod", s.store.PodCount())
 }
 
 func (s *Service) onPodUpdate(_, newObj interface{}) {
@@ -146,6 +153,7 @@ func (s *Service) onPodUpdate(_, newObj interface{}) {
 		return
 	}
 	s.store.AddPod(TransformPod(pod))
+	RecordInformerEvent("pod", "update")
 }
 
 func (s *Service) onPodDelete(obj interface{}) {
@@ -162,6 +170,9 @@ func (s *Service) onPodDelete(obj interface{}) {
 		}
 	}
 	s.store.DeletePod(TransformPod(pod))
+	RecordInformerEvent("pod", "delete")
+	UpdateCacheSize("pod", s.store.PodCount())
+	UpdateCacheSize("tombstone", s.store.Tombstones().Count())
 }
 
 func (s *Service) onServiceAdd(obj interface{}) {
@@ -170,6 +181,8 @@ func (s *Service) onServiceAdd(obj interface{}) {
 		return
 	}
 	s.store.AddService(TransformService(svc))
+	RecordInformerEvent("service", "add")
+	UpdateCacheSize("service", s.store.ServiceCount())
 }
 
 func (s *Service) onServiceUpdate(_, newObj interface{}) {
@@ -178,6 +191,7 @@ func (s *Service) onServiceUpdate(_, newObj interface{}) {
 		return
 	}
 	s.store.AddService(TransformService(svc))
+	RecordInformerEvent("service", "update")
 }
 
 func (s *Service) onServiceDelete(obj interface{}) {
@@ -193,4 +207,6 @@ func (s *Service) onServiceDelete(obj interface{}) {
 		}
 	}
 	s.store.DeleteService(TransformService(svc))
+	RecordInformerEvent("service", "delete")
+	UpdateCacheSize("service", s.store.ServiceCount())
 }

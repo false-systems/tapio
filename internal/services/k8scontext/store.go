@@ -202,3 +202,8 @@ func (s *Store) ServiceCount() int {
 	defer s.mu.RUnlock()
 	return len(s.services)
 }
+
+// Tombstones returns the tombstone cache for lifecycle management.
+func (s *Store) Tombstones() *TombstoneCache {
+	return s.tombstones
+}
