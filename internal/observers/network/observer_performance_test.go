@@ -12,12 +12,6 @@ import (
 	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
-// setupBenchmark is a no-op now that we use Prometheus metrics directly
-func setupBenchmark(b *testing.B) {
-	b.Helper()
-	// No-op: observer uses Prometheus metrics directly via base.Deps
-}
-
 // setupTest is a no-op now that we use Prometheus metrics directly
 func setupTest(t *testing.T) {
 	t.Helper()
