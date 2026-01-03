@@ -16,6 +16,10 @@ type Tier string
 const (
 	// TierDebug outputs to stdout only (for development/debugging).
 	TierDebug Tier = "debug"
+
+	// TierPolku streams events to POLKU gateway (production).
+	// Use NewPolkuService(PolkuConfig) to create this tier.
+	TierPolku Tier = "polku"
 )
 
 // Config configures the intelligence service.
