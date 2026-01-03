@@ -36,6 +36,13 @@ var (
 		Name:      "events_sent_total",
 		Help:      "Total number of events sent to POLKU",
 	})
+
+	eventsDropped = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "tapio",
+		Subsystem: "publisher",
+		Name:      "events_dropped_total",
+		Help:      "Total number of events dropped",
+	}, []string{"reason"}) // throttle, buffer_full
 )
 
 // Config for the POLKU publisher.
@@ -205,18 +212,31 @@ func (p *Publisher) buildTransportCredentials() (credentials.TransportCredential
 }
 
 // Publish queues an event for sending.
+// Respects backpressure by probabilistically dropping events when throttled.
 func (p *Publisher) Publish(event *tapiopb.RawEbpfEvent) error {
-	p.bufferMu.Lock()
-	defer p.bufferMu.Unlock()
+	// Apply backpressure: drop events probabilistically based on throttle
+	throttle := p.throttle.Load()
+	if throttle > 0 && throttle < 100 {
+		// Use event ID hash for deterministic sampling
+		if len(event.Id) > 0 && int(event.Id[0])%100 >= int(throttle) {
+			eventsDropped.WithLabelValues("throttle").Inc()
+			return nil
+		}
+	}
 
+	p.bufferMu.Lock()
 	if len(p.buffer) >= p.bufferSize {
+		p.bufferMu.Unlock()
+		eventsDropped.WithLabelValues("buffer_full").Inc()
 		return errors.New("buffer full, dropping event")
 	}
 
 	p.buffer = append(p.buffer, event)
+	shouldFlush := len(p.buffer) >= p.config.BatchSize
+	p.bufferMu.Unlock()
 
-	if len(p.buffer) >= p.config.BatchSize {
-		return p.flushLocked()
+	if shouldFlush {
+		return p.flush()
 	}
 
 	return nil
@@ -234,27 +254,33 @@ func (p *Publisher) flushLoop() {
 		case <-p.ctx.Done():
 			return
 		case <-ticker.C:
-			p.bufferMu.Lock()
-			if len(p.buffer) > 0 {
-				if err := p.flushLocked(); err != nil {
-					flushErrors.Inc()
-				}
+			if err := p.flush(); err != nil {
+				flushErrors.Inc()
 			}
-			p.bufferMu.Unlock()
 		}
 	}
 }
 
-// flushLocked sends buffered events. Caller must hold bufferMu.
-func (p *Publisher) flushLocked() error {
-	if len(p.buffer) == 0 || !p.connected.Load() {
+// flush sends buffered events without holding bufferMu during I/O.
+func (p *Publisher) flush() error {
+	if !p.connected.Load() {
 		return nil
 	}
 
-	eventCount := len(p.buffer)
+	// Copy and clear buffer under lock
+	p.bufferMu.Lock()
+	if len(p.buffer) == 0 {
+		p.bufferMu.Unlock()
+		return nil
+	}
+	events := make([]*tapiopb.RawEbpfEvent, len(p.buffer))
+	copy(events, p.buffer)
+	p.buffer = p.buffer[:0]
+	p.bufferMu.Unlock()
 
+	// Marshal without lock
 	batch := &tapiopb.EventBatch{
-		Events:    p.buffer,
+		Events:    events,
 		Source:    "tapio",
 		ClusterId: p.clusterID,
 		NodeName:  p.nodeName,
@@ -265,6 +291,7 @@ func (p *Publisher) flushLocked() error {
 		return err
 	}
 
+	// Send without lock
 	p.streamMu.RLock()
 	stream := p.stream
 	p.streamMu.RUnlock()
@@ -285,8 +312,7 @@ func (p *Publisher) flushLocked() error {
 	})
 
 	if err == nil {
-		p.buffer = p.buffer[:0]
-		eventsSent.Add(float64(eventCount))
+		eventsSent.Add(float64(len(events)))
 	}
 
 	return err

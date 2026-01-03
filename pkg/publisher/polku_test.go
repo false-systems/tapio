@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tapiopb "github.com/yairfalse/proto/gen/go/tapio/v1"
 )
 
 func TestConfig_Validate(t *testing.T) {
@@ -103,4 +104,54 @@ func TestPublisher_IsConnected(t *testing.T) {
 
 	pub := New(cfg)
 	assert.False(t, pub.IsConnected(), "should not be connected before Connect")
+}
+
+func TestPublisher_Publish_BufferFull(t *testing.T) {
+	cfg := Config{
+		Address:    "localhost:50051",
+		ClusterID:  "test",
+		NodeName:   "node-1",
+		BufferSize: 2,
+		BatchSize:  10, // High so no auto-flush
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+
+	// Fill buffer
+	event := &tapiopb.RawEbpfEvent{Id: "test-1"}
+	require.NoError(t, pub.Publish(event))
+	require.NoError(t, pub.Publish(event))
+
+	// Third should fail
+	err := pub.Publish(event)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "buffer full")
+}
+
+func TestPublisher_Throttle_Initial(t *testing.T) {
+	cfg := Config{
+		Address:   "localhost:50051",
+		ClusterID: "test",
+		NodeName:  "node-1",
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+	// Initial throttle should be 0 (no throttling configured yet)
+	assert.Equal(t, 0, pub.Throttle())
+}
+
+func TestPublisher_Close_NotConnected(t *testing.T) {
+	cfg := Config{
+		Address:   "localhost:50051",
+		ClusterID: "test",
+		NodeName:  "node-1",
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+	// Close without Connect should not panic
+	err := pub.Close()
+	assert.NoError(t, err)
 }
