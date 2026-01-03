@@ -75,9 +75,32 @@ func TestNewPublisher(t *testing.T) {
 	}
 	cfg.ApplyDefaults()
 
-	// Can't actually connect without a server, but constructor should work
 	pub := New(cfg)
 	require.NotNil(t, pub)
 	assert.Equal(t, "test", pub.clusterID)
 	assert.Equal(t, "node-1", pub.nodeName)
+}
+
+func TestConfig_ReconnectDefaults(t *testing.T) {
+	cfg := Config{
+		Address:   "polku:50051",
+		ClusterID: "prod",
+	}
+
+	cfg.ApplyDefaults()
+
+	assert.Equal(t, 1*time.Second, cfg.ReconnectInitial)
+	assert.Equal(t, 30*time.Second, cfg.ReconnectMax)
+}
+
+func TestPublisher_IsConnected(t *testing.T) {
+	cfg := Config{
+		Address:   "localhost:50051",
+		ClusterID: "test",
+		NodeName:  "node-1",
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+	assert.False(t, pub.IsConnected(), "should not be connected before Connect")
 }

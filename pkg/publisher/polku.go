@@ -50,6 +50,10 @@ type Config struct {
 	FlushInterval time.Duration // Max time between flushes (default: 100ms)
 	BufferSize    int           // Event buffer size (default: 1000)
 
+	// Reconnection (optional)
+	ReconnectInitial time.Duration // Initial backoff (default: 1s)
+	ReconnectMax     time.Duration // Max backoff (default: 30s)
+
 	// TLS (optional)
 	TLSCert string // Path to client cert
 	TLSKey  string // Path to client key
@@ -78,6 +82,12 @@ func (c *Config) ApplyDefaults() {
 	if c.BufferSize == 0 {
 		c.BufferSize = 1000
 	}
+	if c.ReconnectInitial == 0 {
+		c.ReconnectInitial = 1 * time.Second
+	}
+	if c.ReconnectMax == 0 {
+		c.ReconnectMax = 30 * time.Second
+	}
 }
 
 // Publisher sends events to POLKU gateway.
@@ -93,6 +103,9 @@ type Publisher struct {
 	buffer     []*tapiopb.RawEbpfEvent
 	bufferMu   sync.Mutex
 	bufferSize int
+
+	// Connection state
+	connected atomic.Bool
 
 	// Backpressure
 	throttle atomic.Int32 // 0-100, percentage of normal rate
@@ -144,6 +157,7 @@ func (p *Publisher) Connect(ctx context.Context) error {
 		return errors.Join(err, conn.Close())
 	}
 	p.stream = stream
+	p.connected.Store(true)
 
 	p.wg.Add(2)
 	go p.flushLoop()
@@ -295,6 +309,7 @@ func (p *Publisher) ackLoop() {
 // Close shuts down the publisher.
 func (p *Publisher) Close() error {
 	p.cancel()
+	p.connected.Store(false)
 
 	var errs []error
 	if p.stream != nil {
@@ -316,4 +331,9 @@ func (p *Publisher) Close() error {
 // Throttle returns the current throttle percentage (0-100).
 func (p *Publisher) Throttle() int {
 	return int(p.throttle.Load())
+}
+
+// IsConnected returns true if the publisher is connected to POLKU.
+func (p *Publisher) IsConnected() bool {
+	return p.connected.Load()
 }
