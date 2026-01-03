@@ -96,16 +96,18 @@ type Publisher struct {
 	clusterID string
 	nodeName  string
 
-	conn   *grpc.ClientConn
-	client polkupb.GatewayClient
-	stream polkupb.Gateway_StreamEventsClient
+	conn     *grpc.ClientConn
+	client   polkupb.GatewayClient
+	stream   polkupb.Gateway_StreamEventsClient
+	streamMu sync.RWMutex
 
 	buffer     []*tapiopb.RawEbpfEvent
 	bufferMu   sync.Mutex
 	bufferSize int
 
 	// Connection state
-	connected atomic.Bool
+	connected   atomic.Bool
+	reconnectCh chan struct{}
 
 	// Backpressure
 	throttle atomic.Int32 // 0-100, percentage of normal rate
@@ -123,13 +125,14 @@ func New(cfg Config) *Publisher {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Publisher{
-		config:     cfg,
-		clusterID:  cfg.ClusterID,
-		nodeName:   cfg.NodeName,
-		buffer:     make([]*tapiopb.RawEbpfEvent, 0, cfg.BatchSize),
-		bufferSize: cfg.BufferSize,
-		ctx:        ctx,
-		cancel:     cancel,
+		config:      cfg,
+		clusterID:   cfg.ClusterID,
+		nodeName:    cfg.NodeName,
+		buffer:      make([]*tapiopb.RawEbpfEvent, 0, cfg.BatchSize),
+		bufferSize:  cfg.BufferSize,
+		reconnectCh: make(chan struct{}, 1),
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 }
 
@@ -156,12 +159,16 @@ func (p *Publisher) Connect(ctx context.Context) error {
 	if err != nil {
 		return errors.Join(err, conn.Close())
 	}
+
+	p.streamMu.Lock()
 	p.stream = stream
+	p.streamMu.Unlock()
 	p.connected.Store(true)
 
-	p.wg.Add(2)
+	p.wg.Add(3)
 	go p.flushLoop()
 	go p.ackLoop()
+	go p.reconnectLoop()
 
 	return nil
 }
@@ -240,7 +247,7 @@ func (p *Publisher) flushLoop() {
 
 // flushLocked sends buffered events. Caller must hold bufferMu.
 func (p *Publisher) flushLocked() error {
-	if len(p.buffer) == 0 || p.stream == nil {
+	if len(p.buffer) == 0 || !p.connected.Load() {
 		return nil
 	}
 
@@ -258,7 +265,15 @@ func (p *Publisher) flushLocked() error {
 		return err
 	}
 
-	err = p.stream.Send(&polkupb.IngestBatch{
+	p.streamMu.RLock()
+	stream := p.stream
+	p.streamMu.RUnlock()
+
+	if stream == nil {
+		return errors.New("stream not available")
+	}
+
+	err = stream.Send(&polkupb.IngestBatch{
 		Source:  "tapio",
 		Cluster: p.clusterID,
 		Payload: &polkupb.IngestBatch_Raw{
@@ -283,27 +298,88 @@ func (p *Publisher) ackLoop() {
 	defer p.wg.Done()
 
 	for {
-		if p.stream == nil {
+		p.streamMu.RLock()
+		stream := p.stream
+		p.streamMu.RUnlock()
+
+		if stream == nil {
 			return
 		}
 
-		ack, err := p.stream.Recv()
+		ack, err := stream.Recv()
 		if err != nil {
+			p.signalReconnect()
 			return
 		}
 
-		// Backpressure: adjust rate based on buffer fill
 		if ack.BufferCapacity > 0 {
 			fillPct := float64(ack.BufferSize) / float64(ack.BufferCapacity) * 100
 			if fillPct > 80 {
-				p.throttle.Store(50) // Slow down to 50%
+				p.throttle.Store(50)
 			} else if fillPct > 50 {
-				p.throttle.Store(75) // Slow to 75%
+				p.throttle.Store(75)
 			} else {
-				p.throttle.Store(100) // Full speed
+				p.throttle.Store(100)
 			}
 		}
 	}
+}
+
+// signalReconnect triggers a reconnection attempt.
+func (p *Publisher) signalReconnect() {
+	p.connected.Store(false)
+	select {
+	case p.reconnectCh <- struct{}{}:
+	default:
+	}
+}
+
+// reconnectLoop handles reconnection with exponential backoff.
+func (p *Publisher) reconnectLoop() {
+	defer p.wg.Done()
+
+	backoff := p.config.ReconnectInitial
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case <-p.reconnectCh:
+			for {
+				select {
+				case <-p.ctx.Done():
+					return
+				default:
+				}
+
+				if err := p.tryReconnect(); err == nil {
+					backoff = p.config.ReconnectInitial
+					break
+				}
+
+				time.Sleep(backoff)
+				backoff = min(backoff*2, p.config.ReconnectMax)
+			}
+		}
+	}
+}
+
+// tryReconnect attempts to re-establish the stream.
+func (p *Publisher) tryReconnect() error {
+	stream, err := p.client.StreamEvents(p.ctx)
+	if err != nil {
+		return err
+	}
+
+	p.streamMu.Lock()
+	p.stream = stream
+	p.streamMu.Unlock()
+	p.connected.Store(true)
+
+	p.wg.Add(1)
+	go p.ackLoop()
+
+	return nil
 }
 
 // Close shuts down the publisher.
