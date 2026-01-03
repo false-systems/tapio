@@ -284,9 +284,8 @@ func (p *Publisher) flushLocked() error {
 		},
 	})
 
-	p.buffer = p.buffer[:0]
-
 	if err == nil {
+		p.buffer = p.buffer[:0]
 		eventsSent.Add(float64(eventCount))
 	}
 
@@ -294,22 +293,31 @@ func (p *Publisher) flushLocked() error {
 }
 
 // ackLoop handles acknowledgments and backpressure.
+// Runs for the lifetime of the publisher, survives reconnections.
 func (p *Publisher) ackLoop() {
 	defer p.wg.Done()
 
 	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		default:
+		}
+
 		p.streamMu.RLock()
 		stream := p.stream
 		p.streamMu.RUnlock()
 
 		if stream == nil {
-			return
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 
 		ack, err := stream.Recv()
 		if err != nil {
 			p.signalReconnect()
-			return
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 
 		if ack.BufferCapacity > 0 {
@@ -376,9 +384,6 @@ func (p *Publisher) tryReconnect() error {
 	p.streamMu.Unlock()
 	p.connected.Store(true)
 
-	p.wg.Add(1)
-	go p.ackLoop()
-
 	return nil
 }
 
@@ -388,11 +393,15 @@ func (p *Publisher) Close() error {
 	p.connected.Store(false)
 
 	var errs []error
+
+	p.streamMu.Lock()
 	if p.stream != nil {
 		if err := p.stream.CloseSend(); err != nil {
 			errs = append(errs, err)
 		}
+		p.stream = nil
 	}
+	p.streamMu.Unlock()
 
 	p.wg.Wait()
 
