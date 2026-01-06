@@ -8,7 +8,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"k8s.io/client-go/kubernetes"
 )
 
 // Config holds scheduler observer configuration
@@ -16,19 +15,15 @@ type Config struct {
 	// Prometheus scraper config
 	SchedulerMetricsURL string        // e.g., "http://kube-scheduler:10251/metrics"
 	ScrapeInterval      time.Duration // How often to scrape (default: 30s)
-
-	// K8s Events API watcher config
-	K8sClientset kubernetes.Interface // K8s client for Events API
 }
 
-// SchedulerObserver monitors Kubernetes scheduler using Prometheus + Events API
+// SchedulerObserver monitors Kubernetes scheduler using Prometheus scraping
 type SchedulerObserver struct {
-	name          string
-	deps          *base.Deps
-	logger        zerolog.Logger
-	config        Config
-	promScraper   *PrometheusScraper
-	eventsWatcher *EventsWatcher // K8s Events API watcher
+	name        string
+	deps        *base.Deps
+	logger      zerolog.Logger
+	config      Config
+	promScraper *PrometheusScraper
 
 	// Scheduler-specific Prometheus metrics
 	schedulingAttemptsTotal *prometheus.Counter   // scheduling_attempts_total
@@ -66,25 +61,12 @@ func New(config Config, deps *base.Deps) (*SchedulerObserver, error) {
 		obs.logger.Warn().Err(err).Msg("failed to register scheduler metrics")
 	}
 
-	// Create Events API watcher if K8s client provided
-	if config.K8sClientset != nil {
-		obs.eventsWatcher = NewEventsWatcher(config.K8sClientset, obs)
-	}
-
 	return obs, nil
 }
 
 // Run executes the observer until context is cancelled.
 func (o *SchedulerObserver) Run(ctx context.Context) error {
 	o.logger.Info().Msg("starting scheduler observer")
-
-	// Run Events API watcher if configured
-	if o.eventsWatcher != nil {
-		o.logger.Info().Msg("starting Events API watcher")
-		if err := o.eventsWatcher.Run(ctx); err != nil {
-			return err
-		}
-	}
 
 	// Block until context cancelled
 	<-ctx.Done()
