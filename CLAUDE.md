@@ -36,22 +36,23 @@ The 5-Level Dependency Hierarchy IS the law. No circular dependencies, no shortc
 2. **Semantic Correlation** - Automatic causality tracking between events
 3. **Flexible Export** - OTLP (Simple), NATS (FREE), Intelligence Service (ENTERPRISE)
 
-## 🔗 TAPIO-AHTI Architecture
+## 🔗 TAPIO-PORTTI-AHTI Architecture
 
-**TAPIO = Edge Intelligence (watches). AHTI = Central Intelligence (learns).**
+**TAPIO = eBPF Edge Intelligence. PORTTI = K8s API Watcher. AHTI = Central Intelligence.**
 
 ```
-TAPIO (per node)                              AHTI (central)
+TAPIO (per node)
 ├── eBPF Observers ──filter──→ ~1% anomalies ─┐
 │   (network, container, node)                │
-│                                             ├──→ NATS ──→ Learn & Correlate
-└── K8s Observers ──────────→ 100% causal ────┘
-    (deployments, configs)    (rare events)
+│                                             ├──→ POLKU ──→ AHTI
+PORTTI (cluster-wide, 1-2 replicas)           │
+└── K8s API Watcher ─────────→ 100% events ───┘
+    (deployments, pods, nodes, services)
 ```
 
-- **eBPF events**: Filter to 1% (only anomalies: OOM, connection failures, RTT spikes)
-- **K8s events**: Send 100% (deployments, config changes - they're rare but causal)
-- **AHTI never watches** - only receives pre-filtered events and builds causality graph
+- **TAPIO**: eBPF kernel events → filter to 1% anomalies (OOM, connection failures, RTT spikes)
+- **PORTTI**: K8s API events → send 100% (deployments, pods - they're rare but causal)
+- **AHTI**: Central intelligence - receives from both, builds causality graph
 
 See: **[Edge-Central Data Flow](docs/designs/edge-central-data-flow.md)**
 
@@ -141,10 +142,13 @@ internal/
 
 ### ✅ Production Ready
 - Supervisor with health monitoring (PR #536 merged)
-- 6+ observers: network, container, node, deployments, scheduler
+- eBPF observers: network, container (eBPF)
+- Scheduler observer (Prometheus scraping)
+- K8s context service (pod metadata enrichment for eBPF events)
 - CI/CD with GitHub Actions
-- Test coverage verification
 - ZERO map[string]interface{} violations (2 test exceptions)
+
+**Note**: K8s API watching (deployments, pods, nodes, services) moved to **PORTTI**.
 
 ### 🚧 In Progress
 - **Intelligence Service Foundation** - Fix layer violation (emitter_nats.go → pkg/intelligence/)

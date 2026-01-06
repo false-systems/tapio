@@ -38,26 +38,34 @@ eBPF Kernel Events (millions/sec)
 ┌─────────────────────────────────────────────────────────────────┐
 │                    TAPIO (Edge - Per Node)                       │
 │                                                                  │
-│  ┌──────────────────────┐    ┌──────────────────────┐           │
-│  │   eBPF Observers     │    │   K8s Observers      │           │
-│  │                      │    │                      │           │
-│  │  • network (TCP/DNS) │    │  • deployments       │           │
-│  │  • container (OOM)   │    │  • configmaps        │           │
-│  │  • node (PMC)        │    │  • scaling events    │           │
-│  └──────────┬───────────┘    └──────────┬───────────┘           │
-│             │                           │                        │
-│             ▼                           ▼                        │
-│      Filter (~1%)                 Send ALL (rare)                │
-│      (anomalies)                  (causal events)                │
-│             │                           │                        │
-│             └───────────┬───────────────┘                        │
-│                         ▼                                        │
-│                    NATS Publish                                  │
+│  ┌──────────────────────┐                                        │
+│  │   eBPF Observers     │                                        │
+│  │                      │                                        │
+│  │  • network (TCP/DNS) │                                        │
+│  │  • container (OOM)   │                                        │
+│  │  • node (PMC)        │                                        │
+│  └──────────┬───────────┘                                        │
+│             │                                                    │
+│             ▼                                                    │
+│      Filter (~1%)                                                │
+│      (anomalies)                                                 │
+│             │                                                    │
+│             ▼                                                    │
+│        POLKU ────────────────────────────────────────────────────┤
 └─────────────────────────┬───────────────────────────────────────┘
                           │
-                    NATS Cluster
+┌─────────────────────────┴───────────────────────────────────────┐
+│                    PORTTI (Cluster - 1-2 replicas)               │
+│                                                                  │
+│  K8s API Watcher: Deployments, Pods, Services, Nodes, Events    │
+│  Sends 100% (low volume, causal anchors)                         │
+│             │                                                    │
+│             ▼                                                    │
+│        POLKU ────────────────────────────────────────────────────┤
+└─────────────────────────┬───────────────────────────────────────┘
                           │
-┌─────────────────────────▼───────────────────────────────────────┐
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
 │                    AHTI (Central)                                │
 │                                                                  │
 │              Receives → Learns → Correlates                      │
@@ -69,8 +77,9 @@ eBPF Kernel Events (millions/sec)
 ```
 
 **Key insight:**
-- eBPF events: High volume → Filter to 1% (only anomalies)
-- K8s events: Low volume → Send 100% (they're causal anchors)
+- **TAPIO**: eBPF kernel events → Filter to 1% (only anomalies)
+- **PORTTI**: K8s API events → Send 100% (they're causal anchors)
+- **AHTI**: Never watches - only receives and correlates
 
 ---
 
@@ -84,12 +93,13 @@ eBPF Kernel Events (millions/sec)
 | **Container** | OOM kills, process exits | OOM, error exits (code ≠ 0) |
 | **Node** | PMC, cgroup metrics | Memory pressure >80%, CPU throttling |
 
-### K8s Observers (API Level)
+### Prometheus Scraping
 
 | Observer | Captures | Sends |
 |----------|----------|-------|
-| **Deployments** | Creates, updates, deletes | All (causal anchors) |
-| **Scheduler** | FailedScheduling events | All (failure events) |
+| **Scheduler** | kube-scheduler metrics | Scheduling latency, queue depth |
+
+**Note**: K8s API watching (Deployments, Pods, Services, Nodes, Events) moved to **[PORTTI](https://github.com/yairfalse/portti)**.
 
 ---
 
@@ -99,10 +109,10 @@ eBPF Kernel Events (millions/sec)
 
 | Component | Coverage | Description |
 |-----------|----------|-------------|
-| Deployments Observer | 93.9% | K8s deployment lifecycle |
-| Scheduler Observer | 85.2% | Scheduling failures |
 | Supervisor | 89.8% | Observer lifecycle |
 | Network Observer | 78% | eBPF TCP/DNS/RTT |
+| Scheduler Observer | 85.2% | Prometheus scraping |
+| K8s Context | - | Pod metadata enrichment |
 
 ### In Progress
 
@@ -110,7 +120,6 @@ eBPF Kernel Events (millions/sec)
 |-----------|--------|
 | Container Observer | eBPF code written, needs compilation |
 | Node Observer | PMC metrics, cgroup integration |
-| NATS Integration | Scaffolded, not wired |
 
 ---
 
@@ -126,7 +135,7 @@ cd tapio
 make build
 
 # Run with OTLP export (FREE tier)
-./bin/tapio --observer=deployments
+./bin/tapio --observer=network
 
 # Run with NATS (connects to AHTI)
 ./bin/tapio --observer=network --nats=nats://localhost:4222
@@ -200,7 +209,9 @@ tapio/
 
 | Project | Description |
 |---------|-------------|
-| **[AHTI](https://github.com/yairfalse/ahti)** | Central Intelligence - receives from TAPIO, builds causality graph |
+| **[PORTTI](https://github.com/yairfalse/portti)** | K8s API watcher - Deployments, Pods, Services, Nodes |
+| **[AHTI](https://github.com/yairfalse/ahti)** | Central Intelligence - receives events, builds causality graph |
+| **[POLKU](https://github.com/yairfalse/polku)** | Event router - transforms raw events to AhtiEvent |
 | **[Sykli](https://github.com/yairfalse/sykli)** | CI in your language |
 
 ---
