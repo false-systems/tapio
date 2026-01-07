@@ -155,6 +155,43 @@ enum {
 #define __LICENSE(x) SEC("license") const char LICENSE[] = (x)
 #endif
 
+// Device ID type (if not defined)
+#ifndef dev_t
+typedef __u32 dev_t;
+#endif
+
+// Sector type (if not defined)
+#ifndef sector_t
+typedef __u64 sector_t;
+#endif
+
+// Block I/O tracepoint structures (for storage observer)
+// CO-RE compatible with preserve_access_index - field offsets resolved at runtime via BTF
+// Reference: Brendan Gregg's BPF Performance Tools, Chapter 2
+
+// Base block request tracepoint (block_rq_issue, block_rq_insert)
+// Only define fields we actually read - CO-RE handles the rest
+struct trace_event_raw_block_rq {
+	__u64 __unused;           // Common trace fields (skipped)
+	dev_t dev;                // Device ID (major << 20 | minor)
+	sector_t sector;          // Starting sector
+	unsigned int nr_sector;   // Number of sectors
+	unsigned int bytes;       // Request size in bytes
+	char rwbs[8];             // R=read, W=write, D=discard, etc.
+	char comm[TASK_COMM_LEN]; // Process name
+} __attribute__((preserve_access_index));
+
+// Block request completion tracepoint (block_rq_complete)
+struct trace_event_raw_block_rq_completion {
+	__u64 __unused;           // Common trace fields (skipped)
+	dev_t dev;                // Device ID
+	sector_t sector;          // Starting sector
+	unsigned int nr_sector;   // Number of sectors
+	int error;                // Error code (0 = success)
+	char rwbs[8];             // R=read, W=write, D=discard, etc.
+	char comm[TASK_COMM_LEN]; // Process name
+} __attribute__((preserve_access_index));
+
 #pragma clang diagnostic pop
 
 #endif // __VMLINUX_MINIMAL_H__
