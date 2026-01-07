@@ -135,6 +135,15 @@ func convertToRawEvent(event *domain.ObserverEvent, clusterID, nodeName string) 
 		}
 	}
 
+	if event.StorageData != nil {
+		raw.Namespace = event.StorageData.Namespace
+		raw.PodName = event.StorageData.PodName
+		raw.ContainerId = event.StorageData.ContainerID
+		raw.Data = &tapiopb.RawEbpfEvent_Storage{
+			Storage: convertStorageData(event.StorageData),
+		}
+	}
+
 	return raw
 }
 
@@ -146,6 +155,8 @@ func convertEventType(t string) tapiopb.EbpfType {
 		return tapiopb.EbpfType_EBPF_TYPE_CONTAINER
 	case "kernel":
 		return tapiopb.EbpfType_EBPF_TYPE_MEMORY
+	case "storage":
+		return tapiopb.EbpfType_EBPF_TYPE_STORAGE
 	default:
 		return tapiopb.EbpfType_EBPF_TYPE_UNSPECIFIED
 	}
@@ -186,5 +197,22 @@ func convertMemoryData(d *domain.KernelEventData) *tapiopb.MemoryData {
 	return &tapiopb.MemoryData{
 		UsageBytes: d.OOMMemoryUsage,
 		LimitBytes: d.OOMMemoryLimit,
+	}
+}
+
+func convertStorageData(d *domain.StorageEventData) *tapiopb.StorageData {
+	device := ""
+	if d.DeviceName != "" {
+		device = d.DeviceName
+	} else {
+		device = fmt.Sprintf("%d:%d", d.DeviceMajor, d.DeviceMinor)
+	}
+
+	return &tapiopb.StorageData{
+		Device:    device,
+		Operation: d.OperationType,
+		Bytes:     d.Bytes,
+		LatencyUs: uint64(d.LatencyMs * 1000), // ms → µs
+		ErrorCode: d.ErrorName,
 	}
 }
