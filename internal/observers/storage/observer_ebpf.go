@@ -52,14 +52,14 @@ func (s *StorageObserver) loadAndAttachStage(ctx context.Context, eventCh chan S
 	if err := bpf.LoadStorageObjects(objs, nil); err != nil {
 		return fmt.Errorf("failed to load eBPF objects: %w", err)
 	}
-	defer objs.Close()
+	defer objs.Close() //nolint:errcheck // cleanup on exit, error non-actionable
 
 	// Store map reference
 	s.inflightIOMap = objs.InflightIo
 
 	// Create manager for attachment
 	s.ebpfMgr = base.NewEBPFManagerFromCollection(nil)
-	defer s.ebpfMgr.Close()
+	defer s.ebpfMgr.Close() //nolint:errcheck // cleanup on exit, error non-actionable
 
 	// Attach tracepoints
 	if err := s.ebpfMgr.AttachTracepointWithProgram(
@@ -77,7 +77,7 @@ func (s *StorageObserver) loadAndAttachStage(ctx context.Context, eventCh chan S
 	if err != nil {
 		return fmt.Errorf("failed to open ring buffer: %w", err)
 	}
-	defer reader.Close()
+	defer reader.Close() //nolint:errcheck // cleanup on exit, error non-actionable
 
 	// Read events until context cancelled
 	for {
