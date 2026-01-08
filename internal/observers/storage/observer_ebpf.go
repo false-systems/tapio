@@ -192,7 +192,7 @@ func (s *StorageObserver) createDomainEvent(evt StorageEventBPF) *domain.Observe
 	return &domain.ObserverEvent{
 		ID:          uuid.New().String(),
 		Type:        string(domain.EventTypeStorage),
-		Subtype:     SubtypeIOLatencySpike, // Default, may be overwritten
+		Subtype:     "", // Default, will be set during classification
 		Source:      s.name,
 		Timestamp:   time.Now(),
 		StorageData: storageData,
