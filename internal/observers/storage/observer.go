@@ -12,7 +12,8 @@ import (
 type Config struct {
 	EventChannelSize int // Ring buffer → processor channel size (default: 1000)
 
-	// Latency thresholds (milliseconds)
+	// Latency thresholds (milliseconds) - currently hardcoded in eBPF,
+	// these are for future dynamic configuration via BPF maps
 	LatencyWarningMs  float64 // Emit warning event (default: 50ms)
 	LatencyCriticalMs float64 // Emit critical event (default: 200ms)
 }
@@ -45,7 +46,6 @@ type StorageObserver struct {
 	ioLatencySpikeTotal *prometheus.Counter // io_latency_spikes_total
 	ioErrorsTotal       *prometheus.Counter // io_errors_total
 	ioLatencyMs         *prometheus.Gauge   // io_latency_ms (last observed)
-	ioThroughputBytes   *prometheus.Gauge   // io_throughput_bytes (per flush interval)
 }
 
 // New creates a storage observer with dependency injection.
@@ -64,7 +64,6 @@ func New(config Config, deps *base.Deps) *StorageObserver {
 	builder.Counter(&obs.ioLatencySpikeTotal, "io_latency_spikes_total", "I/O latency spike events (above threshold)")
 	builder.Counter(&obs.ioErrorsTotal, "io_errors_total", "Total I/O errors detected")
 	builder.Gauge(&obs.ioLatencyMs, "io_latency_ms", "Last observed I/O latency in milliseconds")
-	builder.Gauge(&obs.ioThroughputBytes, "io_throughput_bytes", "I/O throughput in bytes per second")
 	//nolint:errcheck // metrics registration errors are non-fatal for observer operation
 	builder.Build()
 

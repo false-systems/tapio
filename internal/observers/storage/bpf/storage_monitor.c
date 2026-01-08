@@ -86,7 +86,13 @@ int trace_block_rq_issue(struct trace_event_raw_block_rq *ctx) {
 	// rwbs is a char array: R=read, W=write, D=discard, F=flush, etc.
 	char rwbs[8] = {};
 	bpf_core_read_str(rwbs, sizeof(rwbs), &ctx->rwbs);
-	val.opcode = (rwbs[0] == 'W') ? OP_WRITE : OP_READ;
+	if (rwbs[0] == 'R') {
+		val.opcode = OP_READ;
+	} else if (rwbs[0] == 'W') {
+		val.opcode = OP_WRITE;
+	} else {
+		return 0;  // Skip discards, flushes, etc.
+	}
 
 	// Store in inflight map
 	bpf_map_update_elem(&inflight_io, &key, &val, BPF_ANY);

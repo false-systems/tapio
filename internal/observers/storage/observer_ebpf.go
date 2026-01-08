@@ -151,6 +151,7 @@ func (s *StorageObserver) processEvent(ctx context.Context, evt StorageEventBPF)
 	} else if evt.Severity == SeverityCritical || evt.Severity == SeverityWarning {
 		(*s.ioLatencySpikeTotal).Inc()
 		domainEvt.Subtype = SubtypeIOLatencySpike
+		domainEvt.Outcome = domain.OutcomeSuccess // Slow but successful I/O
 		if evt.Severity == SeverityCritical {
 			domainEvt.Severity = domain.SeverityCritical
 		} else {
