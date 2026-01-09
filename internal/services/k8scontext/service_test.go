@@ -13,7 +13,7 @@ import (
 )
 
 func TestService_New(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	cfg := Config{
 		NodeName: "test-node",
 	}
@@ -26,7 +26,7 @@ func TestService_New(t *testing.T) {
 }
 
 func TestService_StartStop(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewClientset()
 	cfg := Config{NodeName: "test-node"}
 	svc := New(client, cfg)
 
@@ -65,7 +65,7 @@ func TestService_PodLookup(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset(pod)
+	client := fake.NewClientset(pod)
 	cfg := Config{NodeName: "test-node"}
 	svc := New(client, cfg)
 
@@ -104,7 +104,7 @@ func TestService_ServiceLookup(t *testing.T) {
 		},
 	}
 
-	client := fake.NewSimpleClientset(svc)
+	client := fake.NewClientset(svc)
 	cfg := Config{NodeName: "test-node"}
 	service := New(client, cfg)
 
