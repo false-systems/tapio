@@ -44,6 +44,7 @@ type ObserverEvent struct {
 	ProcessData    *ProcessEventData    `json:"process_data,omitempty"`
 	SchedulingData *SchedulingEventData `json:"scheduling_data,omitempty"`
 	NodeData       *NodeEventData       `json:"node_data,omitempty"`
+	StorageData    *StorageEventData    `json:"storage_data,omitempty"`
 
 	// Raw bytes for debugging
 	RawData []byte `json:"raw_data,omitempty"`
@@ -70,6 +71,7 @@ type TapioEvent struct {
 	ProcessData    *ProcessEventData    `json:"process_data,omitempty"`
 	SchedulingData *SchedulingEventData `json:"scheduling_data,omitempty"`
 	NodeData       *NodeEventData       `json:"node_data,omitempty"`
+	StorageData    *StorageEventData    `json:"storage_data,omitempty"`
 
 	// Multi-cluster support
 	ClusterID string            `json:"cluster_id"`
@@ -93,6 +95,7 @@ const (
 	EventTypePerformance EventType = "performance"
 	EventTypeResource    EventType = "resource"
 	EventTypeCluster     EventType = "cluster"
+	EventTypeStorage     EventType = "storage"
 )
 
 // Severity levels
@@ -323,4 +326,32 @@ type NodeEventData struct {
 	CPUIPC            float64 `json:"cpu_ipc,omitempty"`            // Instructions Per Cycle (0.0 - 2.0)
 	MemoryStalls      float64 `json:"memory_stalls,omitempty"`      // % of cycles stalled on memory (0-100)
 	PerformanceImpact string  `json:"performance_impact,omitempty"` // low, medium, high, critical
+}
+
+// StorageEventData - block I/O events from eBPF storage observer
+type StorageEventData struct {
+	// Device identification
+	DeviceMajor uint32 `json:"device_major"`
+	DeviceMinor uint32 `json:"device_minor"`
+	DeviceName  string `json:"device_name,omitempty"` // Resolved in userspace (e.g., "sda", "nvme0n1")
+
+	// Operation details
+	OperationType string  `json:"operation_type"`   // read, write
+	Bytes         uint64  `json:"bytes"`            // I/O size in bytes
+	LatencyMs     float64 `json:"latency_ms"`       // I/O latency in milliseconds
+	Sector        uint64  `json:"sector,omitempty"` // Starting sector
+
+	// Error information (present when I/O fails)
+	ErrorCode uint16 `json:"error_code,omitempty"` // Linux errno (0 = success)
+	ErrorName string `json:"error_name,omitempty"` // Human-readable: EIO, ENOSPC, EROFS
+
+	// Container attribution (from cgroup_id)
+	CgroupID    uint64 `json:"cgroup_id,omitempty"`
+	ContainerID string `json:"container_id,omitempty"`
+	PodName     string `json:"pod_name,omitempty"`
+	Namespace   string `json:"namespace,omitempty"`
+
+	// Process context
+	ProcessName string `json:"process_name,omitempty"`
+	PID         uint32 `json:"pid,omitempty"`
 }
