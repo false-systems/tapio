@@ -213,7 +213,6 @@ func convertStorageData(d *domain.StorageEventData) *tapiopb.StorageData {
 		Operation: d.OperationType,
 		Bytes:     d.Bytes,
 		LatencyUs: uint64(d.LatencyMs * 1000), // ms → µs
-		ErrorCode: uint32(d.ErrorCode),
-		ErrorName: d.ErrorName,
+		ErrorCode: d.ErrorName,                // proto ErrorCode is string (e.g., "EIO")
 	}
 }
