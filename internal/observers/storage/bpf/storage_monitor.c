@@ -32,7 +32,7 @@ struct storage_event {
 	__u8  opcode;         // offset 50
 	__u8  severity;       // offset 51
 	__u8  comm[16];       // offset 52
-	// 4 bytes end padding to align struct to 8 bytes = 72 total
+	__u8  _pad[4];        // offset 68, explicit padding to 72 bytes
 };
 
 // Key for tracking inflight I/O operations
