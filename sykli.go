@@ -1,9 +1,9 @@
 //go:build ignore
 
-// sykli.go - CI pipeline for Tapio (dogfooding sykli!)
+// sykli.go - CI pipeline for Tapio
 //
-// Run with: sykli
-// Run full CI: sykli --filter=docker-ci (requires Docker)
+// Local:  sykli
+// CI:     GitHub Actions runs sykli
 package main
 
 import sykli "github.com/yairfalse/sykli/sdk/go"
@@ -11,7 +11,7 @@ import sykli "github.com/yairfalse/sykli/sdk/go"
 func main() {
 	s := sykli.New()
 
-	// === LOCAL CHECKS (macOS-friendly, parallel) ===
+	// === STATIC ANALYSIS (parallel) ===
 	s.Task("fmt-check").
 		Run("gofmt -l . | grep -q . && exit 1 || exit 0").
 		Inputs("**/*.go")
@@ -34,12 +34,6 @@ func main() {
 	s.Task("build").
 		Run("mkdir -p bin && CGO_ENABLED=0 go build -ldflags='-s -w' -o bin/tapio ./cmd/tapio 2>/dev/null || echo 'No main.go yet'").
 		After("test")
-
-	// === FULL CI (runs in Docker, use: sykli --filter=docker-ci) ===
-	s.Task("docker-ci").
-		Run("docker run --rm -v $(pwd):/tapio -w /tapio tapio-dev just ci").
-		When("false"). // Only run when explicitly filtered
-		After("build")
 
 	s.Emit()
 }
