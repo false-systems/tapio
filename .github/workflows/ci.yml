@@ -22,15 +22,23 @@ jobs:
           go-version: '1.25'
           cache: true
 
-      - name: Install tools
-        run: |
-          # Install sykli
-          curl -fsSL https://raw.githubusercontent.com/yairfalse/sykli/main/install.sh | bash
-          # Install golangci-lint
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.7.1
+      - name: Install golangci-lint
+        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.7.1
 
-      - name: Run sykli
-        run: ~/.local/bin/sykli
+      - name: Format check
+        run: gofmt -l . | grep -q . && exit 1 || exit 0
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        run: golangci-lint run --timeout 5m
+
+      - name: Test
+        run: go test -timeout 10m ./...
+
+      - name: Build
+        run: mkdir -p bin && CGO_ENABLED=0 go build -ldflags='-s -w' -o bin/tapio ./cmd/tapio 2>/dev/null || echo 'No main.go yet'
 
   security:
     name: Security Scan
