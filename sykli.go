@@ -3,7 +3,7 @@
 // sykli.go - CI pipeline for Tapio (dogfooding sykli!)
 //
 // Run with: sykli
-// Run full CI: sykli --filter=ci (requires Docker)
+// Run full CI: sykli --filter=docker-ci (requires Docker)
 package main
 
 import sykli "github.com/yairfalse/sykli/sdk/go"
@@ -22,7 +22,7 @@ func main() {
 
 	s.Task("lint").
 		Run("golangci-lint run --timeout 5m").
-		Inputs("**/*.go", "go.mod", "go.sum", ".golangci.yml")
+		Inputs("**/*.go", "go.mod", "go.sum")
 
 	// === TESTS (after static analysis) ===
 	s.Task("test").
