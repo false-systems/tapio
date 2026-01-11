@@ -421,3 +421,5 @@ perf.data.old
 /cmd/observers/observers
 /cmd/transformer/transformer
 *.exe
+.sykli/
+erl_crash.dump
