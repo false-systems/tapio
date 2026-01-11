@@ -14,16 +14,16 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Go 1.24
+# Install Go 1.25
 ARG TARGETARCH
-RUN wget -q https://go.dev/dl/go1.24.0.linux-${TARGETARCH:-amd64}.tar.gz && \
-    tar -C /usr/local -xzf go1.24.0.linux-${TARGETARCH:-amd64}.tar.gz && \
-    rm go1.24.0.linux-${TARGETARCH:-amd64}.tar.gz
+RUN wget -q https://go.dev/dl/go1.25.0.linux-${TARGETARCH:-amd64}.tar.gz && \
+    tar -C /usr/local -xzf go1.25.0.linux-${TARGETARCH:-amd64}.tar.gz && \
+    rm go1.25.0.linux-${TARGETARCH:-amd64}.tar.gz
 
 # Install just
 RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
 
-# Install golangci-lint (v2.x for Go 1.24 support)
+# Install golangci-lint (v2.x for Go 1.25 support)
 RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v2.7.1
 
 # Add Go and LLVM to PATH

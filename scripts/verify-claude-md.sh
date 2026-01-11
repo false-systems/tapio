@@ -155,12 +155,15 @@ VET_FAILED=0
 
 for dir in $DIRS; do
     if [ -d "$dir" ] && ls "$dir"/*.go >/dev/null 2>&1; then
-        if ! go vet "./$dir" 2>&1 | grep -q "no Go files"; then
-            if ! go vet "./$dir" 2>/dev/null; then
-                echo -e "${RED}❌ go vet failed for $dir${NC}"
-                go vet "./$dir" 2>&1 | head -10
-                VET_FAILED=1
-            fi
+        VET_OUTPUT=$(go vet "./$dir" 2>&1 || true)
+        # Skip directories with no buildable Go files (e.g., //go:build ignore)
+        if echo "$VET_OUTPUT" | grep -qE "(no Go files|build constraints exclude all Go files)"; then
+            continue
+        fi
+        if [ -n "$VET_OUTPUT" ]; then
+            echo -e "${RED}❌ go vet failed for $dir${NC}"
+            echo "$VET_OUTPUT" | head -10
+            VET_FAILED=1
         fi
     fi
 done
@@ -189,9 +192,14 @@ BUILD_FAILED=0
 
 for dir in $DIRS; do
     if [ -d "$dir" ] && ls "$dir"/*.go >/dev/null 2>&1; then
-        if ! go build "./$dir" 2>/dev/null; then
+        BUILD_OUTPUT=$(go build "./$dir" 2>&1 || true)
+        # Skip directories with no buildable Go files (e.g., //go:build ignore)
+        if echo "$BUILD_OUTPUT" | grep -qE "(no Go files|build constraints exclude all Go files)"; then
+            continue
+        fi
+        if [ -n "$BUILD_OUTPUT" ]; then
             echo -e "${RED}❌ Build failed for $dir${NC}"
-            go build "./$dir" 2>&1 | head -10
+            echo "$BUILD_OUTPUT" | head -10
             BUILD_FAILED=1
         fi
     fi
