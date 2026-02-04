@@ -303,7 +303,7 @@ func TestConvertStorageData_AllFields(t *testing.T) {
 	}
 }
 
-func TestConvertEvent(t *testing.T) {
+func TestConvertToRawEvent_NetworkData(t *testing.T) {
 	event := &domain.ObserverEvent{
 		ID:        "test-123",
 		Type:      "network",
@@ -311,11 +311,13 @@ func TestConvertEvent(t *testing.T) {
 		Source:    "network-observer",
 		Timestamp: time.Now(),
 		NetworkData: &domain.NetworkEventData{
-			Protocol: "tcp",
-			SrcIP:    "10.0.0.1",
-			DstIP:    "10.0.0.2",
-			SrcPort:  45678,
-			DstPort:  80,
+			Protocol:  "tcp",
+			SrcIP:     "10.0.0.1",
+			DstIP:     "10.0.0.2",
+			SrcPort:   45678,
+			DstPort:   80,
+			Namespace: "default",
+			PodName:   "nginx-pod",
 		},
 	}
 
@@ -326,10 +328,115 @@ func TestConvertEvent(t *testing.T) {
 	assert.Equal(t, "connection_reset", raw.Subtype)
 	assert.Equal(t, "test-cluster", raw.ClusterId)
 	assert.Equal(t, "node-1", raw.NodeName)
+	assert.Equal(t, "default", raw.Namespace)
+	assert.Equal(t, "nginx-pod", raw.PodName)
 
 	// Check network data
 	require.NotNil(t, raw.GetNetwork())
 	assert.Equal(t, "tcp", raw.GetNetwork().Protocol)
 	assert.Equal(t, "10.0.0.1", raw.GetNetwork().SrcIp)
 	assert.Equal(t, "10.0.0.2", raw.GetNetwork().DstIp)
+}
+
+func TestConvertToRawEvent_ContainerData(t *testing.T) {
+	event := &domain.ObserverEvent{
+		ID:        "test-456",
+		Type:      "container",
+		Subtype:   "oom_kill",
+		Timestamp: time.Now(),
+		ContainerData: &domain.ContainerEventData{
+			ContainerID:   "abc123",
+			ContainerName: "nginx",
+			PodNamespace:  "default",
+			PodName:       "nginx-pod",
+			ExitCode:      137,
+		},
+	}
+
+	raw := convertToRawEvent(event, "test-cluster", "node-1")
+
+	require.NotNil(t, raw)
+	assert.Equal(t, "test-456", raw.Id)
+	assert.Equal(t, "default", raw.Namespace)
+	assert.Equal(t, "nginx-pod", raw.PodName)
+	assert.Equal(t, "abc123", raw.ContainerId)
+	assert.Equal(t, "nginx", raw.ContainerName)
+
+	// Check container data
+	require.NotNil(t, raw.GetContainer())
+	assert.Equal(t, "abc123", raw.GetContainer().ContainerId)
+	assert.Equal(t, int32(137), raw.GetContainer().ExitCode)
+}
+
+func TestConvertToRawEvent_KernelData(t *testing.T) {
+	event := &domain.ObserverEvent{
+		ID:        "test-789",
+		Type:      "kernel",
+		Subtype:   "oom",
+		Timestamp: time.Now(),
+		KernelData: &domain.KernelEventData{
+			OOMMemoryUsage: 1073741824,
+			OOMMemoryLimit: 2147483648,
+		},
+	}
+
+	raw := convertToRawEvent(event, "test-cluster", "node-1")
+
+	require.NotNil(t, raw)
+	assert.Equal(t, "test-789", raw.Id)
+
+	// Check memory data
+	require.NotNil(t, raw.GetMemory())
+	assert.Equal(t, uint64(1073741824), raw.GetMemory().UsageBytes)
+	assert.Equal(t, uint64(2147483648), raw.GetMemory().LimitBytes)
+}
+
+func TestConvertToRawEvent_StorageData(t *testing.T) {
+	event := &domain.ObserverEvent{
+		ID:        "test-storage",
+		Type:      "storage",
+		Subtype:   "io_error",
+		Timestamp: time.Now(),
+		StorageData: &domain.StorageEventData{
+			DeviceName:    "sda",
+			OperationType: "write",
+			Bytes:         4096,
+			LatencyMs:     1.5,
+			ErrorName:     "EIO",
+			Namespace:     "default",
+			PodName:       "db-pod",
+			ContainerID:   "xyz789",
+		},
+	}
+
+	raw := convertToRawEvent(event, "test-cluster", "node-1")
+
+	require.NotNil(t, raw)
+	assert.Equal(t, "test-storage", raw.Id)
+	assert.Equal(t, "default", raw.Namespace)
+	assert.Equal(t, "db-pod", raw.PodName)
+	assert.Equal(t, "xyz789", raw.ContainerId)
+
+	// Check storage data
+	require.NotNil(t, raw.GetStorage())
+	assert.Equal(t, "sda", raw.GetStorage().Device)
+	assert.Equal(t, "write", raw.GetStorage().Operation)
+	assert.Equal(t, "EIO", raw.GetStorage().ErrorCode)
+}
+
+func TestConvertToRawEvent_NoData(t *testing.T) {
+	event := &domain.ObserverEvent{
+		ID:        "test-empty",
+		Type:      "unknown",
+		Timestamp: time.Now(),
+	}
+
+	raw := convertToRawEvent(event, "test-cluster", "node-1")
+
+	require.NotNil(t, raw)
+	assert.Equal(t, "test-empty", raw.Id)
+	assert.Nil(t, raw.GetNetwork())
+	assert.Nil(t, raw.GetContainer())
+	assert.Nil(t, raw.GetMemory())
+	assert.Nil(t, raw.GetStorage())
 }

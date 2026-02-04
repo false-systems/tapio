@@ -101,3 +101,23 @@ func TestDebugService_Emit_ContextCancelled(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
+
+func TestDebugService_Emit_Success(t *testing.T) {
+	svc, err := New(Config{Tier: TierDebug})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, svc.Close()) }()
+
+	event := &domain.ObserverEvent{
+		ID:      "test-123",
+		Type:    "network",
+		Subtype: "connection",
+		NetworkData: &domain.NetworkEventData{
+			Protocol: "tcp",
+			SrcIP:    "10.0.0.1",
+			DstIP:    "10.0.0.2",
+		},
+	}
+
+	err = svc.Emit(context.Background(), event)
+	assert.NoError(t, err)
+}
