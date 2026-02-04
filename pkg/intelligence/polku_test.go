@@ -133,6 +133,36 @@ func TestConvertNetworkData_AllFields(t *testing.T) {
 	assert.Equal(t, "example.com", result.DnsQuery)
 }
 
+func TestConvertContainerData_AllFields(t *testing.T) {
+	data := &domain.ContainerEventData{
+		ContainerID:   "abc123",
+		ContainerName: "nginx",
+		Image:         "nginx:1.21",
+		State:         "Terminated",
+		ExitCode:      137,
+		Reason:        "OOMKilled",
+		Signal:        9,
+		MemoryLimit:   1073741824, // 1 GiB
+		MemoryUsage:   1073741824,
+		CgroupPath:    "/kubepods/pod123/abc123",
+		PID:           12345,
+	}
+
+	result := convertContainerData(data)
+
+	assert.Equal(t, "abc123", result.ContainerId)
+	assert.Equal(t, "nginx", result.ContainerName)
+	assert.Equal(t, "nginx:1.21", result.Image)
+	assert.Equal(t, "Terminated", result.State)
+	assert.Equal(t, int32(137), result.ExitCode)
+	assert.Equal(t, "OOMKilled", result.ExitReason)
+	assert.Equal(t, int32(9), result.Signal)
+	assert.Equal(t, uint64(1073741824), result.MemoryLimit)
+	assert.Equal(t, uint64(1073741824), result.MemoryUsage)
+	assert.Equal(t, "/kubepods/pod123/abc123", result.CgroupPath)
+	assert.Equal(t, uint32(12345), result.Pid)
+}
+
 func TestConvertEvent(t *testing.T) {
 	event := &domain.ObserverEvent{
 		ID:        "test-123",
