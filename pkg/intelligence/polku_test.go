@@ -163,6 +163,65 @@ func TestConvertContainerData_AllFields(t *testing.T) {
 	assert.Equal(t, uint32(12345), result.Pid)
 }
 
+func TestConvertMemoryData_AllFields(t *testing.T) {
+	data := &domain.KernelEventData{
+		OOMMemoryUsage: 1073741824, // 1 GiB
+		OOMMemoryLimit: 2147483648, // 2 GiB
+	}
+
+	result := convertMemoryData(data)
+
+	assert.Equal(t, uint64(1073741824), result.UsageBytes)
+	assert.Equal(t, uint64(2147483648), result.LimitBytes)
+}
+
+func TestConvertStorageData_AllFields(t *testing.T) {
+	tests := []struct {
+		name           string
+		data           *domain.StorageEventData
+		expectedDevice string
+	}{
+		{
+			name: "with device name",
+			data: &domain.StorageEventData{
+				DeviceMajor:   8,
+				DeviceMinor:   0,
+				DeviceName:    "sda",
+				OperationType: "write",
+				Bytes:         4096,
+				LatencyMs:     1.5,
+				ErrorName:     "",
+			},
+			expectedDevice: "sda",
+		},
+		{
+			name: "without device name (uses major:minor)",
+			data: &domain.StorageEventData{
+				DeviceMajor:   259,
+				DeviceMinor:   0,
+				DeviceName:    "",
+				OperationType: "read",
+				Bytes:         8192,
+				LatencyMs:     0.5,
+				ErrorName:     "EIO",
+			},
+			expectedDevice: "259:0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertStorageData(tt.data)
+
+			assert.Equal(t, tt.expectedDevice, result.Device)
+			assert.Equal(t, tt.data.OperationType, result.Operation)
+			assert.Equal(t, tt.data.Bytes, result.Bytes)
+			assert.Equal(t, uint64(tt.data.LatencyMs*1000), result.LatencyUs) // ms → µs
+			assert.Equal(t, tt.data.ErrorName, result.ErrorCode)
+		})
+	}
+}
+
 func TestConvertEvent(t *testing.T) {
 	event := &domain.ObserverEvent{
 		ID:        "test-123",
