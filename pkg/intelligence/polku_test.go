@@ -83,6 +83,28 @@ func TestPolkuService_IsCritical(t *testing.T) {
 	assert.True(t, svc.IsCritical())
 }
 
+func TestConvertEventType_AllTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string // Expected protobuf enum name
+	}{
+		{"network", "network", "EBPF_TYPE_NETWORK"},
+		{"container", "container", "EBPF_TYPE_CONTAINER"},
+		{"kernel", "kernel", "EBPF_TYPE_MEMORY"},
+		{"storage", "storage", "EBPF_TYPE_STORAGE"},
+		{"unknown", "other", "EBPF_TYPE_UNSPECIFIED"},
+		{"empty", "", "EBPF_TYPE_UNSPECIFIED"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertEventType(tt.input)
+			assert.Equal(t, tt.expected, result.String())
+		})
+	}
+}
+
 func TestConvertEvent(t *testing.T) {
 	event := &domain.ObserverEvent{
 		ID:        "test-123",
