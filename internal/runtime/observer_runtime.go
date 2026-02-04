@@ -9,14 +9,13 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/yairfalse/tapio/internal/base"
 	"github.com/yairfalse/tapio/pkg/domain"
-	"github.com/yairfalse/tapio/pkg/intelligence"
 )
 
 // ObserverRuntime is the unified infrastructure for all observers.
 type ObserverRuntime struct {
 	config      Config
 	processor   EventProcessor
-	emitters    []intelligence.Service
+	emitters    []domain.EventEmitter
 	sampler     *Sampler
 	queue       *BoundedQueue
 	causality   *base.CausalityTracker // Tracks causality chains across all events
@@ -144,9 +143,9 @@ func (r *ObserverRuntime) IsHealthy() bool {
 // Option is a functional option for configuring ObserverRuntime
 type Option func(*ObserverRuntime)
 
-// WithEmitters configures the intelligence services to use for event emission.
-// All observers emit through intelligence.Service (the universal gateway).
-func WithEmitters(emitters ...intelligence.Service) Option {
+// WithEmitters configures the event emitters to use for event emission.
+// All observers emit through domain.EventEmitter (the universal gateway).
+func WithEmitters(emitters ...domain.EventEmitter) Option {
 	return func(r *ObserverRuntime) {
 		r.emitters = emitters
 	}
