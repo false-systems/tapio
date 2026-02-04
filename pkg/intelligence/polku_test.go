@@ -105,6 +105,34 @@ func TestConvertEventType_AllTypes(t *testing.T) {
 	}
 }
 
+func TestConvertNetworkData_AllFields(t *testing.T) {
+	data := &domain.NetworkEventData{
+		Protocol:        "tcp",
+		SrcIP:           "10.0.0.1",
+		DstIP:           "10.0.0.2",
+		SrcPort:         45678,
+		DstPort:         80,
+		BytesSent:       1024,
+		BytesReceived:   2048,
+		RTTCurrent:      15.5, // ms
+		RetransmitCount: 3,
+		DNSQuery:        "example.com",
+	}
+
+	result := convertNetworkData(data)
+
+	assert.Equal(t, "tcp", result.Protocol)
+	assert.Equal(t, "10.0.0.1", result.SrcIp)
+	assert.Equal(t, "10.0.0.2", result.DstIp)
+	assert.Equal(t, uint32(45678), result.SrcPort)
+	assert.Equal(t, uint32(80), result.DstPort)
+	assert.Equal(t, uint64(1024), result.BytesSent)
+	assert.Equal(t, uint64(2048), result.BytesRecv)
+	assert.Equal(t, uint64(15500), result.RttUs) // ms * 1000 = µs
+	assert.Equal(t, uint64(3), result.Retransmits)
+	assert.Equal(t, "example.com", result.DnsQuery)
+}
+
 func TestConvertEvent(t *testing.T) {
 	event := &domain.ObserverEvent{
 		ID:        "test-123",
