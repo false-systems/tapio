@@ -1,6 +1,7 @@
 package intelligence
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -81,6 +82,86 @@ func TestPolkuService_IsCritical(t *testing.T) {
 	defer func() { require.NoError(t, svc.Close()) }()
 
 	assert.True(t, svc.IsCritical())
+}
+
+func TestPolkuService_Emit_NilEvent(t *testing.T) {
+	cfg := PolkuConfig{
+		Publisher: publisher.Config{
+			Address:   "polku:50051",
+			ClusterID: "test",
+			NodeName:  "node-1",
+		},
+	}
+
+	svc, err := NewPolkuService(cfg)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, svc.Close()) }()
+
+	err = svc.Emit(context.Background(), nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "nil event")
+}
+
+func TestPolkuService_Emit_Closed(t *testing.T) {
+	cfg := PolkuConfig{
+		Publisher: publisher.Config{
+			Address:   "polku:50051",
+			ClusterID: "test",
+			NodeName:  "node-1",
+		},
+	}
+
+	svc, err := NewPolkuService(cfg)
+	require.NoError(t, err)
+
+	// Close first
+	require.NoError(t, svc.Close())
+
+	// Emit after close should fail
+	event := &domain.ObserverEvent{ID: "test", Type: "network"}
+	err = svc.Emit(context.Background(), event)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "closed")
+}
+
+func TestPolkuService_Emit_ContextCancelled(t *testing.T) {
+	cfg := PolkuConfig{
+		Publisher: publisher.Config{
+			Address:   "polku:50051",
+			ClusterID: "test",
+			NodeName:  "node-1",
+		},
+	}
+
+	svc, err := NewPolkuService(cfg)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, svc.Close()) }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	event := &domain.ObserverEvent{ID: "test", Type: "network"}
+	err = svc.Emit(ctx, event)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestPolkuService_IsConnected_NotConnected(t *testing.T) {
+	cfg := PolkuConfig{
+		Publisher: publisher.Config{
+			Address:   "polku:50051",
+			ClusterID: "test",
+			NodeName:  "node-1",
+		},
+	}
+
+	svc, err := NewPolkuService(cfg)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, svc.Close()) }()
+
+	// Before Connect, should not be connected
+	polkuSvc := svc.(*polkuService)
+	assert.False(t, polkuSvc.IsConnected())
 }
 
 func TestConvertEventType_AllTypes(t *testing.T) {
