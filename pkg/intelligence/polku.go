@@ -22,6 +22,9 @@ func (c *PolkuConfig) Validate() error {
 	return c.Publisher.Validate()
 }
 
+// Compile-time interface compliance check.
+var _ domain.EventEmitter = (*polkuService)(nil)
+
 // polkuService implements Service for POLKU tier.
 type polkuService struct {
 	pub       *publisher.Publisher
