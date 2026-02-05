@@ -10,6 +10,16 @@ type Emitter interface {
 	Emit(ctx context.Context, event *ObserverEvent) error
 }
 
+// EventEmitter is the full interface for event emission services.
+// Extends Emitter with lifecycle and criticality methods.
+// Implemented by pkg/intelligence services (debugService, polkuService).
+type EventEmitter interface {
+	Emitter
+	Name() string
+	IsCritical() bool
+	Close() error
+}
+
 // ObserverEvent is emitted by observers (68 subtypes → migrating to 12 base types)
 // Built on 5 months of learning, implemented with production standards
 // ADR 002: Adding Subtype field to prepare for Ahti migration
