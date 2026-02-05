@@ -2,7 +2,7 @@ package base
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/yairfalse/tapio/pkg/intelligence"
+	"github.com/yairfalse/tapio/pkg/domain"
 )
 
 // Deps holds shared dependencies for all observers.
@@ -12,12 +12,12 @@ type Deps struct {
 	Metrics *PromObserverMetrics
 
 	// Emitter for sending events to NATS/OTLP
-	Emitter intelligence.Service
+	Emitter domain.EventEmitter
 }
 
 // NewDeps creates shared dependencies for observers.
 // Call once at startup, pass to all observers.
-func NewDeps(reg prometheus.Registerer, emitter intelligence.Service) *Deps {
+func NewDeps(reg prometheus.Registerer, emitter domain.EventEmitter) *Deps {
 	if reg == nil {
 		reg = GlobalRegistry
 	}

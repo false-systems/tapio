@@ -62,6 +62,11 @@ func New(cfg Config) (Service, error) {
 	}
 }
 
+// Compile-time interface compliance checks.
+var (
+	_ domain.EventEmitter = (*debugService)(nil)
+)
+
 // debugService implements Service for debug tier (stdout only).
 type debugService struct {
 	critical bool

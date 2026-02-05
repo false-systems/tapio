@@ -155,3 +155,168 @@ func TestPublisher_Close_NotConnected(t *testing.T) {
 	err := pub.Close()
 	assert.NoError(t, err)
 }
+
+func TestBuildTransportCredentials_Insecure(t *testing.T) {
+	cfg := Config{
+		Address:   "localhost:50051",
+		ClusterID: "test",
+		NodeName:  "node-1",
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+	creds, err := pub.buildTransportCredentials()
+
+	assert.NoError(t, err)
+	assert.NotNil(t, creds)
+	// Insecure credentials should have "insecure" protocol
+	info := creds.Info()
+	assert.Equal(t, "insecure", info.SecurityProtocol)
+}
+
+func TestBuildTransportCredentials_TLS_CertError(t *testing.T) {
+	cfg := Config{
+		Address:   "localhost:50051",
+		ClusterID: "test",
+		NodeName:  "node-1",
+		TLSCert:   "/nonexistent/cert.pem",
+		TLSKey:    "/nonexistent/key.pem",
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+	_, err := pub.buildTransportCredentials()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "load client cert")
+}
+
+func TestPublisher_Flush_NotConnected(t *testing.T) {
+	cfg := Config{
+		Address:   "localhost:50051",
+		ClusterID: "test",
+		NodeName:  "node-1",
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+	// Not connected - flush should return nil (no error, just skip)
+	err := pub.flush()
+	assert.NoError(t, err)
+}
+
+func TestPublisher_Flush_EmptyBuffer(t *testing.T) {
+	cfg := Config{
+		Address:   "localhost:50051",
+		ClusterID: "test",
+		NodeName:  "node-1",
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+	pub.connected.Store(true) // Fake connected state
+
+	// Empty buffer - flush should return nil
+	err := pub.flush()
+	assert.NoError(t, err)
+}
+
+func TestPublisher_Flush_NoStream(t *testing.T) {
+	cfg := Config{
+		Address:   "localhost:50051",
+		ClusterID: "test",
+		NodeName:  "node-1",
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+	pub.connected.Store(true) // Fake connected state
+
+	// Add an event to buffer
+	pub.buffer = append(pub.buffer, &tapiopb.RawEbpfEvent{Id: "test"})
+
+	// No stream set - should fail
+	err := pub.flush()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "stream not available")
+}
+
+func TestPublisher_Publish_ThrottleDrop(t *testing.T) {
+	cfg := Config{
+		Address:    "localhost:50051",
+		ClusterID:  "test",
+		NodeName:   "node-1",
+		BufferSize: 100,
+		BatchSize:  100,
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+	pub.throttle.Store(50) // 50% throttle
+
+	// With throttle at 50%, events with ID[0] >= 50 should be dropped
+	// Create event that will be dropped based on deterministic sampling
+	event := &tapiopb.RawEbpfEvent{Id: "z"} // 'z' = 122 % 100 = 22, which is < 50, so NOT dropped
+
+	// Event with ID starting with high ASCII should be dropped
+	eventDropped := &tapiopb.RawEbpfEvent{Id: string([]byte{100})} // 100 % 100 = 0, < 50, NOT dropped
+
+	// Event with ID starting with ASCII 60 should be dropped (60 >= 50)
+	eventDropped2 := &tapiopb.RawEbpfEvent{Id: string([]byte{60})} // 60 >= 50, dropped
+
+	err := pub.Publish(event)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(pub.buffer))
+
+	err = pub.Publish(eventDropped)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(pub.buffer))
+
+	// This one should be dropped
+	err = pub.Publish(eventDropped2)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(pub.buffer)) // Still 2 because event was dropped
+}
+
+func TestPublisher_SignalReconnect(t *testing.T) {
+	cfg := Config{
+		Address:   "localhost:50051",
+		ClusterID: "test",
+		NodeName:  "node-1",
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+	pub.connected.Store(true)
+
+	pub.signalReconnect()
+
+	assert.False(t, pub.IsConnected())
+
+	// Channel should have a signal
+	select {
+	case <-pub.reconnectCh:
+		// Expected
+	default:
+		t.Fatal("expected reconnect signal")
+	}
+}
+
+func TestPublisher_SignalReconnect_Multiple(t *testing.T) {
+	cfg := Config{
+		Address:   "localhost:50051",
+		ClusterID: "test",
+		NodeName:  "node-1",
+	}
+	cfg.ApplyDefaults()
+
+	pub := New(cfg)
+	pub.connected.Store(true)
+
+	// Multiple signals should not block (channel has buffer of 1)
+	pub.signalReconnect()
+	pub.signalReconnect()
+	pub.signalReconnect()
+
+	assert.False(t, pub.IsConnected())
+}
