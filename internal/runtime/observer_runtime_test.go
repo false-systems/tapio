@@ -297,7 +297,7 @@ func TestObserverRuntime_CriticalEmitterFailure(t *testing.T) {
 	}
 
 	criticalEmitter := &mockEmitter{name: "otlp", critical: true, alwaysFail: true}
-	nonCriticalEmitter := &mockEmitter{name: "nats", critical: false}
+	nonCriticalEmitter := &mockEmitter{name: "polku", critical: false}
 
 	runtime, err := NewObserverRuntime(processor, func(r *ObserverRuntime) {
 		r.config.Sampling.Enabled = false // Disable sampling for this test
@@ -378,7 +378,7 @@ func TestObserverRuntime_NonCriticalEmitterFailure(t *testing.T) {
 	}
 
 	criticalEmitter := &mockEmitter{name: "otlp", critical: true}
-	nonCriticalEmitter := &mockEmitter{name: "nats", critical: false, failNext: true}
+	nonCriticalEmitter := &mockEmitter{name: "polku", critical: false, failNext: true}
 
 	runtime, err := NewObserverRuntime(processor, func(r *ObserverRuntime) {
 		r.config.Sampling.Enabled = false // Disable sampling for this test

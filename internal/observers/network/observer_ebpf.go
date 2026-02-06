@@ -410,7 +410,7 @@ func (n *NetworkObserver) emitDomainEvent(ctx context.Context, evt *domain.Obser
 }
 
 // enrichWithK8sContext lookups pod metadata by IP and populates NetworkEventData fields.
-// NOTE: TapioEvent enrichment and NATS publishing is handled by intelligence.Service.Emit()
+// NOTE: TapioEvent enrichment and POLKU publishing is handled by intelligence.Service.Emit()
 func (n *NetworkObserver) enrichWithK8sContext(evt *domain.ObserverEvent) {
 	if evt.NetworkData == nil {
 		return

@@ -1,6 +1,8 @@
 # Pipeline Wiring - Design Session
 
-**Status**: Ready to Implement
+> **SUPERSEDED**: NATS/NATSEmitter references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS. The pipeline is: Observers → Intelligence Service → POLKU Publisher → AHTI. See `pkg/intelligence/polku.go` and `pkg/publisher/polku.go`.
+
+**Status**: Superseded by POLKU implementation
 **Date**: 2025-12-05
 **Author**: Claude + Yair
 **Related**: Intelligence Service Foundation, README audit

@@ -1,5 +1,7 @@
 # Architecture Research Findings: Grafana + Prometheus Patterns
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Date:** 2025-10-21
 **Purpose:** Document critical architectural patterns from Grafana and Prometheus codebases to inform Tapio's two-tier observer architecture design.
 
