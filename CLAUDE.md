@@ -13,7 +13,7 @@ The 5-Level Dependency Hierarchy IS the law. No circular dependencies, no shortc
 - Level 0: pkg/domain/       (ZERO dependencies - domain models)
 - Level 1: internal/observers/    (Domain ONLY - eBPF observers)
 - Level 2: pkg/intelligence/ (Domain + L1 - event enrichment)
-- Level 3: pkg/integrations/ (Domain + L1 + L2 - NATS, K8s)
+- Level 3: pkg/integrations/ (Domain + L1 + L2 - POLKU, K8s)
 - Level 4: pkg/interfaces/   (All above - OTLP, REST APIs)
 ```
 
@@ -34,7 +34,7 @@ The 5-Level Dependency Hierarchy IS the law. No circular dependencies, no shortc
 **Our Solution**:
 1. **eBPF Kernel Capture** - Zero overhead observability at kernel level
 2. **Semantic Correlation** - Automatic causality tracking between events
-3. **Flexible Export** - OTLP (Simple), NATS (FREE), Intelligence Service (ENTERPRISE)
+3. **Flexible Export** - OTLP (Simple), POLKU (gRPC gateway to AHTI)
 
 ## 🔗 TAPIO-PORTTI-AHTI Architecture
 
@@ -105,8 +105,8 @@ func validate() error { /* 30 lines */ }  // Small functions
 ```
 pkg/
   ├── domain/          # Core types (ObserverEvent, NetworkEventData)
-  ├── intelligence/    # Event enrichment (NATS bridge, correlation)
-  ├── integrations/    # NATS, K8s clients
+  ├── intelligence/    # Event enrichment (POLKU bridge, correlation)
+  ├── integrations/    # POLKU, K8s clients
   └── interfaces/      # OTLP exporter, REST APIs
 
 internal/
@@ -151,12 +151,12 @@ internal/
 **Note**: K8s API watching (deployments, pods, nodes, services) moved to **PORTTI**.
 
 ### 🚧 In Progress
-- **Intelligence Service Foundation** - Fix layer violation (emitter_nats.go → pkg/intelligence/)
+- **Intelligence Service** - POLKU gRPC publisher with batching, backpressure, TLS
   - Design: docs/designs/intelligence-service-foundation.md
-  - Status: Ready to implement (6 commits, ~150 lines)
+  - Status: Implemented (polkuService + publisher)
 
 - **Observer Runtime Refactor** (ADR 009) - Unified infrastructure
-  - Status: Blocked by Intelligence Service completion
+  - Status: In progress
 
 ### 📈 Quality Metrics
 - map[string]interface{}: **2** (test exceptions only) ✅

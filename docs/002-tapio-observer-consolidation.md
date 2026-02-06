@@ -1,5 +1,7 @@
 # ADR 002: TAPIO Observer Consolidation (18 → 12 Observers)
 
+> **NOTE**: NATS JetStream references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Status**: Accepted
 **Date**: 2025-10-05
 **Deciders**: Yair + Claude (AI pair programming)

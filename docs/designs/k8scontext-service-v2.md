@@ -1,5 +1,7 @@
 # Design: K8sContext Service v2 (Sharp + Fast + Lean)
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Status**: Proposed
 **Date**: 2025-01-02
 **Related**: ADR 009 (PORTTI), ADR 010 (TAPIO Refactor)

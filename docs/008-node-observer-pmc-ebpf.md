@@ -1,5 +1,7 @@
 # ADR 008: Node Observer Step 2 - eBPF PMC (Performance Monitoring Counters)
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Status**: Design Phase
 **Date**: 2025-11-01
 **Author**: Claude + Yair

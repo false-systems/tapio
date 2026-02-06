@@ -196,9 +196,6 @@ scratch/
 neo4j.log
 query.log
 
-# NATS data (if running locally)
-/nats-data/
-nats.log
 
 # OpenTelemetry collector local data
 /otelcol-data/

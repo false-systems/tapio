@@ -1,5 +1,7 @@
 # OTEL Attribute Standards for Tapio/Ahti Integration
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Status**: Design Document
 **Date**: 2025-10-14
 **Author**: Architecture Team
