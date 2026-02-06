@@ -1,6 +1,8 @@
 # Intelligence Service Foundation - Design Session
 
-**Status**: Ready to Implement
+> **SUPERSEDED**: This document describes a NATS-based architecture that has been replaced by **POLKU** (gRPC event gateway). The `emitter_nats.go` layer violation was resolved by implementing `pkg/intelligence/polku.go` with a POLKU gRPC publisher instead of NATS bridge. See `pkg/publisher/polku.go`.
+
+**Status**: Superseded by POLKU implementation
 **Date**: 2025-11-30
 **Author**: Claude + Yair
 **Related**: Doc 010 (Intelligence Service), ADR 009 (Observer Runtime)

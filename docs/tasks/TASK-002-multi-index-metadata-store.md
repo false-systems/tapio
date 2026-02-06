@@ -1,8 +1,10 @@
 # TASK-002: Implement Multi-Index Metadata Store
 
+> **NOTE**: NATS KV references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Priority:** P0 - Critical (Blocks v1.0)
 **Estimated Effort:** 6-8 hours
-**Skills Required:** Go, NATS KV, data structures, concurrency
+**Skills Required:** Go, data structures, concurrency
 **Depends On:** TASK-001 (PodContext with OTELAttributes)
 
 ---

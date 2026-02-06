@@ -1,9 +1,11 @@
  # Intelligence Service Implementation Plan
 
-**Status:** Planning
+> **SUPERSEDED**: This plan describes a NATS-based architecture (KV buckets, JetStream, NATSKVEmitter) that has been replaced by **POLKU** (gRPC event gateway). The intelligence service is now implemented as `pkg/intelligence/polku.go` with `pkg/publisher/polku.go` providing batched gRPC transport to POLKU. Two tiers: Simple (OTLPEmitter) and POLKU (gRPC → AHTI).
+
+**Status:** Superseded by POLKU implementation
 **Date:** 2025-01-10
 **Author:** Yair + Claude
-**Related:** PR #512 (NATS emitter architecture mismatch)
+**Related:** PR #512 (original NATS architecture, now replaced by POLKU)
 
 ---
 

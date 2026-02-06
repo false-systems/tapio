@@ -1,5 +1,7 @@
 # Design Doc 005: WASM Observer Implementation Guide
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Status**: Ready for Implementation (Post-v1.0)
 **Date**: 2025-01-25
 **Authors**: Yair + Claude (AI pair programming)

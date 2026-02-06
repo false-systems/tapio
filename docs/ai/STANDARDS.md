@@ -43,14 +43,14 @@ func ProcessEvent(event *domain.ObserverEvent) error {
 ```go
 // ❌ NEVER DO THIS
 const (
-    natsURL = "nats://localhost:4222"
+    polkuEndpoint = "localhost:50051"
     k8sConfigPath = "/home/user/.kube/config"
     nodeName = "worker-1"
 )
 
 // ✅ ALWAYS DO THIS
 type Config struct {
-    NATSURL       string `env:"NATS_URL" yaml:"nats_url"`
+    PolkuEndpoint string `env:"POLKU_ENDPOINT" yaml:"polku_endpoint"`
     K8sConfigPath string `env:"KUBECONFIG" yaml:"kubeconfig"`
     NodeName      string `env:"NODE_NAME" yaml:"node_name"`
 }
@@ -312,7 +312,7 @@ Level 4: pkg/interfaces/   # All above
 ```go
 // ❌ WRONG - Level 1 importing Level 3
 package observers
-import "github.com/yairfalse/tapio/pkg/integrations/nats"  // VIOLATION!
+import "github.com/yairfalse/tapio/pkg/integrations/polku"  // VIOLATION!
 
 // ✅ CORRECT - Level 1 imports Level 0 only
 package observers

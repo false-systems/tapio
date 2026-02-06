@@ -18,7 +18,7 @@ import (
 // The processor should be PURE BUSINESS LOGIC with no infrastructure concerns:
 //   - No eBPF loading/management
 //   - No K8s informer management
-//   - No OTLP/NATS export
+//   - No OTLP/POLKU export
 //   - No metrics collection
 //
 // Just: Parse raw event → Apply observer logic → Return domain event (or nil)

@@ -254,28 +254,24 @@ func TestPublisher_Publish_ThrottleDrop(t *testing.T) {
 	pub := New(cfg)
 	pub.throttle.Store(50) // 50% throttle
 
-	// With throttle at 50%, events with ID[0] >= 50 should be dropped
-	// Create event that will be dropped based on deterministic sampling
-	event := &tapiopb.RawEbpfEvent{Id: "z"} // 'z' = 122 % 100 = 22, which is < 50, so NOT dropped
+	// Throttle logic: drop if int(event.Id[0]) % 100 >= throttle
+	// With throttle=50: values 0-49 pass, values 50-99 are dropped
 
-	// Event with ID starting with high ASCII should be dropped
-	eventDropped := &tapiopb.RawEbpfEvent{Id: string([]byte{100})} // 100 % 100 = 0, < 50, NOT dropped
+	eventKept1 := &tapiopb.RawEbpfEvent{Id: "z"}                   // 'z'=122, 122%100=22 < 50 → kept
+	eventKept2 := &tapiopb.RawEbpfEvent{Id: string([]byte{100})}   // 100%100=0 < 50 → kept
+	eventDropped := &tapiopb.RawEbpfEvent{Id: string([]byte{60})}  // 60%100=60 >= 50 → dropped
 
-	// Event with ID starting with ASCII 60 should be dropped (60 >= 50)
-	eventDropped2 := &tapiopb.RawEbpfEvent{Id: string([]byte{60})} // 60 >= 50, dropped
-
-	err := pub.Publish(event)
+	err := pub.Publish(eventKept1)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(pub.buffer))
 
-	err = pub.Publish(eventDropped)
+	err = pub.Publish(eventKept2)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(pub.buffer))
 
-	// This one should be dropped
-	err = pub.Publish(eventDropped2)
+	err = pub.Publish(eventDropped)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(pub.buffer)) // Still 2 because event was dropped
+	assert.Equal(t, 2, len(pub.buffer)) // Still 2 — event was dropped
 }
 
 func TestPublisher_SignalReconnect(t *testing.T) {

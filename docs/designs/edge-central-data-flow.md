@@ -1,5 +1,7 @@
 # TAPIO-AHTI Data Flow Architecture
 
+> **SUPERSEDED**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS for all event transport. See `pkg/intelligence/polku.go` and `pkg/publisher/polku.go`.
+
 ## Overview
 
 This document defines the data flow architecture between TAPIO (Edge Intelligence) and AHTI (Central Intelligence).

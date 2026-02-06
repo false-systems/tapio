@@ -1,6 +1,6 @@
 # Simple Mode Deployment
 
-**Simple Mode** is the fastest way to start using Tapio. It requires **zero infrastructure dependencies** - no NATS, no databases, just observers sending directly to an OTLP collector.
+**Simple Mode** is the fastest way to start using Tapio. It requires **zero infrastructure dependencies** - no external gateways, no databases, just observers sending directly to an OTLP collector.
 
 ## Architecture
 
@@ -57,21 +57,17 @@ env:
 
 ## Deployment Options
 
-| Tier | NATS? | Observer Emitter | Consumer Service | Latency | Use Case |
-|------|-------|------------------|------------------|---------|----------|
-| **Simple** (this) | No | OTLPEmitter | None (direct) | ~10-50ms | Getting started |
-| FREE | Yes | NATSKVEmitter | OTLP Exporter | ~50-200ms | Resilience, buffering |
-| ENTERPRISE | Yes | NATSKVEmitter | Intelligence | ~100-200ms | Graph enrichment |
+| Tier | Observer Emitter | Backend | Latency | Use Case |
+|------|------------------|---------|---------|----------|
+| **Simple** (this) | OTLPEmitter | OTLP Collector (direct) | ~10-50ms | Getting started |
+| **POLKU** | PolkuPublisher | POLKU → AHTI | ~50-200ms | Edge intelligence, graph enrichment |
 
 ## When to Upgrade
 
-**Upgrade to FREE tier when you need:**
-- Event buffering (survives collector restarts)
+**Upgrade to POLKU tier when you need:**
+- Event buffering with backpressure (survives gateway restarts)
 - K8s context enrichment (pod names, labels, etc.)
-- Better backpressure handling
-
-**Upgrade to ENTERPRISE tier when you need:**
-- Graph-based root cause analysis
+- Graph-based root cause analysis via AHTI
 - Cross-service correlation
 - Semantic event relationships
 

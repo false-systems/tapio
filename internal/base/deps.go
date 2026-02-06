@@ -11,7 +11,7 @@ type Deps struct {
 	// Metrics for recording events, errors, drops
 	Metrics *PromObserverMetrics
 
-	// Emitter for sending events to NATS/OTLP
+	// Emitter for sending events to POLKU/OTLP
 	Emitter domain.EventEmitter
 }
 

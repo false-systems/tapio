@@ -1,5 +1,7 @@
 # Tapio Platform Architecture - Required Services Model
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) for all event transport to AHTI.
+
 ## Executive Summary
 
 Based on extensive research of Prometheus, Beyla, and Grafana patterns, Tapio adopts a **platform-first architecture** where a minimal Context Service is **required for all deployments** (FREE and ENTERPRISE). This eliminates standalone/shared dichotomy and provides superior resource efficiency even for single-observer deployments.

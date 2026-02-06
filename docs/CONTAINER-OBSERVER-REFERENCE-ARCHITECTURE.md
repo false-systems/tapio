@@ -1,5 +1,7 @@
 # Container Observer Reference Architecture
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Based on**: Network Observer Implementation (Proven Pattern)
 **Date**: 2025-10-26
 **Purpose**: Implementation guide using existing Tapio patterns

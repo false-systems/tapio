@@ -1,5 +1,7 @@
 # Agent 2: Base Observer + Network Observer (eBPF Focus)
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Timeline:** Week 1, Day 1-4 (parallel with Agent 1's decoder work)
 
 **Goal:** Build observer infrastructure and first consolidated network observer

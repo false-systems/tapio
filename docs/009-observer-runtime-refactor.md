@@ -1,5 +1,7 @@
 # ADR 009: Observer Runtime Refactor - Decouple Infrastructure from Logic
 
+> **NOTE**: NATS emitter references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Status:** Proposed
 **Date:** 2025-01-03
 **Authors:** Tapio Team

@@ -1,5 +1,7 @@
 # Beyla Patterns - Tapio Implementation Guide
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 ## Executive Summary
 
 This document outlines **technical implementation patterns** learned from Beyla that Tapio should adopt, while maintaining our unique value proposition as a **Kubernetes diagnostic tool** (not an observability platform).

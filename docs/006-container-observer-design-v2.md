@@ -1,5 +1,7 @@
 # Design Doc 006: Container Observer - The REAL Implementation
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Status**: Draft v2 (v1 scrapped for being 20% observer)
 **Date**: 2025-10-26
 **Author**: Yair + Claude

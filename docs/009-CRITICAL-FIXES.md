@@ -1,5 +1,7 @@
 # ADR 009 - Critical Fixes Before Phase 1
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Status**: FIXED ✅
 **Date**: 2025-01-05
 **Related**: docs/009-observer-runtime-refactor.md

@@ -1,5 +1,7 @@
 # Design Doc 003: Network Observer DNS/Link/Status Integration
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 **Status**: In Progress
 **Date**: 2025-10-19
 **Authors**: Yair + Claude (AI pair programming)

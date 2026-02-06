@@ -137,15 +137,15 @@ make build
 # Run with OTLP export (FREE tier)
 ./bin/tapio --observer=network
 
-# Run with NATS (connects to AHTI)
-./bin/tapio --observer=network --nats=nats://localhost:4222
+# Run with POLKU (connects to AHTI via gRPC gateway)
+./bin/tapio --observer=network --polku=localhost:50051
 ```
 
 ### Environment Variables
 
 ```bash
 OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317  # OTLP collector
-NATS_URL=nats://localhost:4222               # NATS for AHTI
+POLKU_ENDPOINT=localhost:50051               # POLKU gateway for AHTI
 KUBECONFIG=~/.kube/config                    # K8s access
 ```
 
@@ -190,7 +190,7 @@ tapio/
 │       └── k8scontext/     # Pod metadata enrichment
 ├── pkg/
 │   ├── domain/             # Event types (ObserverEvent)
-│   └── intelligence/       # NATS routing
+│   └── intelligence/       # POLKU routing
 └── docs/
     └── designs/            # Architecture docs
 ```

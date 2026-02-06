@@ -1,5 +1,7 @@
 # Design: Causality-Driven Correlation Patterns for TAPIO
 
+> **NOTE**: NATS references in this document are outdated. TAPIO now uses **POLKU** (gRPC event gateway) instead of NATS.
+
 > **Status**: ✅ **IMPLEMENTED** - All core causality features completed (2025-01-19)
 > - ULID event IDs (pkg/domain/ids.go)
 > - ParentSpanID, Duration, Severity, Outcome fields (pkg/domain/events.go)
