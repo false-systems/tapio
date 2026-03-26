@@ -1,177 +1,82 @@
-# TAPIO - Kubernetes eBPF Observability Agent
+# CLAUDE.md
 
-> **For AI Agents**: Read [docs/ai/WORKFLOW.md](docs/ai/WORKFLOW.md) for TDD workflow and [docs/ai/STANDARDS.md](docs/ai/STANDARDS.md) for code quality rules.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 🚪 Project Overview
-TAPIO is **Edge Intelligence** for Kubernetes - an eBPF-based agent that captures kernel-level events, filters to anomalies at the edge (~1%), and sends enriched events to AHTI (Central Intelligence) for root cause analysis.
+## Project
 
-**What makes TAPIO special:** It doesn't just collect data - it learns baselines (RTT, memory patterns) and only sends what matters.
+TAPIO v4 is a lean, AI-native eBPF edge observer for Kubernetes. It captures kernel-level anomalies (OOM kills, connection failures, I/O errors, CPU stalls), enriches them with K8s pod context, and emits FALSE Protocol Occurrences to pluggable sinks (stdout, file, POLKU, Grafana).
 
-## 🧠 Architecture-First Development
-```
-The 5-Level Dependency Hierarchy IS the law. No circular dependencies, no shortcuts:
-- Level 0: pkg/domain/       (ZERO dependencies - domain models)
-- Level 1: internal/observers/    (Domain ONLY - eBPF observers)
-- Level 2: pkg/intelligence/ (Domain + L1 - event enrichment)
-- Level 3: pkg/integrations/ (Domain + L1 + L2 - POLKU, K8s)
-- Level 4: pkg/interfaces/   (All above - OTLP, REST APIs)
-```
+TAPIO is the founding tool of False Systems. It provides context to AI agents — facts, not reasoning. The kernel sees; AI thinks.
 
-## 🎯 Core Philosophy
-- **eBPF captures, Go parses** - Single eBPF program, userspace processors
-- **TDD mandatory** - RED → GREEN → REFACTOR (NO exceptions)
-- **Small commits** - ≤30 lines per commit, ≤200 lines per PR
-- **Typed everything** - ZERO map[string]interface{} (2 test exceptions allowed)
-- **Direct OTEL** - No wrappers, pure OpenTelemetry
-- **Linux-only** - Mock mode for Mac development, Colima for eBPF testing
+Part of the False Systems ecosystem: TAPIO (eBPF edge) → POLKU (protocol hub) → AHTI (central intelligence). Sibling tools: SYKLI (CI), NOPEA (deploy), RAUTA (gateway), RAUHA (runtime).
 
-## 🎯 The Problem We Solve
+## Commands
 
-**Kubernetes observability requires kernel-level visibility** - APM tools miss network failures, container lifecycle events, and node-level issues.
-
-**The Cost**: Blind spots in production, slow root cause analysis, vendor lock-in.
-
-**Our Solution**:
-1. **eBPF Kernel Capture** - Zero overhead observability at kernel level
-2. **Semantic Correlation** - Automatic causality tracking between events
-3. **Flexible Export** - OTLP (Simple), POLKU (gRPC gateway to AHTI)
-
-## 🔗 TAPIO-PORTTI-AHTI Architecture
-
-**TAPIO = eBPF Edge Intelligence. PORTTI = K8s API Watcher. AHTI = Central Intelligence.**
-
-```
-TAPIO (per node)
-├── eBPF Observers ──filter──→ ~1% anomalies ─┐
-│   (network, container, node)                │
-│                                             ├──→ POLKU ──→ AHTI
-PORTTI (cluster-wide, 1-2 replicas)           │
-└── K8s API Watcher ─────────→ 100% events ───┘
-    (deployments, pods, nodes, services)
-```
-
-- **TAPIO**: eBPF kernel events → filter to 1% anomalies (OOM, connection failures, RTT spikes)
-- **PORTTI**: K8s API events → send 100% (deployments, pods - they're rare but causal)
-- **AHTI**: Central intelligence - receives from both, builds causality graph
-
-See: **[Edge-Central Data Flow](docs/designs/edge-central-data-flow.md)**
-
-## 📚 Documentation
-
-- **[AI Workflow](docs/ai/WORKFLOW.md)** - TDD process, commit workflow, eBPF patterns
-- **[Code Standards](docs/ai/STANDARDS.md)** - Anti-patterns, quality rules, verification
-- **[Architecture](docs/002-tapio-observer-consolidation.md)** - Observer consolidation ADR
-- **[Edge-Central Data Flow](docs/designs/edge-central-data-flow.md)** - Edge vs Central intelligence
-- **[Intelligence Service](docs/designs/intelligence-service-foundation.md)** - Tier architecture
-
-## 🏗️ Quick Start for AI Agents
-
-### TDD Workflow (Mandatory)
 ```bash
-# RED: Write failing test
-go test ./internal/observers/network -v -run TestProcessor  # Should FAIL
+cargo check --workspace                        # type-check all crates
+cargo check -p tapio-common -p tapio-cli       # check platform-independent crates (works on macOS)
+cargo test --workspace                         # run all tests
+cargo test -p tapio-common                     # test single crate
+cargo test -p tapio-common -- test_name        # run single test
+cargo clippy --workspace --all-targets -- -D warnings   # lint
+cargo fmt --check                              # format check
+cargo build --release                          # release build (LTO + strip, ~8MB)
 
-# GREEN: Minimal implementation
-go test ./internal/observers/network -v -run TestProcessor  # Should PASS
-
-# REFACTOR: Clean up
-go fmt ./... && go vet ./... && golangci-lint run
+# CI (via sykli)
+sykli                                          # run full pipeline: fmt → clippy → test → build
 ```
 
-### Pre-Commit Checklist
-- [ ] `go fmt ./...` + `go vet ./...` + `golangci-lint run`
-- [ ] `go test ./... -race`
-- [ ] No map[string]interface{} (except JSON tests)
-- [ ] Functions < 50 lines
-- [ ] No TODOs/stubs
-- [ ] Follow 5-level hierarchy
+## Architecture
 
-## ⛔ Core Rules (INSTANT REJECTION)
+### Workspace crates
 
-```go
-// ❌ NEVER
-var data map[string]interface{}        // Untyped data
-import "tapio/pkg/integrations/telemetry"  // Custom OTEL wrapper
-func Process() { /* 200 lines */ }     // God functions
+- **tapio-common**: Shared types. `#[repr(C)]` eBPF event structs mirroring the C programs, `kernel.*` event type hierarchy, FALSE Protocol `Occurrence` builder, `Sink` trait.
+- **tapio-agent**: DaemonSet binary. Loads eBPF C programs via aya, reads ring buffers, parses events, filters anomalies, enriches with K8s context (kube-rs), emits Occurrences to sinks. Linux-only (aya requires kernel). Exposes Prometheus metrics on `:9090`.
+- **tapio-cli**: User/AI interface. CLI commands (`tapio status`, `tapio watch`, `tapio health`, `tapio recent`) and MCP server (`tapio mcp`) for AI agent integration.
 
-// ✅ ALWAYS
-type NetworkEventData struct { ... }   // Typed structs
-import "go.opentelemetry.io/otel/metric"  // Direct OTEL
-func validate() error { /* 30 lines */ }  // Small functions
-```
+### eBPF programs (C, in `ebpf/`)
 
-## 📦 Package Structure
+Four C programs compiled with clang, loaded at runtime by aya. These capture raw kernel data — all parsing and filtering happens in Rust userspace.
 
-```
-pkg/
-  ├── domain/          # Core types (ObserverEvent, NetworkEventData)
-  ├── intelligence/    # Event enrichment (POLKU bridge, correlation)
-  ├── integrations/    # POLKU, K8s clients
-  └── interfaces/      # OTLP exporter, REST APIs
+| Program | Tracepoints | Detects |
+|---------|------------|---------|
+| `network_monitor.c` | `inet_sock_set_state`, `tcp_receive_reset`, `tcp_retransmit_skb` | Connection failures, RST storms, retransmit spikes, RTT degradation |
+| `container_monitor.c` | `sched_process_exit`, `oom/mark_victim` | OOM kills, abnormal container exits |
+| `storage_monitor.c` | `block_rq_issue`, `block_rq_complete` | I/O errors, latency spikes |
+| `node_pmc_monitor.c` | perf_event counters | CPU IPC degradation, memory stalls |
 
-internal/
-  ├── observers/       # eBPF observers (network, container, node)
-  ├── runtime/         # Observer lifecycle (supervisor, emitters)
-  └── services/        # K8s context, decoders
-```
+Shared headers in `ebpf/headers/`: `vmlinux_minimal.h`, `conn_tracking.h`, `metrics.h`, `tcp.h`.
 
-## 🎯 eBPF Development Pattern (Brendan Gregg Approach)
-
-**MANDATORY**: Single eBPF program + Go processor chain
+### Event flow
 
 ```
-┌─────────────────────────────────────┐
-│  eBPF (network_monitor.c)          │
-│  - Captures TCP states, UDP, IPs   │
-│  - NO parsing (just capture data)  │
-└──────────┬──────────────────────────┘
-           │ Ring Buffer
-           ▼
-┌─────────────────────────────────────┐
-│  Go Userspace (processEventsStage) │
-│  Processor Chain:                   │
-│  1. LinkProcessor   → link_failure  │
-│  2. DNSProcessor    → dns_query     │
-│  3. StatusProcessor → connection    │
-└─────────────────────────────────────┘
+eBPF (C) → ring buffer → parse (#[repr(C)] structs) → filter (anomaly?) → enrich (K8s pod context) → Occurrence → Sink
 ```
 
-**Why**: eBPF parsing is 10x slower than Go, single program reduces kernel overhead, easier to test.
+### Sinks (pluggable output)
 
-## 🔥 Current State (2024-11-30)
+Implement the `Sink` trait from `tapio-common`. Planned: `StdoutSink`, `FileSink` (`.tapio/`), `PolkuSink` (gRPC to POLKU), `GrafanaSink` (OTLP).
 
-### ✅ Production Ready
-- Supervisor with health monitoring (PR #536 merged)
-- eBPF observers: network, container (eBPF)
-- Scheduler observer (Prometheus scraping)
-- K8s context service (pod metadata enrichment for eBPF events)
-- CI/CD with GitHub Actions
-- ZERO map[string]interface{} violations (2 test exceptions)
+### FALSE Protocol
 
-**Note**: K8s API watching (deployments, pods, nodes, services) moved to **PORTTI**.
+TAPIO emits Occurrences in the `kernel.*` type namespace. It fills factual fields (error code, message, data) but NOT reasoning fields. AI agents and AHTI do the reasoning.
 
-### 🚧 In Progress
-- **Intelligence Service** - POLKU gRPC publisher with batching, backpressure, TLS
-  - Design: docs/designs/intelligence-service-foundation.md
-  - Status: Implemented (polkuService + publisher)
+### MCP server
 
-- **Observer Runtime Refactor** (ADR 009) - Unified infrastructure
-  - Status: In progress
+Exposes kernel context to AI agents via stdio transport. Tools return data, not analysis. An AI agent asks TAPIO "what's happening on this node?" and gets structured kernel facts.
 
-### 📈 Quality Metrics
-- map[string]interface{}: **2** (test exceptions only) ✅
-- Test Coverage: Variable per package (no enforcement)
-- All PRs: TDD workflow, <30 line commits
-- Architecture: 5-level hierarchy enforced
+## Rules
 
-## 🔥 Remember
+- **No `.unwrap()` in production code** — use `?` or proper error handling
+- **No `println!`** — use `tracing::{info, warn, error, debug}`
+- **No dead code, no stubs, no TODOs** — complete or don't commit
+- **`#[repr(C)]` structs must match C layouts exactly** — a mismatch silently corrupts data
+- **TAPIO provides context, not reasoning** — facts in Occurrences, no `possible_causes` or `suggested_fix` fields
+- **aya is Linux-only** — use `cfg(target_os = "linux")` for eBPF code, keep tapio-common and tapio-cli platform-independent
+- **Lean** — every dependency must justify its existence. Target: <8MB release binary, <10MB RSS
 
-> "eBPF captures, Go parses. One program, many processors."
+## Observability
 
-> "Format, vet, lint - every single commit"
-
-> "Architecture hierarchy is law. No circular dependencies."
-
----
-
-**False Systems** 🇫🇮
+- **Logging**: `tracing` crate, env-filtered via `RUST_LOG`
+- **Metrics**: `prometheus` crate, exposed on `:9090` via axum (`GET /metrics`, `GET /health`)
+- **Metric prefix**: `tapio_` (e.g., `tapio_anomalies_total`, `tapio_events_processed_total`)

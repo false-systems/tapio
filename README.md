@@ -1,228 +1,109 @@
 # Tapio
 
-**Edge Intelligence for Kubernetes**
+**Kernel eyes for Kubernetes.**
 
-eBPF-based agent that captures kernel-level events, filters to anomalies at the edge (~1%), and sends enriched events to AHTI for root cause analysis.
+Your cluster is lying to you. Kubernetes API events tell you a pod restarted — not *why*. Metrics tell you memory went up — not that the OOM killer fired at PID 1234 with 512Mi used of 512Mi limit. Logs tell you a connection failed — not that TCP retransmits hit 23% on the path between your frontend and database.
 
----
+Tapio sees what the kernel sees. eBPF tracepoints capture the ground truth — OOM kills, connection failures, I/O errors, CPU stalls — and emits it as structured FALSE Protocol occurrences that AI agents and humans can actually use.
 
-## What Makes Tapio Different
+> *Tapio* (Finnish) — spirit of the forest. The original tool that started [False Systems](https://github.com/false-systems).
 
-**Tapio doesn't just collect data - it learns baselines and only sends what matters.**
+## What it observes
 
-| Traditional Observability | Tapio (Edge Intelligence) |
-|--------------------------|---------------------------|
-| Send everything | Filter to ~1% (anomalies only) |
-| Central processing | Edge filtering |
-| High bandwidth | Low bandwidth |
-| Noise | Signal |
+| Observer | Kernel tracepoints | Anomalies detected |
+|----------|-------------------|-------------------|
+| **Network** | `inet_sock_set_state`, `tcp_receive_reset`, `tcp_retransmit_skb` | Connection refused, SYN timeout, retransmit spike, RTT degradation |
+| **Container** | `sched_process_exit`, `oom/mark_victim` | OOM kills, abnormal exits |
+| **Storage** | `block_rq_issue`, `block_rq_complete` | I/O errors, latency spikes |
+| **Node** | perf_event counters | CPU IPC degradation, memory stalls |
+
+## How it works
 
 ```
-eBPF Kernel Events (millions/sec)
-        │
-        ▼
-   Edge Filtering
-   (RTT baseline learning,
-    memory pressure detection)
-        │
-        ▼
-   ~1% Anomalies ──────▶ AHTI (Central Intelligence)
-                         └─▶ Root cause analysis
+eBPF (kernel) ──→ ring buffer ──→ parse + filter ──→ enrich (K8s context) ──→ Occurrence ──→ sink
+                                  (is this an anomaly?)  (which pod? node?)                    │
+                                                                                    ┌──────────┤
+                                                                                    ▼          ▼
+                                                                                  stdout    POLKU → AHTI
+                                                                                  file      Grafana
 ```
 
----
+Tapio filters at the edge. Millions of kernel events per second become the ~1% that matter — the anomalies. Each one becomes a FALSE Protocol occurrence with full kernel context.
+
+## Sinks
+
+```bash
+tapio-agent --sink=stdout          # JSON occurrences, pipe anywhere
+tapio-agent --sink=file            # .tapio/occurrences/ (local, for AI/MCP)
+tapio-agent --sink=polku           # gRPC stream → POLKU → AHTI
+tapio-agent --sink=grafana         # OTLP → Grafana Cloud/Tempo/Loki
+```
+
+Multiple sinks at once: `--sink=polku --sink=file`
+
+## CLI
+
+```bash
+tapio status                # observer health, event rates
+tapio watch                 # live anomaly stream
+tapio watch --network       # filter by observer
+tapio recent                # last 20 anomalies
+tapio health                # node health: network, storage, memory, cpu
+tapio explain <pod>         # all kernel events for a pod
+tapio mcp                   # start MCP server for AI agents
+```
+
+## AI native
+
+Tapio provides context, not conclusions. It fills the factual fields — what the kernel saw — and lets AI agents reason about it.
+
+```json
+{
+  "source": "tapio",
+  "type": "kernel.container.oom_kill",
+  "severity": "critical",
+  "outcome": "failure",
+  "error": { "code": "OOM_KILL", "message": "Container killed by OOM killer" },
+  "context": { "node": "worker-3", "namespace": "default",
+    "entities": [{ "kind": "pod", "id": "default/nginx-abc" }] },
+  "data": { "memory_usage_bytes": 536870912, "memory_limit_bytes": 536870912,
+    "pid": 1234, "exit_code": 137, "signal": 9 }
+}
+```
+
+MCP tools let AI agents query kernel context directly:
+
+```
+tapio_node_health          — factual health snapshot
+tapio_recent_anomalies     — last N anomalies with full kernel data
+tapio_pod_context           — all kernel observations for a pod
+tapio_connection_context   — network path health between two points
+```
+
+## Building
+
+```bash
+cargo build --release                    # agent + CLI
+cargo test --workspace                   # all tests
+cargo clippy --workspace --all-targets   # lint
+```
+
+Release builds use LTO + strip for minimal binary size (~8MB).
+
+The eBPF C programs in `ebpf/` are loaded at runtime via [aya](https://github.com/aya-rs/aya). The agent requires Linux with eBPF support (kernel 5.8+). The CLI works on any platform.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    TAPIO (Edge - Per Node)                       │
-│                                                                  │
-│  ┌──────────────────────┐                                        │
-│  │   eBPF Observers     │                                        │
-│  │                      │                                        │
-│  │  • network (TCP/DNS) │                                        │
-│  │  • container (OOM)   │                                        │
-│  │  • node (PMC)        │                                        │
-│  └──────────┬───────────┘                                        │
-│             │                                                    │
-│             ▼                                                    │
-│      Filter (~1%)                                                │
-│      (anomalies)                                                 │
-│             │                                                    │
-│             ▼                                                    │
-│        POLKU ────────────────────────────────────────────────────┤
-└─────────────────────────┬───────────────────────────────────────┘
-                          │
-┌─────────────────────────┴───────────────────────────────────────┐
-│                    PORTTI (Cluster - 1-2 replicas)               │
-│                                                                  │
-│  K8s API Watcher: Deployments, Pods, Services, Nodes, Events    │
-│  Sends 100% (low volume, causal anchors)                         │
-│             │                                                    │
-│             ▼                                                    │
-│        POLKU ────────────────────────────────────────────────────┤
-└─────────────────────────┬───────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    AHTI (Central)                                │
-│                                                                  │
-│              Receives → Learns → Correlates                      │
-│                                                                  │
-│      "Deployment X at T=0 → OOM at T=5min → Root Cause"         │
-│                                                                  │
-│                   Never watches anything                         │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-**Key insight:**
-- **TAPIO**: eBPF kernel events → Filter to 1% (only anomalies)
-- **PORTTI**: K8s API events → Send 100% (they're causal anchors)
-- **AHTI**: Never watches - only receives and correlates
-
----
-
-## Observers
-
-### eBPF Observers (Kernel Level)
-
-| Observer | Captures | Filters To |
-|----------|----------|------------|
-| **Network** | TCP states, DNS, retransmits | RTT spikes >2x baseline, connection failures |
-| **Container** | OOM kills, process exits | OOM, error exits (code ≠ 0) |
-| **Node** | PMC, cgroup metrics | Memory pressure >80%, CPU throttling |
-
-### Prometheus Scraping
-
-| Observer | Captures | Sends |
-|----------|----------|-------|
-| **Scheduler** | kube-scheduler metrics | Scheduling latency, queue depth |
-
-**Note**: K8s API watching (Deployments, Pods, Services, Nodes, Events) moved to **[PORTTI](https://github.com/yairfalse/portti)**.
-
----
-
-## Status
-
-### Production Ready
-
-| Component | Coverage | Description |
-|-----------|----------|-------------|
-| Supervisor | 89.8% | Observer lifecycle |
-| Network Observer | 78% | eBPF TCP/DNS/RTT |
-| Scheduler Observer | 85.2% | Prometheus scraping |
-| K8s Context | - | Pod metadata enrichment |
-
-### In Progress
-
-| Component | Status |
-|-----------|--------|
-| Container Observer | eBPF code written, needs compilation |
-| Node Observer | PMC metrics, cgroup integration |
-
----
-
-## Quick Start
-
-```bash
-# Prerequisites: Linux, Go 1.24+, Kubernetes cluster
-
-git clone https://github.com/yairfalse/tapio
-cd tapio
-
-# Build
-make build
-
-# Run with OTLP export (FREE tier)
-./bin/tapio --observer=network
-
-# Run with POLKU (connects to AHTI via gRPC gateway)
-./bin/tapio --observer=network --polku=localhost:50051
-```
-
-### Environment Variables
-
-```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317  # OTLP collector
-POLKU_ENDPOINT=localhost:50051               # POLKU gateway for AHTI
-KUBECONFIG=~/.kube/config                    # K8s access
-```
-
----
-
-## Edge Filtering Examples
-
-### Network Observer
-
-```c
-// In eBPF: Only emit when RTT spikes >2x baseline OR >500ms
-if (rtt_us > (baseline->baseline_us * 2) || rtt_us > 500000) {
-    emit_rtt_spike_event();  // ~1% of traffic
-}
-```
-
-### Container Observer
-
-```go
-// Only send OOM kills and error exits
-if evt.Type == EventTypeOOMKill || classification.Category == ExitCategoryError {
-    publish(event)  // Skip normal exits
-}
-```
-
----
-
-## Project Structure
-
-```
 tapio/
-├── internal/
-│   ├── observers/
-│   │   ├── network/        # eBPF TCP/DNS/RTT
-│   │   ├── container/      # eBPF OOM/exits
-│   │   ├── node/           # eBPF PMC/cgroup
-│   │   ├── deployments/    # K8s API
-│   │   └── scheduler/      # K8s Events
-│   ├── runtime/
-│   │   └── supervisor/     # Observer lifecycle
-│   └── services/
-│       └── k8scontext/     # Pod metadata enrichment
-├── pkg/
-│   ├── domain/             # Event types (ObserverEvent)
-│   └── intelligence/       # POLKU routing
-└── docs/
-    └── designs/            # Architecture docs
+├── tapio-common/     # shared types: eBPF structs, event types, FALSE Protocol, sink trait
+├── tapio-agent/      # DaemonSet binary: eBPF → observe → emit
+├── tapio-cli/        # CLI + MCP server
+├── ebpf/             # 4 C programs (the kernel truth)
+└── eval/oracle/      # ground-truth tests
 ```
 
----
-
-## Documentation
-
-- **[Edge-Central Data Flow](docs/designs/edge-central-data-flow.md)** - TAPIO-AHTI architecture
-- **[Network Observer Design](docs/003-network-observer-dns-link-status-integration.md)** - eBPF patterns
-- **[Container Observer Design](docs/006-container-observer-design-v2.md)** - OOM/exit detection
-
----
-
-## Related Projects
-
-| Project | Description |
-|---------|-------------|
-| **[PORTTI](https://github.com/yairfalse/portti)** | K8s API watcher - Deployments, Pods, Services, Nodes |
-| **[AHTI](https://github.com/yairfalse/ahti)** | Central Intelligence - receives events, builds causality graph |
-| **[POLKU](https://github.com/yairfalse/polku)** | Event router - transforms raw events to AhtiEvent |
-| **[Sykli](https://github.com/yairfalse/sykli)** | CI in your language |
-
----
-
-## Why "Tapio"?
-
-Finnish god of forests. Watches over the ecosystem.
-
-Tapio watches Kubernetes at the kernel level - network packets, container lifecycle, node health. It sees what APM tools miss.
-
----
+Part of **False Systems**: TAPIO (eBPF edge) → [POLKU](https://github.com/false-systems/polku) (protocol hub) → [AHTI](https://github.com/false-systems/ahti) (central intelligence)
 
 ## License
 
