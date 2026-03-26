@@ -1,11 +1,11 @@
 use crate::occurrence::Occurrence;
 
-/// Sink receives occurrences and sends them somewhere.
-/// Implementations: stdout, file, polku (gRPC), grafana (OTLP).
-#[async_trait::async_trait]
+/// Sink contract — where occurrences go.
+/// Implementations live in tapio-agent (stdout, file, polku, grafana).
+/// This trait is sync — async wrappers added in the agent crate.
 pub trait Sink: Send + Sync {
-    async fn send(&self, occurrence: &Occurrence) -> Result<(), SinkError>;
-    async fn flush(&self) -> Result<(), SinkError>;
+    fn send(&self, occurrence: &Occurrence) -> Result<(), SinkError>;
+    fn flush(&self) -> Result<(), SinkError>;
     fn name(&self) -> &str;
 }
 

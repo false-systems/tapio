@@ -10,4 +10,3 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 ulid = { workspace = true }
 thiserror = { workspace = true }
-async-trait = "0.1"
