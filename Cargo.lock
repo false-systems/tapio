@@ -2033,7 +2033,6 @@ dependencies = [
 name = "tapio-common"
 version = "4.0.0"
 dependencies = [
- "async-trait",
  "chrono",
  "serde",
  "serde_json",
