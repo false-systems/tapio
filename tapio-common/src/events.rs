@@ -1,5 +1,5 @@
-/// TAPIO event types in the kernel.* namespace.
-/// These are the anomalies TAPIO detects at the eBPF edge.
+//! TAPIO event types in the kernel.* namespace.
+//! These are the anomalies TAPIO detects at the eBPF edge.
 
 /// Hierarchical event type following FALSE Protocol conventions.
 /// Format: kernel.<observer>.<anomaly>
