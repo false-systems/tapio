@@ -16,7 +16,10 @@ tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+dashmap = "6"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 aya = { workspace = true }
 aya-log = { workspace = true }
+kube = { workspace = true }
+k8s-openapi = { workspace = true }

@@ -20,7 +20,9 @@ pub fn classify(event: &StorageEvent) -> Option<ClassifiedAnomaly> {
             error_code: "IO_ERROR",
             error_message: format!(
                 "I/O error on {}:{} (error={}, {})",
-                event.dev_major, event.dev_minor, event.error_code,
+                event.dev_major,
+                event.dev_minor,
+                event.error_code,
                 op_name(event.opcode),
             ),
         })
@@ -36,7 +38,9 @@ pub fn classify(event: &StorageEvent) -> Option<ClassifiedAnomaly> {
             error_code: "LATENCY_SPIKE",
             error_message: format!(
                 "I/O latency {:.1}ms on {}:{} ({})",
-                event.latency_ms(), event.dev_major, event.dev_minor,
+                event.latency_ms(),
+                event.dev_major,
+                event.dev_minor,
                 op_name(event.opcode),
             ),
         })
@@ -44,27 +48,32 @@ pub fn classify(event: &StorageEvent) -> Option<ClassifiedAnomaly> {
 }
 
 pub fn build_occurrence(event: &StorageEvent, anomaly: &ClassifiedAnomaly) -> Occurrence {
-    Occurrence::new(anomaly.event_type, anomaly.severity.clone(), anomaly.outcome.clone())
-        .with_error(anomaly.error_code, &anomaly.error_message)
-        .with_data(serde_json::json!({
-            "pid": event.pid,
-            "comm": event.comm_str(),
-            "dev_major": event.dev_major,
-            "dev_minor": event.dev_minor,
-            "sector": event.sector,
-            "bytes": event.bytes,
-            "latency_ms": event.latency_ms(),
-            "opcode": op_name(event.opcode),
-            "error_code": event.error_code,
-            "cgroup_id": event.cgroup_id,
-            "timestamp_ns": event.timestamp_ns,
-        }))
+    Occurrence::new(
+        anomaly.event_type,
+        anomaly.severity.clone(),
+        anomaly.outcome.clone(),
+    )
+    .with_error(anomaly.error_code, &anomaly.error_message)
+    .with_data(serde_json::json!({
+        "pid": event.pid,
+        "comm": event.comm_str(),
+        "dev_major": event.dev_major,
+        "dev_minor": event.dev_minor,
+        "sector": event.sector,
+        "bytes": event.bytes,
+        "latency_ms": event.latency_ms(),
+        "opcode": op_name(event.opcode),
+        "error_code": event.error_code,
+        "cgroup_id": event.cgroup_id,
+        "timestamp_ns": event.timestamp_ns,
+    }))
 }
 
 #[cfg(target_os = "linux")]
 pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
+    cache: &crate::enrichment::PodCache,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::{Ebpf, maps::RingBuf, programs::TracePoint};
@@ -77,7 +86,8 @@ pub async fn run(
         ("trace_block_rq_issue", "block", "block_rq_issue"),
         ("trace_block_rq_complete", "block", "block_rq_complete"),
     ] {
-        let prog: &mut TracePoint = ebpf.program_mut(name)
+        let prog: &mut TracePoint = ebpf
+            .program_mut(name)
             .ok_or_else(|| anyhow::anyhow!("program not found: {name}"))?
             .try_into()?;
         prog.load()?;
@@ -85,7 +95,8 @@ pub async fn run(
         tracing::info!(tracepoint = %format!("{category}/{tp}"), "attached");
     }
 
-    let events_map = ebpf.map_mut("events")
+    let events_map = ebpf
+        .map_mut("events")
         .ok_or_else(|| anyhow::anyhow!("map not found: events"))?;
     let mut ring_buf = RingBuf::try_from(events_map)?;
 
@@ -110,7 +121,11 @@ pub async fn run(
                     };
                     event_count += 1;
                     if let Some(anomaly) = classify(&event) {
-                        let occ = build_occurrence(&event, &anomaly);
+                        let mut occ = build_occurrence(&event, &anomaly);
+                        crate::enrichment::enrich(&mut occ, cache, &crate::enrichment::EnrichHints {
+                            src_ip: None,
+                            cgroup_path: None, // storage events use cgroup_id, not path — future: resolve via /proc
+                        });
                         anomaly_count += 1;
                         if let Err(e) = sink.send(&occ) {
                             tracing::warn!(error = %e, "sink error");
