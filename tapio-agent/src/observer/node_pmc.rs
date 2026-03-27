@@ -24,10 +24,7 @@ pub fn classify(event: &PmcEvent) -> Option<ClassifiedAnomaly> {
             severity: Severity::Critical,
             outcome: Outcome::InProgress,
             error_code: "CPU_STALL",
-            error_message: format!(
-                "CPU {} stall {stall_pct:.1}% (ipc={ipc:.2})",
-                event.cpu,
-            ),
+            error_message: format!("CPU {} stall {stall_pct:.1}% (ipc={ipc:.2})", event.cpu,),
         });
     }
 
@@ -50,10 +47,7 @@ pub fn classify(event: &PmcEvent) -> Option<ClassifiedAnomaly> {
             severity: Severity::Warning,
             outcome: Outcome::InProgress,
             error_code: "IPC_DEGRADATION",
-            error_message: format!(
-                "CPU {} low IPC {ipc:.2} (stall {stall_pct:.1}%)",
-                event.cpu,
-            ),
+            error_message: format!("CPU {} low IPC {ipc:.2} (stall {stall_pct:.1}%)", event.cpu,),
         });
     }
 
@@ -61,17 +55,21 @@ pub fn classify(event: &PmcEvent) -> Option<ClassifiedAnomaly> {
 }
 
 pub fn build_occurrence(event: &PmcEvent, anomaly: &ClassifiedAnomaly) -> Occurrence {
-    Occurrence::new(anomaly.event_type, anomaly.severity.clone(), anomaly.outcome.clone())
-        .with_error(anomaly.error_code, &anomaly.error_message)
-        .with_data(serde_json::json!({
-            "cpu": event.cpu,
-            "cycles": event.cycles,
-            "instructions": event.instructions,
-            "stall_cycles": event.stall_cycles,
-            "ipc": event.ipc(),
-            "stall_pct": event.stall_pct(),
-            "timestamp_ns": event.timestamp,
-        }))
+    Occurrence::new(
+        anomaly.event_type,
+        anomaly.severity.clone(),
+        anomaly.outcome.clone(),
+    )
+    .with_error(anomaly.error_code, &anomaly.error_message)
+    .with_data(serde_json::json!({
+        "cpu": event.cpu,
+        "cycles": event.cycles,
+        "instructions": event.instructions,
+        "stall_cycles": event.stall_cycles,
+        "ipc": event.ipc(),
+        "stall_pct": event.stall_pct(),
+        "timestamp_ns": event.timestamp,
+    }))
 }
 
 // PMC observer requires perf_event_open syscalls to set up hardware counters.

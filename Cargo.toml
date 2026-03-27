@@ -44,7 +44,7 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json"]
 tokio-util = "0.7"
 
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # Essentials
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
