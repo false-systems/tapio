@@ -17,6 +17,18 @@ pub const NET_EVENT_RTT_SPIKE: u8 = 3;
 pub const CONTAINER_EVENT_EXIT: u32 = 1;
 pub const CONTAINER_EVENT_OOM: u32 = 2;
 
+// TCP states (matching kernel tcp_states.h)
+pub const TCP_ESTABLISHED: u8 = 1;
+pub const TCP_SYN_SENT: u8 = 2;
+pub const TCP_SYN_RECV: u8 = 3;
+pub const TCP_FIN_WAIT1: u8 = 4;
+pub const TCP_FIN_WAIT2: u8 = 5;
+pub const TCP_TIME_WAIT: u8 = 6;
+pub const TCP_CLOSE: u8 = 7;
+pub const TCP_CLOSE_WAIT: u8 = 8;
+pub const TCP_LAST_ACK: u8 = 9;
+pub const TCP_LISTEN: u8 = 10;
+
 // Storage severity levels (matching storage_monitor.c defines)
 pub const STORAGE_SEVERITY_NORMAL: u8 = 0;
 pub const STORAGE_SEVERITY_WARNING: u8 = 1;
