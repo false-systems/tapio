@@ -29,6 +29,10 @@ pub const TCP_CLOSE_WAIT: u8 = 8;
 pub const TCP_LAST_ACK: u8 = 9;
 pub const TCP_LISTEN: u8 = 10;
 
+// Storage operation types (matching storage_monitor.c defines)
+pub const OP_READ: u8 = 0;
+pub const OP_WRITE: u8 = 1;
+
 // Storage severity levels (matching storage_monitor.c defines)
 pub const STORAGE_SEVERITY_NORMAL: u8 = 0;
 pub const STORAGE_SEVERITY_WARNING: u8 = 1;
