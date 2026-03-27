@@ -17,7 +17,7 @@ pub const NET_EVENT_RTT_SPIKE: u8 = 3;
 pub const CONTAINER_EVENT_EXIT: u32 = 1;
 pub const CONTAINER_EVENT_OOM: u32 = 2;
 
-// TCP states (matching kernel tcp_states.h)
+// TCP states (subset used by TAPIO — kernel has additional states like CLOSING, NEW_SYN_RECV)
 pub const TCP_ESTABLISHED: u8 = 1;
 pub const TCP_SYN_SENT: u8 = 2;
 pub const TCP_SYN_RECV: u8 = 3;

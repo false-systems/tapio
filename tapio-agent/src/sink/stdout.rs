@@ -6,9 +6,10 @@ pub struct StdoutSink;
 
 impl Sink for StdoutSink {
     fn send(&self, occurrence: &Occurrence) -> Result<(), SinkError> {
-        let mut out = io::stdout().lock();
-        serde_json::to_writer(&mut out, occurrence)
+        let buf = serde_json::to_vec(occurrence)
             .map_err(|e| SinkError::Serialization(e.to_string()))?;
+        let mut out = io::stdout().lock();
+        out.write_all(&buf).map_err(SinkError::Io)?;
         out.write_all(b"\n").map_err(SinkError::Io)?;
         Ok(())
     }

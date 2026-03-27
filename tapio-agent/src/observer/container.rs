@@ -157,6 +157,10 @@ pub async fn run(
             }
         }
     }
+
+    if let Err(e) = sink.flush() {
+        tracing::warn!(error = %e, "sink flush error on shutdown");
+    }
     Ok(())
 }
 
