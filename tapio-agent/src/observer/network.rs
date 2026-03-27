@@ -75,9 +75,7 @@ pub fn classify(event: &NetworkEvent) -> Option<ClassifiedAnomaly> {
                     severity: Severity::Error,
                     outcome: Outcome::Failure,
                     error_code: "SYN_TIMEOUT",
-                    error_message: format!(
-                        "Connection timeout to {dst_ip}:{dp} (SYN_SENT→CLOSE)",
-                    ),
+                    error_message: format!("Connection timeout to {dst_ip}:{dp} (SYN_SENT→CLOSE)",),
                     ebpf_event_type: et,
                 })
             } else {
@@ -131,9 +129,13 @@ pub fn build_occurrence(event: &NetworkEvent, anomaly: &ClassifiedAnomaly) -> Oc
         }
     }
 
-    Occurrence::new(anomaly.event_type, anomaly.severity.clone(), anomaly.outcome.clone())
-        .with_error(anomaly.error_code, &anomaly.error_message)
-        .with_data(data)
+    Occurrence::new(
+        anomaly.event_type,
+        anomaly.severity.clone(),
+        anomaly.outcome.clone(),
+    )
+    .with_error(anomaly.error_code, &anomaly.error_message)
+    .with_data(data)
 }
 
 /// Load eBPF program and start the observation loop.
@@ -141,6 +143,7 @@ pub fn build_occurrence(event: &NetworkEvent, anomaly: &ClassifiedAnomaly) -> Oc
 pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
+    cache: &crate::enrichment::PodCache,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::{Ebpf, maps::RingBuf, programs::TracePoint};
@@ -154,7 +157,8 @@ pub async fn run(
         ("trace_tcp_receive_reset", "tcp", "tcp_receive_reset"),
         ("trace_tcp_retransmit_skb", "tcp", "tcp_retransmit_skb"),
     ] {
-        let prog: &mut TracePoint = ebpf.program_mut(name)
+        let prog: &mut TracePoint = ebpf
+            .program_mut(name)
             .ok_or_else(|| anyhow::anyhow!("program not found: {name}"))?
             .try_into()?;
         prog.load()?;
@@ -162,7 +166,8 @@ pub async fn run(
         tracing::info!(tracepoint = %format!("{category}/{tp}"), "attached");
     }
 
-    let events_map = ebpf.map_mut("events")
+    let events_map = ebpf
+        .map_mut("events")
         .ok_or_else(|| anyhow::anyhow!("map not found: events"))?;
     let mut ring_buf = RingBuf::try_from(events_map)?;
 
@@ -187,7 +192,11 @@ pub async fn run(
                     };
                     event_count += 1;
                     if let Some(anomaly) = classify(&event) {
-                        let occ = build_occurrence(&event, &anomaly);
+                        let mut occ = build_occurrence(&event, &anomaly);
+                        crate::enrichment::enrich(&mut occ, cache, &crate::enrichment::EnrichHints {
+                            src_ip: Some(event.src_ip_str()),
+                            cgroup_path: None,
+                        });
                         anomaly_count += 1;
                         if let Err(e) = sink.send(&occ) {
                             tracing::warn!(error = %e, "sink error");

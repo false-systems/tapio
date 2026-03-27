@@ -83,25 +83,30 @@ pub fn classify(event: &ContainerEvent) -> Option<ClassifiedAnomaly> {
 
 pub fn build_occurrence(event: &ContainerEvent, anomaly: &ClassifiedAnomaly) -> Occurrence {
     let f = EventFields::from(event);
-    Occurrence::new(anomaly.event_type, anomaly.severity.clone(), anomaly.outcome.clone())
-        .with_error(anomaly.error_code, &anomaly.error_message)
-        .with_data(serde_json::json!({
-            "pid": f.pid,
-            "tid": f.tid,
-            "exit_code": f.exit_code,
-            "signal": f.signal,
-            "memory_usage_bytes": f.memory_usage,
-            "memory_limit_bytes": f.memory_limit,
-            "cgroup_id": f.cgroup_id,
-            "cgroup_path": f.cgroup_path,
-            "timestamp_ns": f.timestamp_ns,
-        }))
+    Occurrence::new(
+        anomaly.event_type,
+        anomaly.severity.clone(),
+        anomaly.outcome.clone(),
+    )
+    .with_error(anomaly.error_code, &anomaly.error_message)
+    .with_data(serde_json::json!({
+        "pid": f.pid,
+        "tid": f.tid,
+        "exit_code": f.exit_code,
+        "signal": f.signal,
+        "memory_usage_bytes": f.memory_usage,
+        "memory_limit_bytes": f.memory_limit,
+        "cgroup_id": f.cgroup_id,
+        "cgroup_path": f.cgroup_path,
+        "timestamp_ns": f.timestamp_ns,
+    }))
 }
 
 #[cfg(target_os = "linux")]
 pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
+    cache: &crate::enrichment::PodCache,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::{Ebpf, maps::RingBuf, programs::TracePoint};
@@ -114,7 +119,8 @@ pub async fn run(
         ("handle_oom", "oom", "mark_victim"),
         ("handle_exit", "sched", "sched_process_exit"),
     ] {
-        let prog: &mut TracePoint = ebpf.program_mut(name)
+        let prog: &mut TracePoint = ebpf
+            .program_mut(name)
             .ok_or_else(|| anyhow::anyhow!("program not found: {name}"))?
             .try_into()?;
         prog.load()?;
@@ -122,7 +128,8 @@ pub async fn run(
         tracing::info!(tracepoint = %format!("{category}/{tp}"), "attached");
     }
 
-    let events_map = ebpf.map_mut("events")
+    let events_map = ebpf
+        .map_mut("events")
         .ok_or_else(|| anyhow::anyhow!("map not found: events"))?;
     let mut ring_buf = RingBuf::try_from(events_map)?;
 
@@ -147,7 +154,11 @@ pub async fn run(
                     };
                     event_count += 1;
                     if let Some(anomaly) = classify(&event) {
-                        let occ = build_occurrence(&event, &anomaly);
+                        let mut occ = build_occurrence(&event, &anomaly);
+                        crate::enrichment::enrich(&mut occ, cache, &crate::enrichment::EnrichHints {
+                            src_ip: None,
+                            cgroup_path: Some(event.cgroup_path_str().to_string()),
+                        });
                         anomaly_count += 1;
                         if let Err(e) = sink.send(&occ) {
                             tracing::warn!(error = %e, "sink error");
