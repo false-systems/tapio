@@ -11,24 +11,12 @@ path = "src/main.rs"
 [dependencies]
 tapio-common = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 aya = { workspace = true }
 aya-log = { workspace = true }
-kube = { workspace = true }
-k8s-openapi = { workspace = true }
-tonic = { workspace = true }
-prost = { workspace = true }
-prost-types = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-prometheus = { workspace = true }
-axum = { workspace = true }
-chrono = { workspace = true }
-ulid = { workspace = true }
-thiserror = { workspace = true }
-anyhow = { workspace = true }
-bytes = { workspace = true }
-tokio-util = { workspace = true }
