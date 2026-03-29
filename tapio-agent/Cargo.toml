@@ -20,3 +20,9 @@ anyhow = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 aya = { workspace = true }
 aya-log = { workspace = true }
+libc = { workspace = true }
+kube = { workspace = true }
+k8s-openapi = { workspace = true }
+# Concurrent cache for K8s enrichment without blocking observers
+dashmap = { workspace = true }
+futures = { workspace = true }

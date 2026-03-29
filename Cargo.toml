@@ -23,7 +23,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "syn
 
 # K8s enrichment
 kube = { version = "0.98", features = ["runtime", "client"] }
-k8s-openapi = { version = "0.23", features = ["v1_30"] }
+k8s-openapi = { version = "0.24", features = ["v1_32"] }
 
 # POLKU sink (gRPC)
 tonic = "0.12"
@@ -44,7 +44,16 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json"]
 tokio-util = "0.7"
 
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
+
+# System
+libc = "0.2"
+
+# Concurrent data structures
+dashmap = "6"
+
+# Async streams (kube reflector)
+futures = "0.3"
 
 # Essentials
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }

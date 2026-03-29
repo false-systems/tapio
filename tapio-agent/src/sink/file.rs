@@ -1,27 +1,18 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Once;
 use tapio_common::occurrence::Occurrence;
 use tapio_common::sink::{Sink, SinkError};
 
 pub struct FileSink {
     dir: PathBuf,
-    init: Once,
 }
 
 impl FileSink {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self {
-            dir: dir.into(),
-            init: Once::new(),
-        }
+        Self { dir: dir.into() }
     }
 
     fn ensure_dir(&self) -> Result<(), SinkError> {
-        let dir = &self.dir;
-        self.init.call_once(|| {
-            let _ = fs::create_dir_all(dir);
-        });
         if !self.dir.exists() {
             fs::create_dir_all(&self.dir).map_err(SinkError::Io)?;
         }

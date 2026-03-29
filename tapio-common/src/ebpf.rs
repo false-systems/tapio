@@ -14,8 +14,8 @@ pub const NET_EVENT_RETRANSMIT: u8 = 2;
 pub const NET_EVENT_RTT_SPIKE: u8 = 3;
 
 // Container event types (matching container_monitor.c defines)
+pub const CONTAINER_EVENT_OOM: u32 = 0;
 pub const CONTAINER_EVENT_EXIT: u32 = 1;
-pub const CONTAINER_EVENT_OOM: u32 = 2;
 
 // TCP states (subset used by TAPIO — kernel has additional states like CLOSING, NEW_SYN_RECV)
 pub const TCP_ESTABLISHED: u8 = 1;
@@ -228,7 +228,11 @@ pub struct StorageEvent {
 
 impl StorageEvent {
     pub fn comm_str(&self) -> &str {
-        let len = self.comm.iter().position(|&b| b == 0).unwrap_or(self.comm.len());
+        let len = self
+            .comm
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.comm.len());
         std::str::from_utf8(&self.comm[..len]).unwrap_or("<invalid>")
     }
 
