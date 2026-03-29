@@ -145,10 +145,10 @@ int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
 	evt->tid = pid_tgid & 0xFFFFFFFF;
 
-	// Read exit_code from task_struct
+	// Read exit_code from task_struct (CO-RE: field offset resolved at load time via BTF)
 	// exit_code format: (exit_code << 8) | signal
 	__u32 exit_code = 0;
-	bpf_probe_read_kernel(&exit_code, sizeof(exit_code), &task->exit_code);
+	bpf_core_read(&exit_code, sizeof(exit_code), &task->exit_code);
 
 	evt->exit_code = exit_code >> 8;          // Upper byte is exit code
 	evt->signal = exit_code & 0x7F;           // Lower 7 bits is signal

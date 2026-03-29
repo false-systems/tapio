@@ -26,6 +26,7 @@ struct {
 #define METRIC_NETWORK_RTT_SAMPLES_TOTAL  2
 #define METRIC_NETWORK_RST_TOTAL          3
 #define METRIC_NETWORK_RTT_SPIKES_TOTAL   4
+#define METRIC_NETWORK_BASELINE_REJECTED  5
 
 // Scheduler Observer Metrics (100-199) - Reserved for future
 #define METRIC_SCHEDULER_DECISIONS        100

@@ -164,7 +164,15 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 
 				// Transition to STABLE after collecting enough samples
 				if (baseline->sample_count >= LEARNING_SAMPLES) {
-					baseline->state = RTT_STATE_STABLE;
+					// Reject baselines above 100ms — likely captured under load
+					if (baseline->baseline_us > 100000) {
+						baseline->sample_count = 0;
+						baseline->baseline_us = 0;
+						baseline->state = RTT_STATE_LEARNING;
+						metric_inc(METRIC_NETWORK_BASELINE_REJECTED);
+					} else {
+						baseline->state = RTT_STATE_STABLE;
+					}
 				}
 
 				bpf_map_update_elem(&baseline_rtt, &key, baseline, BPF_EXIST);

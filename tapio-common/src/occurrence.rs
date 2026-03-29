@@ -186,27 +186,31 @@ mod tests {
 
     #[test]
     fn occurrence_serialization_round_trip() {
-        let occ = Occurrence::new("kernel.container.oom_kill", Severity::Critical, Outcome::Failure)
-            .with_error("OOM_KILL", "Container killed by OOM killer")
-            .with_context(Context {
-                cluster: Some("prod".into()),
-                node: Some("worker-3".into()),
-                namespace: Some("default".into()),
-                trace_id: None,
-                span_id: None,
-                entities: vec![Entity {
-                    kind: "pod".into(),
-                    id: "default/nginx-abc".into(),
-                    name: Some("nginx-abc".into()),
-                    version: None,
-                }],
-                correlation_keys: vec![],
-            })
-            .with_data(serde_json::json!({
-                "memory_usage_bytes": 536870912_u64,
-                "memory_limit_bytes": 536870912_u64,
-                "pid": 1234,
-            }));
+        let occ = Occurrence::new(
+            "kernel.container.oom_kill",
+            Severity::Critical,
+            Outcome::Failure,
+        )
+        .with_error("OOM_KILL", "Container killed by OOM killer")
+        .with_context(Context {
+            cluster: Some("prod".into()),
+            node: Some("worker-3".into()),
+            namespace: Some("default".into()),
+            trace_id: None,
+            span_id: None,
+            entities: vec![Entity {
+                kind: "pod".into(),
+                id: "default/nginx-abc".into(),
+                name: Some("nginx-abc".into()),
+                version: None,
+            }],
+            correlation_keys: vec![],
+        })
+        .with_data(serde_json::json!({
+            "memory_usage_bytes": 536870912_u64,
+            "memory_limit_bytes": 536870912_u64,
+            "pid": 1234,
+        }));
 
         let json = serde_json::to_string(&occ).unwrap();
         let parsed: Occurrence = serde_json::from_str(&json).unwrap();
@@ -223,7 +227,11 @@ mod tests {
 
     #[test]
     fn type_field_serializes_as_type_not_occurrence_type() {
-        let occ = Occurrence::new("kernel.network.rst_storm", Severity::Error, Outcome::Failure);
+        let occ = Occurrence::new(
+            "kernel.network.rst_storm",
+            Severity::Error,
+            Outcome::Failure,
+        );
         let json = serde_json::to_string(&occ).unwrap();
         assert!(json.contains("\"type\":\"kernel.network.rst_storm\""));
         assert!(!json.contains("occurrence_type"));
@@ -231,7 +239,11 @@ mod tests {
 
     #[test]
     fn outcome_includes_in_progress() {
-        let occ = Occurrence::new("kernel.node.cpu_stall", Severity::Warning, Outcome::InProgress);
+        let occ = Occurrence::new(
+            "kernel.node.cpu_stall",
+            Severity::Warning,
+            Outcome::InProgress,
+        );
         let json = serde_json::to_string(&occ).unwrap();
         assert!(json.contains("\"in_progress\""));
     }
@@ -257,7 +269,11 @@ mod tests {
 
     #[test]
     fn validate_passes_for_valid_occurrence() {
-        let occ = Occurrence::new("kernel.container.oom_kill", Severity::Critical, Outcome::Failure);
+        let occ = Occurrence::new(
+            "kernel.container.oom_kill",
+            Severity::Critical,
+            Outcome::Failure,
+        );
         assert!(occ.validate().is_ok());
     }
 

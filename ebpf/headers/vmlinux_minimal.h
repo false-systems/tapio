@@ -165,6 +165,12 @@ typedef __u32 dev_t;
 typedef __u64 sector_t;
 #endif
 
+// Task structure (minimal CO-RE definition for container observer)
+// Only the fields we access — exit_code for process exit tracking
+struct task_struct {
+    int exit_code;
+} __attribute__((preserve_access_index));
+
 // Block I/O tracepoint structures (for storage observer)
 // CO-RE compatible with preserve_access_index - field offsets resolved at runtime via BTF
 // Reference: Brendan Gregg's BPF Performance Tools, Chapter 2

@@ -22,9 +22,11 @@ cargo clippy --workspace --all-targets -- -D warnings   # lint
 cargo fmt --check                              # format check
 cargo build --release                          # release build (LTO + strip, ~8MB)
 
-# CI (via sykli)
+# CI (via sykli — requires cargo +nightly -Zscript)
 sykli                                          # run full pipeline: fmt → clippy → test → build
 ```
+
+Rust edition 2024, MSRV 1.85. tapio-agent only compiles on Linux (aya dependency).
 
 ## Architecture
 
@@ -55,7 +57,7 @@ eBPF (C) → ring buffer → parse (#[repr(C)] structs) → filter (anomaly?) �
 
 ### Sinks (pluggable output)
 
-Implement the `Sink` trait from `tapio-common`. Planned: `StdoutSink`, `FileSink` (`.tapio/`), `PolkuSink` (gRPC to POLKU), `GrafanaSink` (OTLP).
+Implement the `Sink` trait from `tapio-common/src/sink.rs` (synchronous — async wrappers belong in the agent). Current: `StdoutSink` (JSON lines), `FileSink` (one `.json` per occurrence in `.tapio/`), `MultiSink` (fan-out, logs errors, doesn't short-circuit). Planned: `PolkuSink` (gRPC), `GrafanaSink` (OTLP).
 
 ### FALSE Protocol
 
@@ -70,10 +72,20 @@ Exposes kernel context to AI agents via stdio transport. Tools return data, not 
 - **No `.unwrap()` in production code** — use `?` or proper error handling
 - **No `println!`** — use `tracing::{info, warn, error, debug}`
 - **No dead code, no stubs, no TODOs** — complete or don't commit
-- **`#[repr(C)]` structs must match C layouts exactly** — a mismatch silently corrupts data
+- **`#[repr(C)]` structs must match C layouts exactly** — a mismatch silently corrupts data. Every struct in `ebpf.rs` has a `size_of` assertion test. Use `std::ptr::read_unaligned` for packed structs to avoid UB
 - **TAPIO provides context, not reasoning** — facts in Occurrences, no `possible_causes` or `suggested_fix` fields
 - **aya is Linux-only** — use `cfg(target_os = "linux")` for eBPF code, keep tapio-common and tapio-cli platform-independent
 - **Lean** — every dependency must justify its existence. Target: <8MB release binary, <10MB RSS
+
+## Testing patterns
+
+Each observer module (`network.rs`, `container.rs`, `storage.rs`, `node_pmc.rs`) tests `classify()` and `build_occurrence()` independently of the eBPF `run()` loop. Test helpers construct events via `unsafe { std::mem::zeroed::<T>() }` then set relevant fields. Occurrence tests call `.validate()` to confirm correctness and test JSON serialization round-trips.
+
+## Environment variables
+
+- **`NODE_NAME`**: Required for K8s enrichment. Set to the Kubernetes node name. If unset, enrichment is disabled (occurrences emitted without pod context). Typically set via the Downward API in the DaemonSet spec.
+- **`RUST_LOG`**: Controls log verbosity (e.g. `RUST_LOG=info` or `RUST_LOG=tapio_agent=debug`).
+- **`TAPIO_DATA_DIR`**: Override the CLI's default data directory (default: `.tapio/occurrences`).
 
 ## Observability
 
