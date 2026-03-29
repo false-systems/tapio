@@ -163,19 +163,36 @@ fn bpf_map_set_perf_fd(
     }
 }
 
-/// Extract raw fd from an aya Map (all variants wrap MapData).
+/// Extract raw fd from an aya Map. All variants wrap MapData — exhaustive match
+/// ensures a compile error if aya adds new variants in a future version.
 #[cfg(target_os = "linux")]
 fn map_raw_fd(map: &aya::maps::Map) -> std::os::fd::RawFd {
+    use aya::maps::Map;
     use std::os::fd::{AsFd, AsRawFd};
-    match map {
-        aya::maps::Map::PerfEventArray(data) => data.fd().as_fd().as_raw_fd(),
-        aya::maps::Map::Array(data) => data.fd().as_fd().as_raw_fd(),
-        aya::maps::Map::RingBuf(data) => data.fd().as_fd().as_raw_fd(),
-        aya::maps::Map::HashMap(data) => data.fd().as_fd().as_raw_fd(),
-        aya::maps::Map::PerCpuArray(data) => data.fd().as_fd().as_raw_fd(),
-        aya::maps::Map::Unsupported(data) => data.fd().as_fd().as_raw_fd(),
-        _ => unreachable!("all map variants wrap MapData"),
-    }
+    let data = match map {
+        Map::Array(d)
+        | Map::BloomFilter(d)
+        | Map::CpuMap(d)
+        | Map::DevMap(d)
+        | Map::DevMapHash(d)
+        | Map::HashMap(d)
+        | Map::LpmTrie(d)
+        | Map::LruHashMap(d)
+        | Map::PerCpuArray(d)
+        | Map::PerCpuHashMap(d)
+        | Map::PerCpuLruHashMap(d)
+        | Map::PerfEventArray(d)
+        | Map::ProgramArray(d)
+        | Map::Queue(d)
+        | Map::RingBuf(d)
+        | Map::SockHash(d)
+        | Map::SockMap(d)
+        | Map::Stack(d)
+        | Map::StackTraceMap(d)
+        | Map::Unsupported(d)
+        | Map::XskMap(d) => d,
+    };
+    data.fd().as_fd().as_raw_fd()
 }
 
 /// Populate a PERF_EVENT_ARRAY map with a perf event fd for a given CPU.

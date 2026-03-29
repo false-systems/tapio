@@ -135,7 +135,10 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 		key.dport = args->dport;
 	}
 
-	// RTT tracking for ESTABLISHED connections with valid RTT
+	// RTT tracking for ESTABLISHED connections with valid RTT (IPv4 only)
+	// IPv6 skipped: conn_key is 4-byte addrs — IPv6 connections would all hash to
+	// the same zero key, producing incorrect shared baselines. Proper IPv6 tracking
+	// requires extending conn_key to 16-byte addrs (separate work item).
 	if (args->newstate == TCP_ESTABLISHED && rtt_us > 0 && args->family == AF_INET) {
 		// Lookup or create baseline entry
 		struct rtt_baseline *baseline = bpf_map_lookup_elem(&baseline_rtt, &key);

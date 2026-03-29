@@ -75,7 +75,9 @@ impl K8sEnricher {
         use std::os::unix::fs::MetadataExt;
 
         for pod in self.store.state() {
-            let Some(uid) = pod.metadata.uid.as_deref() else { continue };
+            let Some(uid) = pod.metadata.uid.as_deref() else {
+                continue;
+            };
             let qos = pod_qos(&pod);
             let uid_underscored = uid.replace('-', "_");
 
@@ -106,12 +108,13 @@ impl K8sEnricher {
 
         let namespace = pod.metadata.namespace.as_deref().unwrap_or_default();
         let name = pod.metadata.name.as_deref().unwrap_or_default();
+        let resource_version = pod.metadata.resource_version.clone();
 
         let mut entities = vec![Entity {
             kind: "pod".into(),
             id: format!("{namespace}/{name}"),
             name: Some(name.to_string()),
-            version: None,
+            version: resource_version,
         }];
 
         // Derive deployment name from ReplicaSet owner reference
