@@ -325,13 +325,7 @@ fn cmd_health(data_dir: &Path, observer_filter: Option<&str>) -> anyhow::Result<
         }
 
         writeln!(out)?;
-        let health = if total_critical >= 3 || total_count >= 20 {
-            "critical"
-        } else if total_count > 0 {
-            "degraded"
-        } else {
-            "healthy"
-        };
+        let health = health_status(total_count, total_critical);
         writeln!(
             out,
             "overall: {health} ({total_count} anomalies, {total_critical} critical in last hour)"
@@ -343,6 +337,16 @@ fn cmd_health(data_dir: &Path, observer_filter: Option<&str>) -> anyhow::Result<
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn health_status(total_count: usize, total_critical: usize) -> &'static str {
+    if total_critical >= 3 || total_count >= 20 {
+        "critical"
+    } else if total_count > 0 {
+        "degraded"
+    } else {
+        "healthy"
+    }
+}
 
 fn load_occurrences(data_dir: &Path) -> anyhow::Result<Vec<Occurrence>> {
     let mut occurrences = Vec::new();
@@ -497,5 +501,28 @@ mod tests {
     fn format_timestamp_trims_to_datetime() {
         let ts = "2026-03-29T14:23:01.123456789+00:00";
         assert_eq!(format_timestamp(ts), "2026-03-29T14:23:01");
+    }
+
+    #[test]
+    fn health_status_healthy() {
+        assert_eq!(health_status(0, 0), "healthy");
+    }
+
+    #[test]
+    fn health_status_degraded() {
+        assert_eq!(health_status(1, 0), "degraded");
+        assert_eq!(health_status(19, 2), "degraded");
+    }
+
+    #[test]
+    fn health_status_critical_by_count() {
+        assert_eq!(health_status(20, 0), "critical");
+        assert_eq!(health_status(100, 0), "critical");
+    }
+
+    #[test]
+    fn health_status_critical_by_severity() {
+        assert_eq!(health_status(3, 3), "critical");
+        assert_eq!(health_status(5, 10), "critical");
     }
 }
