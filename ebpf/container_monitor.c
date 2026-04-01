@@ -1,35 +1,31 @@
-//go:build ignore
+// SPDX-License-Identifier: GPL-2.0
 
 // Container Observer eBPF Program
 // Captures OOM kills and process exits with cgroup context
-// Following Brendan Gregg's principle: "eBPF captures, Go parses"
+// Following Brendan Gregg's principle: "eBPF captures, Rust parses"
 
-#include "../../base/bpf/vmlinux_minimal.h"
+#include "headers/vmlinux_minimal.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
 
-// Event types (MUST match Go ContainerEventBPF.Type)
+// Event types (MUST match Rust ContainerEvent.event_type in tapio-common/src/ebpf.rs)
 #define EVENT_TYPE_OOM_KILL 0
 #define EVENT_TYPE_EXIT     1
 
-// Cgroup path max length
-#define CGROUP_PATH_LEN 256
-
 // Container event structure
-// MUST match Go ContainerEventBPF exactly (308 bytes)
-// Field order optimized for alignment (uint64 first)
+// MUST match Rust ContainerEvent in tapio-common/src/ebpf.rs (52 bytes packed)
+// Field order optimized for alignment (u64 first)
 struct container_event {
 	__u64 memory_limit;          // offset 0: Memory limit from cgroup
 	__u64 memory_usage;          // offset 8: Memory usage from cgroup
 	__u64 timestamp_ns;          // offset 16: Event timestamp in nanoseconds
-	__u64 cgroup_id;             // offset 24: Cgroup ID (survives cgroup deletion)
+	__u64 cgroup_id;             // offset 24: Cgroup ID — userspace resolves cgroup path via this ID
 	__u32 type;                  // offset 32: EVENT_TYPE_OOM_KILL or EVENT_TYPE_EXIT
 	__u32 pid;                   // offset 36: Process ID
 	__u32 tid;                   // offset 40: Thread ID
 	__s32 exit_code;             // offset 44: Exit code
 	__s32 signal;                // offset 48: Signal number
-	char  cgroup_path[CGROUP_PATH_LEN]; // offset 52: cgroup path (256 bytes)
 } __attribute__((packed));
 
 // Ring buffer for events (256KB)
@@ -45,6 +41,10 @@ struct {
 // Triggered when kernel OOM killer selects a victim process
 // We capture memory info HERE because cgroup will be deleted shortly
 // ═══════════════════════════════════════════════════════════
+
+/* Tracepoint argument structs: hardcoded layout is intentional.
+ * Tracepoint ABIs are stable across kernel versions (unlike internal structs).
+ * CO-RE is used for task_struct field access where offsets vary. */
 
 // Tracepoint context for oom/mark_victim
 // Format: cat /sys/kernel/debug/tracing/events/oom/mark_victim/format
@@ -93,13 +93,8 @@ int handle_oom(struct trace_event_raw_mark_victim *ctx) {
 	evt->memory_limit = 0;
 
 	// Capture cgroup ID - survives cgroup deletion (Issue #566)
-	// This is the key fix: cgroup_id is stable even after cgroup is deleted
+	// Cgroup path resolution happens in Rust userspace using this ID
 	evt->cgroup_id = bpf_get_current_cgroup_id();
-
-	// Cgroup path left empty - userspace resolves via cgroup_id
-	// This avoids the race condition where cgroup is deleted before
-	// Go can read cgroupfs
-	evt->cgroup_path[0] = '\0';
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
@@ -130,6 +125,19 @@ int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
 		return 0;
 	}
 
+	// Read exit_code from task_struct (CO-RE: field offset resolved at load time via BTF)
+	// exit_code format: (exit_code << 8) | signal
+	__u32 exit_code = 0;
+	bpf_core_read(&exit_code, sizeof(exit_code), &task->exit_code);
+
+	__s32 code = exit_code >> 8;
+	__s32 sig = exit_code & 0x7F;
+
+	/* BPF-side filter: only emit abnormal exits (non-zero exit code or signal) */
+	if (code == 0 && sig == 0) {
+		return 0;
+	}
+
 	// Reserve space in ring buffer
 	struct container_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
 	if (!evt) {
@@ -145,13 +153,8 @@ int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
 	evt->tid = pid_tgid & 0xFFFFFFFF;
 
-	// Read exit_code from task_struct (CO-RE: field offset resolved at load time via BTF)
-	// exit_code format: (exit_code << 8) | signal
-	__u32 exit_code = 0;
-	bpf_core_read(&exit_code, sizeof(exit_code), &task->exit_code);
-
-	evt->exit_code = exit_code >> 8;          // Upper byte is exit code
-	evt->signal = exit_code & 0x7F;           // Lower 7 bits is signal
+	evt->exit_code = code;
+	evt->signal = sig;
 
 	// Memory info not available for regular exits
 	// Userspace will enrich from cgroup monitor
@@ -159,10 +162,8 @@ int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
 	evt->memory_limit = 0;
 
 	// Capture cgroup ID - survives cgroup deletion (Issue #566)
+	// Cgroup path resolution happens in Rust userspace using this ID
 	evt->cgroup_id = bpf_get_current_cgroup_id();
-
-	// Cgroup path left empty - userspace resolves via cgroup_id
-	evt->cgroup_path[0] = '\0';
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;

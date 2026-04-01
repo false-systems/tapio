@@ -1,5 +1,3 @@
-//go:build ignore
-
 #ifndef __TAPIO_TCP_H__
 #define __TAPIO_TCP_H__
 
@@ -10,50 +8,12 @@
 // Import shared connection tracking library
 #include "conn_tracking.h"
 
-// TCP protocol number
-#define IPPROTO_TCP 6
-#define IPPROTO_UDP 17
+// TCP protocol/family/state constants are defined in vmlinux_minimal.h
+// Do NOT redefine them here — include vmlinux_minimal.h before this header.
 
-// Address families
-#define AF_INET  2
-#define AF_INET6 10
-
-// TCP states (from linux/tcp.h)
-#define TCP_ESTABLISHED 1
-#define TCP_SYN_SENT    2
-#define TCP_SYN_RECV    3
-#define TCP_FIN_WAIT1   4
-#define TCP_FIN_WAIT2   5
-#define TCP_TIME_WAIT   6
-#define TCP_CLOSE       7
-#define TCP_CLOSE_WAIT  8
-#define TCP_LAST_ACK    9
-#define TCP_LISTEN      10
-#define TCP_CLOSING     11
-
-// Helper: Get TCP state name (for debugging)
-static __always_inline const char *tcp_state_name(__u8 state)
-{
-	switch (state) {
-	case TCP_ESTABLISHED: return "ESTABLISHED";
-	case TCP_SYN_SENT:    return "SYN_SENT";
-	case TCP_SYN_RECV:    return "SYN_RECV";
-	case TCP_FIN_WAIT1:   return "FIN_WAIT1";
-	case TCP_FIN_WAIT2:   return "FIN_WAIT2";
-	case TCP_TIME_WAIT:   return "TIME_WAIT";
-	case TCP_CLOSE:       return "CLOSE";
-	case TCP_CLOSE_WAIT:  return "CLOSE_WAIT";
-	case TCP_LAST_ACK:    return "LAST_ACK";
-	case TCP_LISTEN:      return "LISTEN";
-	case TCP_CLOSING:     return "CLOSING";
-	default:              return "UNKNOWN";
-	}
-}
-
-// NOTE: Connection tracking structs now defined in conn_tracking.h (shared):
+// Connection tracking structs defined in conn_tracking.h (shared):
 //   - conn_key: Connection identifier (saddr, daddr, sport, dport)
 //   - retransmit_stats: Retransmit/RST tracking per connection
-//   - make_conn_key(): Helper to create connection keys
 
 // ============================================================================
 // Kernel Socket Structures (Minimal CO-RE Definitions)
@@ -80,7 +40,7 @@ static __always_inline const char *tcp_state_name(__u8 state)
 
 // Base socket structure (all sockets inherit from this)
 // We don't access any sock fields directly, but need the type for safe casting.
-// network_monitor.c:105: const struct sock *sk = args->skaddr;
+// Used in network_monitor.c to cast tracepoint skaddr to tcp_sock.
 struct sock {
 	// Opaque - we don't access fields, just use for type safety
 	char __opaque[0];
@@ -96,9 +56,9 @@ struct inet_connection_sock {
 // Contains TCP-specific fields like RTT, retransmit counters, congestion window.
 //
 // FIELDS WE ACCESS (network_monitor.c):
-//   - srtt_us:        Line 110 (RTT tracking)
-//   - total_retrans:  Line 397 (retransmit tracking)
-//   - snd_cwnd:       Line 402 (congestion window)
+//   - srtt_us:        trace_inet_sock_set_state (RTT tracking)
+//   - total_retrans:  trace_tcp_retransmit_skb (retransmit tracking)
+//   - snd_cwnd:       trace_tcp_retransmit_skb (congestion window)
 struct tcp_sock {
 	struct inet_connection_sock inet_conn;  // Parent struct (inheritance)
 	__u32 srtt_us;        // Smoothed RTT in microseconds (divided by 8)

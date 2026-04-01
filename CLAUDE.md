@@ -33,8 +33,8 @@ Rust edition 2024, MSRV 1.85. tapio-agent only compiles on Linux (aya dependency
 ### Workspace crates
 
 - **tapio-common**: Shared types. `#[repr(C)]` eBPF event structs mirroring the C programs, `kernel.*` event type hierarchy, FALSE Protocol `Occurrence` builder, `Sink` trait.
-- **tapio-agent**: DaemonSet binary. Loads eBPF C programs via aya, reads ring buffers, parses events, filters anomalies, enriches with K8s context (kube-rs), emits Occurrences to sinks. Linux-only (aya requires kernel). Exposes Prometheus metrics on `:9090`.
-- **tapio-cli**: User/AI interface. CLI commands (`tapio status`, `tapio watch`, `tapio health`, `tapio recent`) and MCP server (`tapio mcp`) for AI agent integration.
+- **tapio-agent**: DaemonSet binary. Loads eBPF C programs via aya, reads ring buffers, parses events, filters anomalies, enriches with K8s context (kube-rs), emits Occurrences to sinks. Linux-only (aya requires kernel). Internal modules: `observer/` (four observer submodules), `sink/` (`StdoutSink`, `FileSink`), `enricher.rs` (K8s pod enrichment, also `cfg(target_os = "linux")`).
+- **tapio-cli**: User/AI interface. Single-file crate (`main.rs`). CLI commands (`tapio status`, `tapio watch`, `tapio health`, `tapio recent`, `tapio explain <pod>`). Reads from `.tapio/occurrences/*.json` — decoupled from the agent process. MCP server (`tapio mcp`) is stubbed.
 
 ### eBPF programs (C, in `ebpf/`)
 
@@ -47,7 +47,19 @@ Four C programs compiled with clang, loaded at runtime by aya. These capture raw
 | `storage_monitor.c` | `block_rq_issue`, `block_rq_complete` | I/O errors, latency spikes |
 | `node_pmc_monitor.c` | perf_event counters | CPU IPC degradation, memory stalls |
 
-Shared headers in `ebpf/headers/`: `vmlinux_minimal.h`, `conn_tracking.h`, `metrics.h`, `tcp.h`.
+Shared headers in `ebpf/headers/`: `vmlinux_minimal.h`, `conn_tracking.h`, `metrics.h`, `tcp.h`, `node_pmc_monitor.h`.
+
+### eBPF compilation
+
+No build script exists — eBPF C programs are compiled manually with clang and placed in `--ebpf-dir` (default `/opt/tapio/ebpf`). The agent loads pre-compiled `.o` files at runtime via `aya::Ebpf::load_file()`.
+
+```bash
+# Compile a single eBPF program (example)
+clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I ebpf/headers \
+  -c ebpf/network_monitor.c -o /opt/tapio/ebpf/network_monitor.o
+```
+
+Requires kernel 5.8+ and capabilities: `CAP_BPF`, `CAP_PERFMON`, `CAP_NET_ADMIN`. The agent runs as a privileged DaemonSet.
 
 ### Event flow
 
@@ -57,15 +69,15 @@ eBPF (C) → ring buffer → parse (#[repr(C)] structs) → filter (anomaly?) �
 
 ### Sinks (pluggable output)
 
-Implement the `Sink` trait from `tapio-common/src/sink.rs` (synchronous — async wrappers belong in the agent). Current: `StdoutSink` (JSON lines), `FileSink` (one `.json` per occurrence in `.tapio/`), `MultiSink` (fan-out, logs errors, doesn't short-circuit). Planned: `PolkuSink` (gRPC), `GrafanaSink` (OTLP).
+Implement the `Sink` trait from `tapio-common/src/sink.rs` (synchronous — async wrappers belong in the agent). Current: `StdoutSink` (JSON lines), `FileSink` (one `.json` per occurrence in `.tapio/`) in `tapio-agent/src/sink/`, plus `MultiSink` (fan-out, logs errors, doesn't short-circuit) defined in `tapio-agent/src/main.rs`. Planned: `PolkuSink` (gRPC), `GrafanaSink` (OTLP).
 
 ### FALSE Protocol
 
 TAPIO emits Occurrences in the `kernel.*` type namespace. It fills factual fields (error code, message, data) but NOT reasoning fields. AI agents and AHTI do the reasoning.
 
-### MCP server
+### MCP server (planned)
 
-Exposes kernel context to AI agents via stdio transport. Tools return data, not analysis. An AI agent asks TAPIO "what's happening on this node?" and gets structured kernel facts.
+Will expose kernel context to AI agents via stdio transport. Tools return data, not analysis. Currently stubbed in the CLI (`tapio mcp` returns an error).
 
 ## Rules
 
@@ -74,12 +86,19 @@ Exposes kernel context to AI agents via stdio transport. Tools return data, not 
 - **No dead code, no stubs, no TODOs** — complete or don't commit
 - **`#[repr(C)]` structs must match C layouts exactly** — a mismatch silently corrupts data. Every struct in `ebpf.rs` has a `size_of` assertion test. Use `std::ptr::read_unaligned` for packed structs to avoid UB
 - **TAPIO provides context, not reasoning** — facts in Occurrences, no `possible_causes` or `suggested_fix` fields
-- **aya is Linux-only** — use `cfg(target_os = "linux")` for eBPF code, keep tapio-common and tapio-cli platform-independent
+- **aya is Linux-only** — use `cfg(target_os = "linux")` for eBPF code and K8s enricher, keep tapio-common and tapio-cli platform-independent
 - **Lean** — every dependency must justify its existence. Target: <8MB release binary, <10MB RSS
 
 ## Testing patterns
 
 Each observer module (`network.rs`, `container.rs`, `storage.rs`, `node_pmc.rs`) tests `classify()` and `build_occurrence()` independently of the eBPF `run()` loop. Test helpers construct events via `unsafe { std::mem::zeroed::<T>() }` then set relevant fields. Occurrence tests call `.validate()` to confirm correctness and test JSON serialization round-trips.
+
+## Agent CLI flags
+
+The `tapio-agent` binary accepts:
+- `--sink <name>` — output sink (`stdout`, `file`), repeatable for multi-sink
+- `--ebpf-dir <path>` — directory with compiled `.o` files (default: `/opt/tapio/ebpf`)
+- `--data-dir <path>` — directory for file sink output (default: `.tapio/occurrences`)
 
 ## Environment variables
 
@@ -90,5 +109,6 @@ Each observer module (`network.rs`, `container.rs`, `storage.rs`, `node_pmc.rs`)
 ## Observability
 
 - **Logging**: `tracing` crate, env-filtered via `RUST_LOG`
-- **Metrics**: `prometheus` crate, exposed on `:9090` via axum (`GET /metrics`, `GET /health`)
+- **Metrics** (planned): `prometheus` crate on `:9090` via axum — workspace deps exist but not yet wired into the agent
 - **Metric prefix**: `tapio_` (e.g., `tapio_anomalies_total`, `tapio_events_processed_total`)
+- **eBPF-side metrics**: Per-CPU counters in `tapio_metrics` map (defined in `metrics.h`), including `METRIC_NETWORK_BASELINE_REJECTED` for RTT baseline health

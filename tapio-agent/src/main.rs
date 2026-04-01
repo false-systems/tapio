@@ -4,7 +4,28 @@ mod observer;
 mod sink;
 
 use clap::Parser;
+use std::io::{self, Write};
 use tracing::info;
+
+/// Stderr writer that silently swallows broken pipe errors.
+/// Prevents panic=abort from killing the agent when piped to `head`, `grep`, etc.
+struct BrokenPipeGuard;
+
+impl Write for BrokenPipeGuard {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match io::stderr().write(buf) {
+            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(buf.len()),
+            other => other,
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match io::stderr().flush() {
+            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+            other => other,
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(
@@ -78,8 +99,18 @@ impl tapio_common::sink::Sink for MultiSink {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Ignore SIGPIPE so broken pipes (e.g. piping to `head`) return EPIPE
+    // instead of aborting the process (panic=abort in release profile).
+    #[cfg(target_os = "linux")]
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN); }
+
+    // Use a non-panicking writer for tracing — default stderr writer panics
+    // on broken pipe, which with panic=abort kills the process.
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(|| -> Box<dyn std::io::Write> {
+            Box::new(BrokenPipeGuard)
+        })
         .init();
 
     let args = Args::parse();

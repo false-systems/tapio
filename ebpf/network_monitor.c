@@ -1,14 +1,14 @@
-//go:build ignore
+// SPDX-License-Identifier: GPL-2.0
 
-#include "../../base/bpf/vmlinux_minimal.h"
+#include "headers/vmlinux_minimal.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_endian.h>
 
 // Shared helpers (Cilium-style layered lib)
-#include "../../common/bpf/lib/tcp.h"
-#include "../../common/bpf/lib/metrics.h"
+#include "headers/tcp.h"
+#include "headers/metrics.h"
 
 // Event types for distinguishing tracepoint sources
 #define EVENT_TYPE_STATE_CHANGE  0  // inet_sock_set_state
@@ -16,7 +16,7 @@
 #define EVENT_TYPE_RETRANSMIT    2  // tcp_retransmit_skb
 #define EVENT_TYPE_RTT_SPIKE     3  // RTT spike detection (Stage 3)
 
-// Network event structure - MUST match Go NetworkEventBPF exactly (71 bytes packed, 72 with Go alignment)
+// Network event structure - MUST match Rust NetworkEvent in tapio-common/src/ebpf.rs (72 bytes packed)
 struct network_event {
 	__u32 pid;           // offset 0, size 4
 	__u32 src_ip;        // offset 4, size 4
@@ -27,10 +27,10 @@ struct network_event {
 	__u16 dst_port;      // offset 46, size 2
 	__u16 family;        // offset 48, size 2
 	__u8  protocol;      // offset 50, size 1
-	__u8  old_state;     // offset 51, size 1 - TCP state OR total_retrans (see event_type)
-	__u8  new_state;     // offset 52, size 1 - TCP state OR snd_cwnd (see event_type)
-	__u8  event_type;    // offset 53, size 1 - EVENT_TYPE_STATE_CHANGE, EVENT_TYPE_RST_RECEIVED, or EVENT_TYPE_RETRANSMIT
-	__u8  comm[16];      // offset 54, size 16
+	__u8  event_type;    // offset 51, size 1 - EVENT_TYPE_STATE_CHANGE, EVENT_TYPE_RST_RECEIVED, or EVENT_TYPE_RETRANSMIT
+	__u16 old_state;     // offset 52, size 2 - TCP state OR total_retrans/baseline_ms (see event_type)
+	__u16 new_state;     // offset 54, size 2 - TCP state OR snd_cwnd/current_ms (see event_type)
+	__u8  comm[16];      // offset 56, size 16
 } __attribute__((packed));
 
 // Ring buffer for sending events to userspace
@@ -60,7 +60,7 @@ struct {
 } baseline_rtt SEC(".maps");
 
 // Connection statistics tracking (LRU auto-evicts old connections)
-// Tracks retransmits, packet counts, RST flags per connection
+// Tracks retransmit counts and RST flags per connection
 struct {
 	__uint(type, BPF_MAP_TYPE_LRU_HASH);
 	__uint(max_entries, 10000);  // Track up to 10k connections
@@ -81,8 +81,11 @@ struct {
 
 // NOTE: IPPROTO_TCP, AF_INET, AF_INET6, TCP_* states now in tcp.h (shared)
 
+/* Tracepoint argument structs: hardcoded layout is intentional.
+ * Tracepoint ABIs are stable across kernel versions (unlike internal structs).
+ * CO-RE is used for tcp_sock/task_struct field access where offsets vary. */
+
 // Tracepoint arguments for sock/inet_sock_set_state
-// This is the stable kernel ABI - no BPF_CORE_READ needed!
 //
 // NOTE: This struct layout matches Linux kernel 5.8+
 // Verified against: /sys/kernel/debug/tracing/events/sock/inet_sock_set_state/format
@@ -211,11 +214,11 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 						__builtin_memcpy(&evt->src_ip, args->saddr, 4);
 						__builtin_memcpy(&evt->dst_ip, args->daddr, 4);
 
-						// Reuse OldState/NewState for RTT data (convert us to ms, clamp to 255)
+						// Reuse old_state/new_state for RTT data (convert us to ms, clamp to u16)
 						__u32 baseline_ms = baseline->baseline_us / 1000;
 						__u32 current_ms = rtt_us / 1000;
-						evt->old_state = baseline_ms > 255 ? 255 : baseline_ms;
-						evt->new_state = current_ms > 255 ? 255 : current_ms;
+						evt->old_state = baseline_ms > 65535 ? 65535 : (__u16)baseline_ms;
+						evt->new_state = current_ms > 65535 ? 65535 : (__u16)current_ms;
 
 						bpf_ringbuf_submit(evt, 0);
 					}
@@ -251,8 +254,8 @@ skip_rtt_tracking:
 		evt->event_type = EVENT_TYPE_STATE_CHANGE;
 
 		// Extract TCP state transition
-		evt->old_state = (__u8)args->oldstate;
-		evt->new_state = (__u8)args->newstate;
+		evt->old_state = (__u16)args->oldstate;
+		evt->new_state = (__u16)args->newstate;
 
 		// Extract protocol and family
 		evt->protocol = (__u8)args->protocol;
@@ -282,10 +285,11 @@ skip_rtt_tracking:
 
 // Tracepoint arguments for tcp/tcp_receive_reset
 // Fires when kernel receives RST packet (connection refused/reset)
+// Uses tcp_event_sk event class — no state field (unlike tcp_retransmit_skb)
+// Verify: cat /sys/kernel/debug/tracing/events/tcp/tcp_receive_reset/format
 struct trace_event_raw_tcp_receive_reset {
 	__u64 unused;       // Common tracepoint header
 	const void *skaddr;
-	int state;          // TCP state when RST received
 	__u16 sport;
 	__u16 dport;
 	__u16 family;
@@ -315,9 +319,9 @@ int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
 	evt->pid = pid_tgid >> 32;
 	bpf_get_current_comm(&evt->comm, sizeof(evt->comm));
 
-	// Store current state in old_state field (state when RST received)
-	evt->old_state = (__u8)args->state;
-	evt->new_state = 0;  // Not applicable for RST
+	// tcp_receive_reset has no state field — RST can arrive in any state
+	evt->old_state = 0;
+	evt->new_state = 0;
 
 	// Extract protocol and family
 	evt->protocol = IPPROTO_TCP;
@@ -353,7 +357,6 @@ int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
 			stats->rst_received = 1;
 		} else {
 			struct retransmit_stats new_stats = {
-				.total_packets = 0,
 				.retransmits = 0,
 				.last_retransmit_ns = 0,
 				.rst_received = 1,
@@ -440,11 +443,9 @@ int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 		struct retransmit_stats *stats = bpf_map_lookup_elem(&conn_stats, &key);
 		if (stats) {
 			stats->retransmits++;
-			stats->total_packets++;
 			stats->last_retransmit_ns = bpf_ktime_get_ns();
 		} else {
 			struct retransmit_stats new_stats = {
-				.total_packets = 1,
 				.retransmits = 1,
 				.last_retransmit_ns = bpf_ktime_get_ns(),
 				.rst_received = 0,
@@ -458,30 +459,30 @@ int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 	const struct sock *sk = args->skaddr;
 	if (sk) {
 		// Read tcp_sock fields (requires BTF)
-		// old_state = total_retrans (clamped to u8)
-		// new_state = snd_cwnd (clamped to u8)
+		// old_state = total_retrans (clamped to u16)
+		// new_state = snd_cwnd (clamped to u16)
 
 		// SAFETY: tcp_sock contains inet_connection_sock contains inet_sock contains sock
 		// We can safely cast to tcp_sock since this is tcp_retransmit_skb
 		struct tcp_sock *tp = (struct tcp_sock *)sk;
 
-		// Read total retransmits
-		__u8 total_retrans = 0;
+		// Read total retransmits (u32 in kernel, clamp to u16 for event)
+		__u32 total_retrans = 0;
 		if (bpf_core_read(&total_retrans, sizeof(total_retrans), &tp->total_retrans) != 0) {
 			// Failed to read total_retrans - discard event
 			bpf_ringbuf_discard(evt, 0);
 			return 0;
 		}
-		evt->old_state = total_retrans;  // Reuse old_state field
+		evt->old_state = total_retrans > 65535 ? 65535 : (__u16)total_retrans;
 
-		// Read congestion window (clamped to u8)
+		// Read congestion window (clamped to u16)
 		__u32 snd_cwnd = 0;
 		if (bpf_core_read(&snd_cwnd, sizeof(snd_cwnd), &tp->snd_cwnd) != 0) {
 			// Failed to read snd_cwnd - discard event
 			bpf_ringbuf_discard(evt, 0);
 			return 0;
 		}
-		evt->new_state = snd_cwnd > 255 ? 255 : (__u8)snd_cwnd;  // Reuse new_state field
+		evt->new_state = snd_cwnd > 65535 ? 65535 : (__u16)snd_cwnd;
 	}
 
 	// Submit event
