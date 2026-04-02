@@ -20,7 +20,7 @@ struct container_event {
 	__u64 memory_limit;          // offset 0: Memory limit from cgroup
 	__u64 memory_usage;          // offset 8: Memory usage from cgroup
 	__u64 timestamp_ns;          // offset 16: Event timestamp in nanoseconds
-	__u64 cgroup_id;             // offset 24: Cgroup ID — userspace resolves cgroup path via this ID
+	__u64 cgroup_id;             // offset 24: Cgroup ID — userspace derives K8s pod context from this ID
 	__u32 type;                  // offset 32: EVENT_TYPE_OOM_KILL or EVENT_TYPE_EXIT
 	__u32 pid;                   // offset 36: Process ID
 	__u32 tid;                   // offset 40: Thread ID
@@ -93,7 +93,7 @@ int handle_oom(struct trace_event_raw_mark_victim *ctx) {
 	evt->memory_limit = 0;
 
 	// Capture cgroup ID - survives cgroup deletion (Issue #566)
-	// Cgroup path resolution happens in Rust userspace using this ID
+	// K8s pod context derived in Rust userspace using this ID
 	evt->cgroup_id = bpf_get_current_cgroup_id();
 
 	bpf_ringbuf_submit(evt, 0);
@@ -157,12 +157,12 @@ int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
 	evt->signal = sig;
 
 	// Memory info not available for regular exits
-	// Userspace will enrich from cgroup monitor
+	// Userspace may enrich from cgroupfs if still available
 	evt->memory_usage = 0;
 	evt->memory_limit = 0;
 
 	// Capture cgroup ID - survives cgroup deletion (Issue #566)
-	// Cgroup path resolution happens in Rust userspace using this ID
+	// K8s pod context derived in Rust userspace using this ID
 	evt->cgroup_id = bpf_get_current_cgroup_id();
 
 	bpf_ringbuf_submit(evt, 0);

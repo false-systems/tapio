@@ -108,9 +108,7 @@ async fn main() -> anyhow::Result<()> {
     // on broken pipe, which with panic=abort kills the process.
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_writer(|| -> Box<dyn std::io::Write> {
-            Box::new(BrokenPipeGuard)
-        })
+        .with_writer(|| BrokenPipeGuard)
         .init();
 
     let args = Args::parse();

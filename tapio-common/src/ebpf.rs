@@ -146,7 +146,7 @@ impl NetworkEvent {
 ///     __u64 memory_limit;   // 0
 ///     __u64 memory_usage;   // 8
 ///     __u64 timestamp_ns;   // 16
-///     __u64 cgroup_id;      // 24  — userspace resolves cgroup path via this ID
+///     __u64 cgroup_id;      // 24  — userspace derives K8s pod context from this ID
 ///     __u32 type;           // 32
 ///     __u32 pid;            // 36
 ///     __u32 tid;            // 40
