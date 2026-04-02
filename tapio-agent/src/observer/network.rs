@@ -215,7 +215,7 @@ pub async fn run(
     Ok(())
 }
 
-fn tcp_state_name(state: u8) -> &'static str {
+fn tcp_state_name(state: u16) -> &'static str {
     match state {
         TCP_ESTABLISHED => "ESTABLISHED",
         TCP_SYN_SENT => "SYN_SENT",
@@ -235,7 +235,7 @@ fn tcp_state_name(state: u8) -> &'static str {
 mod tests {
     use super::*;
 
-    fn make_event(event_type: u8, old_state: u8, new_state: u8) -> NetworkEvent {
+    fn make_event(event_type: u8, old_state: u16, new_state: u16) -> NetworkEvent {
         let mut evt = unsafe { std::mem::zeroed::<NetworkEvent>() };
         evt.event_type = event_type;
         evt.old_state = old_state;
@@ -342,6 +342,6 @@ mod tests {
     fn tcp_state_names() {
         assert_eq!(tcp_state_name(TCP_ESTABLISHED), "ESTABLISHED");
         assert_eq!(tcp_state_name(TCP_CLOSE), "CLOSE");
-        assert_eq!(tcp_state_name(255), "UNKNOWN");
+        assert_eq!(tcp_state_name(65535), "UNKNOWN");
     }
 }

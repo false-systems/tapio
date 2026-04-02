@@ -18,16 +18,17 @@ pub const CONTAINER_EVENT_OOM: u32 = 0;
 pub const CONTAINER_EVENT_EXIT: u32 = 1;
 
 // TCP states (subset used by TAPIO — kernel has additional states like CLOSING, NEW_SYN_RECV)
-pub const TCP_ESTABLISHED: u8 = 1;
-pub const TCP_SYN_SENT: u8 = 2;
-pub const TCP_SYN_RECV: u8 = 3;
-pub const TCP_FIN_WAIT1: u8 = 4;
-pub const TCP_FIN_WAIT2: u8 = 5;
-pub const TCP_TIME_WAIT: u8 = 6;
-pub const TCP_CLOSE: u8 = 7;
-pub const TCP_CLOSE_WAIT: u8 = 8;
-pub const TCP_LAST_ACK: u8 = 9;
-pub const TCP_LISTEN: u8 = 10;
+// u16 to match NetworkEvent.old_state/new_state field width
+pub const TCP_ESTABLISHED: u16 = 1;
+pub const TCP_SYN_SENT: u16 = 2;
+pub const TCP_SYN_RECV: u16 = 3;
+pub const TCP_FIN_WAIT1: u16 = 4;
+pub const TCP_FIN_WAIT2: u16 = 5;
+pub const TCP_TIME_WAIT: u16 = 6;
+pub const TCP_CLOSE: u16 = 7;
+pub const TCP_CLOSE_WAIT: u16 = 8;
+pub const TCP_LAST_ACK: u16 = 9;
+pub const TCP_LISTEN: u16 = 10;
 
 // Storage operation types (matching storage_monitor.c defines)
 pub const OP_READ: u8 = 0;
@@ -36,10 +37,9 @@ pub const OP_WRITE: u8 = 1;
 // Storage severity levels (matching storage_monitor.c defines)
 pub const STORAGE_SEVERITY_NORMAL: u8 = 0;
 pub const STORAGE_SEVERITY_WARNING: u8 = 1;
-pub const STORAGE_SEVERITY_ERROR: u8 = 2;
-pub const STORAGE_SEVERITY_CRITICAL: u8 = 3;
+pub const STORAGE_SEVERITY_CRITICAL: u8 = 2;
 
-/// Network event from network_monitor.c — 70 bytes, packed.
+/// Network event from network_monitor.c — 72 bytes, packed.
 ///
 /// C layout:
 /// ```c
@@ -53,10 +53,10 @@ pub const STORAGE_SEVERITY_CRITICAL: u8 = 3;
 ///     __u16 dst_port;       // 46
 ///     __u16 family;         // 48
 ///     __u8  protocol;       // 50
-///     __u8  old_state;      // 51
-///     __u8  new_state;      // 52
-///     __u8  event_type;     // 53
-///     __u8  comm[16];       // 54
+///     __u8  event_type;     // 51
+///     __u16 old_state;      // 52
+///     __u16 new_state;      // 54
+///     __u8  comm[16];       // 56
 /// } __attribute__((packed));
 /// ```
 #[repr(C, packed)]
@@ -71,9 +71,9 @@ pub struct NetworkEvent {
     pub dst_port: u16,
     pub family: u16,
     pub protocol: u8,
-    pub old_state: u8,
-    pub new_state: u8,
     pub event_type: u8,
+    pub old_state: u16,
+    pub new_state: u16,
     pub comm: [u8; 16],
 }
 
@@ -138,7 +138,7 @@ impl NetworkEvent {
     }
 }
 
-/// Container event from container_monitor.c — 308 bytes, packed.
+/// Container event from container_monitor.c — 52 bytes, packed.
 ///
 /// C layout:
 /// ```c
@@ -146,13 +146,12 @@ impl NetworkEvent {
 ///     __u64 memory_limit;   // 0
 ///     __u64 memory_usage;   // 8
 ///     __u64 timestamp_ns;   // 16
-///     __u64 cgroup_id;      // 24
+///     __u64 cgroup_id;      // 24  — userspace derives K8s pod context from this ID
 ///     __u32 type;           // 32
 ///     __u32 pid;            // 36
 ///     __u32 tid;            // 40
 ///     __s32 exit_code;      // 44
 ///     __s32 signal;         // 48
-///     char  cgroup_path[256]; // 52
 /// } __attribute__((packed));
 /// ```
 #[repr(C, packed)]
@@ -167,16 +166,9 @@ pub struct ContainerEvent {
     pub tid: u32,
     pub exit_code: i32,
     pub signal: i32,
-    pub cgroup_path: [u8; 256],
 }
 
 impl ContainerEvent {
-    pub fn cgroup_path_str(&self) -> &str {
-        let bytes = &self.cgroup_path;
-        let len = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-        std::str::from_utf8(&bytes[..len]).unwrap_or("<invalid>")
-    }
-
     pub fn is_oom(&self) -> bool {
         let et = self.event_type;
         et == CONTAINER_EVENT_OOM
@@ -299,12 +291,12 @@ mod tests {
 
     #[test]
     fn network_event_size() {
-        assert_eq!(size_of::<NetworkEvent>(), 70);
+        assert_eq!(size_of::<NetworkEvent>(), 72);
     }
 
     #[test]
     fn container_event_size() {
-        assert_eq!(size_of::<ContainerEvent>(), 308);
+        assert_eq!(size_of::<ContainerEvent>(), 52);
     }
 
     #[test]
@@ -361,14 +353,6 @@ mod tests {
         evt.src_ipv6[15] = 1; // ::1
         assert!(evt.is_ipv6());
         assert_eq!(evt.src_ipv6_str(), "::1");
-    }
-
-    #[test]
-    fn container_event_cgroup_path() {
-        let mut evt = unsafe { std::mem::zeroed::<ContainerEvent>() };
-        let path = b"/kubepods/burstable/pod-xyz";
-        evt.cgroup_path[..path.len()].copy_from_slice(path);
-        assert_eq!(evt.cgroup_path_str(), "/kubepods/burstable/pod-xyz");
     }
 
     #[test]

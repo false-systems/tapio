@@ -20,7 +20,6 @@ struct EventFields {
     memory_limit: u64,
     cgroup_id: u64,
     timestamp_ns: u64,
-    cgroup_path: String,
 }
 
 impl EventFields {
@@ -35,7 +34,6 @@ impl EventFields {
             memory_limit: event.memory_limit,
             cgroup_id: event.cgroup_id,
             timestamp_ns: event.timestamp_ns,
-            cgroup_path: event.cgroup_path_str().to_string(),
         }
     }
 }
@@ -97,7 +95,6 @@ pub fn build_occurrence(event: &ContainerEvent, anomaly: &ClassifiedAnomaly) -> 
         "memory_usage_bytes": f.memory_usage,
         "memory_limit_bytes": f.memory_limit,
         "cgroup_id": f.cgroup_id,
-        "cgroup_path": f.cgroup_path,
         "timestamp_ns": f.timestamp_ns,
     }))
 }

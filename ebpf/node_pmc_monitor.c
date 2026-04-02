@@ -1,13 +1,11 @@
-//go:build ignore
-
 // SPDX-License-Identifier: GPL-2.0
 // Node PMC Monitor - eBPF program for Performance Monitoring Counters
 // Based on Brendan Gregg's "CPU Utilization is Wrong" research
 
-#include "../../base/bpf/vmlinux_minimal.h"
+#include "headers/vmlinux_minimal.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
-#include "node_pmc_monitor.h"
+#include "headers/node_pmc_monitor.h"
 
 char LICENSE[] SEC("license") = "GPL";
 
