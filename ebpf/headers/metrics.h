@@ -1,5 +1,3 @@
-//go:build ignore
-
 #ifndef __TAPIO_METRICS_H__
 #define __TAPIO_METRICS_H__
 
@@ -27,18 +25,6 @@ struct {
 #define METRIC_NETWORK_RST_TOTAL          3
 #define METRIC_NETWORK_RTT_SPIKES_TOTAL   4
 #define METRIC_NETWORK_BASELINE_REJECTED  5
-
-// Scheduler Observer Metrics (100-199) - Reserved for future
-#define METRIC_SCHEDULER_DECISIONS        100
-#define METRIC_SCHEDULER_QUEUE_TIME       101
-
-// DNS Observer Metrics (200-299) - Reserved for future
-#define METRIC_DNS_QUERIES_TOTAL          200
-#define METRIC_DNS_TIMEOUTS_TOTAL         201
-
-// HTTP Observer Metrics (300-399) - Reserved for future
-#define METRIC_HTTP_REQUESTS_TOTAL        300
-#define METRIC_HTTP_ERRORS_TOTAL          301
 
 // ============================================================================
 // Helper Functions

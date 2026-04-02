@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Node PMC Monitor - Shared header between eBPF and Go */
+/* Node PMC Monitor - Shared header between eBPF and Rust */
 
 #ifndef __NODE_PMC_MONITOR_H
 #define __NODE_PMC_MONITOR_H

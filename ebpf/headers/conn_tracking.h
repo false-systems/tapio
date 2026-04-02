@@ -1,5 +1,3 @@
-//go:build ignore
-
 #ifndef __TAPIO_CONN_TRACKING_H__
 #define __TAPIO_CONN_TRACKING_H__
 
@@ -16,21 +14,9 @@ struct conn_key {
 	__u16 dport;  // Destination port (network byte order)
 };
 
-// Helper: Create connection key from IP/port (network byte order)
-static __always_inline void make_conn_key(struct conn_key *key,
-					  __u32 saddr, __u32 daddr,
-					  __u16 sport, __u16 dport)
-{
-	key->saddr = saddr;
-	key->daddr = daddr;
-	key->sport = sport;
-	key->dport = dport;
-}
-
-// Retransmit statistics per connection (stored in LRU map)
-// Tracks TCP retransmissions, packet counts, and RST flags
+// Per-connection retransmit/RST tracking (stored in LRU map)
+// Retransmit rate is not tracked at BPF level — no hook counts all TCP segments.
 struct retransmit_stats {
-	__u64 total_packets;      // Total packets sent (approximation)
 	__u64 retransmits;        // Number of retransmissions
 	__u64 last_retransmit_ns; // Timestamp of last retransmit
 	__u8  rst_received;       // 1 if RST packet received, 0 otherwise

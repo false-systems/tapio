@@ -1,6 +1,6 @@
-//go:build ignore
+// SPDX-License-Identifier: GPL-2.0
 
-#include "../../../base/bpf/vmlinux_minimal.h"
+#include "headers/vmlinux_minimal.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
@@ -18,7 +18,7 @@
 #define LATENCY_WARNING_NS  50000000ULL   // 50ms
 #define LATENCY_CRITICAL_NS 200000000ULL  // 200ms
 
-// Storage event structure - MUST match Go StorageEventBPF exactly (72 bytes with alignment)
+// Storage event structure - MUST match Rust StorageEvent in tapio-common/src/ebpf.rs (72 bytes)
 struct storage_event {
 	__u64 timestamp_ns;   // offset 0
 	__u64 latency_ns;     // offset 8
