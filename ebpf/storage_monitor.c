@@ -14,9 +14,14 @@
 #define SEVERITY_WARNING  1
 #define SEVERITY_CRITICAL 2
 
-// Latency thresholds (nanoseconds)
+// Default latency thresholds (nanoseconds) — overridable via config map
 #define LATENCY_WARNING_NS  50000000ULL   // 50ms
 #define LATENCY_CRITICAL_NS 200000000ULL  // 200ms
+
+// Config map indices
+#define CONFIG_LATENCY_WARNING_NS  0
+#define CONFIG_LATENCY_CRITICAL_NS 1
+#define CONFIG_MAX_ENTRIES         2
 
 // Storage event structure - MUST match Rust StorageEvent in tapio-common/src/ebpf.rs (72 bytes)
 struct storage_event {
@@ -50,6 +55,20 @@ struct io_value {
 	__u8  opcode;         // READ or WRITE
 	__u8  padding[3];     // Alignment
 };
+
+// Runtime-configurable thresholds — populated by userspace at load time
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, CONFIG_MAX_ENTRIES);
+	__type(key, __u32);
+	__type(value, __u64);
+} config SEC(".maps");
+
+// Read threshold with fallback to compile-time default
+static __always_inline __u64 get_config(__u32 idx, __u64 default_val) {
+	__u64 *val = bpf_map_lookup_elem(&config, &idx);
+	return val && *val > 0 ? *val : default_val;
+}
 
 // Ring buffer for sending events to userspace
 struct {
@@ -130,11 +149,12 @@ int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
 	error_code = BPF_CORE_READ(ctx, error);
 
 	// Determine severity - only emit events for anomalies
+	// Thresholds read from config map, falling back to compile-time defaults
 	if (error_code != 0) {
 		severity = SEVERITY_CRITICAL;  // I/O error is always critical
-	} else if (latency_ns >= LATENCY_CRITICAL_NS) {
+	} else if (latency_ns >= get_config(CONFIG_LATENCY_CRITICAL_NS, LATENCY_CRITICAL_NS)) {
 		severity = SEVERITY_CRITICAL;
-	} else if (latency_ns >= LATENCY_WARNING_NS) {
+	} else if (latency_ns >= get_config(CONFIG_LATENCY_WARNING_NS, LATENCY_WARNING_NS)) {
 		severity = SEVERITY_WARNING;
 	} else {
 		// Normal I/O - don't emit event (edge filtering ~1%)

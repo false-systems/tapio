@@ -15,8 +15,6 @@ pub struct ClassifiedAnomaly {
 /// Defers string allocation until we know this is an anomaly.
 pub fn classify(event: &NetworkEvent) -> Option<ClassifiedAnomaly> {
     let et = event.event_type;
-    let old = event.old_state;
-    let new = event.new_state;
 
     match et {
         NET_EVENT_RST_RECEIVED => {
@@ -29,7 +27,7 @@ pub fn classify(event: &NetworkEvent) -> Option<ClassifiedAnomaly> {
                 error_code: "RST_RECEIVED",
                 error_message: format!(
                     "TCP RST from {src_ip}:{src_port} (state={})",
-                    tcp_state_name(old),
+                    tcp_state_name(event.old_state),
                 ),
                 ebpf_event_type: et,
             })
@@ -39,13 +37,15 @@ pub fn classify(event: &NetworkEvent) -> Option<ClassifiedAnomaly> {
             let dst_ip = event.dst_ip_str();
             let sp = event.src_port;
             let dp = event.dst_port;
+            let retrans = event.total_retrans;
+            let cwnd = event.snd_cwnd;
             Some(ClassifiedAnomaly {
                 event_type: NETWORK_RETRANSMIT_SPIKE,
                 severity: Severity::Warning,
                 outcome: Outcome::Failure,
                 error_code: "RETRANSMIT",
                 error_message: format!(
-                    "TCP retransmit {src_ip}:{sp} → {dst_ip}:{dp} (total={old}, cwnd={new})",
+                    "TCP retransmit {src_ip}:{sp} → {dst_ip}:{dp} (total={retrans}, cwnd={cwnd})",
                 ),
                 ebpf_event_type: et,
             })
@@ -55,18 +55,22 @@ pub fn classify(event: &NetworkEvent) -> Option<ClassifiedAnomaly> {
             let dst_ip = event.dst_ip_str();
             let sp = event.src_port;
             let dp = event.dst_port;
+            let baseline = event.rtt_baseline_ms;
+            let current = event.rtt_current_ms;
             Some(ClassifiedAnomaly {
                 event_type: NETWORK_RTT_DEGRADATION,
                 severity: Severity::Warning,
                 outcome: Outcome::InProgress,
                 error_code: "RTT_SPIKE",
                 error_message: format!(
-                    "RTT spike {src_ip}:{sp} → {dst_ip}:{dp} (baseline={old}ms, current={new}ms)",
+                    "RTT spike {src_ip}:{sp} → {dst_ip}:{dp} (baseline={baseline}ms, current={current}ms)",
                 ),
                 ebpf_event_type: et,
             })
         }
         NET_EVENT_STATE_CHANGE => {
+            let old = event.old_state;
+            let new = event.new_state;
             if old == TCP_SYN_SENT && new == TCP_CLOSE {
                 let dst_ip = event.dst_ip_str();
                 let dp = event.dst_port;
@@ -96,8 +100,6 @@ pub fn build_occurrence(event: &NetworkEvent, anomaly: &ClassifiedAnomaly) -> Oc
     let src_port = event.src_port;
     let dst_port = event.dst_port;
     let is_ipv6 = event.is_ipv6();
-    let old = event.old_state;
-    let new = event.new_state;
 
     let mut data = serde_json::json!({
         "pid": pid,
@@ -110,20 +112,26 @@ pub fn build_occurrence(event: &NetworkEvent, anomaly: &ClassifiedAnomaly) -> Oc
         "protocol": "tcp",
     });
 
-    // old_state/new_state semantics differ per event type
+    // Each event type has its own named fields — no overloading
     if let serde_json::Value::Object(ref mut map) = data {
         match anomaly.ebpf_event_type {
             NET_EVENT_STATE_CHANGE | NET_EVENT_RST_RECEIVED => {
+                let old = event.old_state;
+                let new = event.new_state;
                 map.insert("old_state".into(), serde_json::json!(tcp_state_name(old)));
                 map.insert("new_state".into(), serde_json::json!(tcp_state_name(new)));
             }
             NET_EVENT_RETRANSMIT => {
-                map.insert("total_retrans".into(), serde_json::json!(old));
-                map.insert("snd_cwnd".into(), serde_json::json!(new));
+                let retrans = event.total_retrans;
+                let cwnd = event.snd_cwnd;
+                map.insert("total_retrans".into(), serde_json::json!(retrans));
+                map.insert("snd_cwnd".into(), serde_json::json!(cwnd));
             }
             NET_EVENT_RTT_SPIKE => {
-                map.insert("baseline_ms".into(), serde_json::json!(old));
-                map.insert("current_ms".into(), serde_json::json!(new));
+                let baseline = event.rtt_baseline_ms;
+                let current = event.rtt_current_ms;
+                map.insert("baseline_ms".into(), serde_json::json!(baseline));
+                map.insert("current_ms".into(), serde_json::json!(current));
             }
             _ => {}
         }
@@ -235,11 +243,9 @@ fn tcp_state_name(state: u16) -> &'static str {
 mod tests {
     use super::*;
 
-    fn make_event(event_type: u8, old_state: u16, new_state: u16) -> NetworkEvent {
+    fn make_base_event(event_type: u8) -> NetworkEvent {
         let mut evt = unsafe { std::mem::zeroed::<NetworkEvent>() };
         evt.event_type = event_type;
-        evt.old_state = old_state;
-        evt.new_state = new_state;
         evt.family = AF_INET;
         evt.src_ip = 0x0100007f; // 127.0.0.1
         evt.dst_ip = 0x0200007f; // 127.0.0.2
@@ -250,19 +256,40 @@ mod tests {
         evt
     }
 
+    fn make_state_event(old_state: u16, new_state: u16) -> NetworkEvent {
+        let mut evt = make_base_event(NET_EVENT_STATE_CHANGE);
+        evt.old_state = old_state;
+        evt.new_state = new_state;
+        evt
+    }
+
+    fn make_retransmit_event(total_retrans: u16, snd_cwnd: u16) -> NetworkEvent {
+        let mut evt = make_base_event(NET_EVENT_RETRANSMIT);
+        evt.total_retrans = total_retrans;
+        evt.snd_cwnd = snd_cwnd;
+        evt
+    }
+
+    fn make_rtt_event(baseline_ms: u16, current_ms: u16) -> NetworkEvent {
+        let mut evt = make_base_event(NET_EVENT_RTT_SPIKE);
+        evt.rtt_baseline_ms = baseline_ms;
+        evt.rtt_current_ms = current_ms;
+        evt
+    }
+
     #[test]
     fn classify_rst_received() {
-        let evt = make_event(NET_EVENT_RST_RECEIVED, TCP_SYN_SENT, 0);
+        let mut evt = make_base_event(NET_EVENT_RST_RECEIVED);
+        evt.old_state = TCP_SYN_SENT;
         let a = classify(&evt).expect("should classify RST");
         assert_eq!(a.event_type, NETWORK_CONNECTION_REFUSED);
         assert_eq!(a.error_code, "RST_RECEIVED");
-        // RST "from" should be src (the remote sender)
         assert!(a.error_message.contains("127.0.0.1:12345"));
     }
 
     #[test]
     fn classify_retransmit() {
-        let evt = make_event(NET_EVENT_RETRANSMIT, 5, 10);
+        let evt = make_retransmit_event(5, 10);
         let a = classify(&evt).expect("should classify retransmit");
         assert_eq!(a.event_type, NETWORK_RETRANSMIT_SPIKE);
         assert!(a.error_message.contains("total=5"));
@@ -271,7 +298,7 @@ mod tests {
 
     #[test]
     fn classify_rtt_spike() {
-        let evt = make_event(NET_EVENT_RTT_SPIKE, 2, 50);
+        let evt = make_rtt_event(2, 50);
         let a = classify(&evt).expect("should classify RTT spike");
         assert_eq!(a.event_type, NETWORK_RTT_DEGRADATION);
         assert!(a.error_message.contains("baseline=2ms"));
@@ -280,26 +307,27 @@ mod tests {
 
     #[test]
     fn classify_syn_timeout() {
-        let evt = make_event(NET_EVENT_STATE_CHANGE, TCP_SYN_SENT, TCP_CLOSE);
+        let evt = make_state_event(TCP_SYN_SENT, TCP_CLOSE);
         let a = classify(&evt).expect("should classify SYN timeout");
         assert_eq!(a.event_type, NETWORK_CONNECTION_TIMEOUT);
     }
 
     #[test]
     fn classify_normal_state_change_returns_none() {
-        let evt = make_event(NET_EVENT_STATE_CHANGE, TCP_ESTABLISHED, TCP_FIN_WAIT1);
+        let evt = make_state_event(TCP_ESTABLISHED, TCP_FIN_WAIT1);
         assert!(classify(&evt).is_none());
     }
 
     #[test]
     fn classify_unknown_event_type_returns_none() {
-        let evt = make_event(99, 0, 0);
+        let evt = make_base_event(99);
         assert!(classify(&evt).is_none());
     }
 
     #[test]
     fn build_occurrence_state_change_has_tcp_states() {
-        let evt = make_event(NET_EVENT_RST_RECEIVED, TCP_SYN_SENT, 0);
+        let mut evt = make_base_event(NET_EVENT_RST_RECEIVED);
+        evt.old_state = TCP_SYN_SENT;
         let a = classify(&evt).unwrap();
         let occ = build_occurrence(&evt, &a);
         assert!(occ.validate().is_ok());
@@ -309,7 +337,7 @@ mod tests {
 
     #[test]
     fn build_occurrence_retransmit_has_metrics() {
-        let evt = make_event(NET_EVENT_RETRANSMIT, 5, 10);
+        let evt = make_retransmit_event(5, 10);
         let a = classify(&evt).unwrap();
         let occ = build_occurrence(&evt, &a);
         let data = occ.data.unwrap();
@@ -320,7 +348,7 @@ mod tests {
 
     #[test]
     fn build_occurrence_rtt_spike_has_rtt_fields() {
-        let evt = make_event(NET_EVENT_RTT_SPIKE, 2, 50);
+        let evt = make_rtt_event(2, 50);
         let a = classify(&evt).unwrap();
         let occ = build_occurrence(&evt, &a);
         let data = occ.data.unwrap();
@@ -331,7 +359,7 @@ mod tests {
 
     #[test]
     fn build_occurrence_no_reasoning() {
-        let evt = make_event(NET_EVENT_RTT_SPIKE, 1, 100);
+        let evt = make_rtt_event(1, 100);
         let a = classify(&evt).unwrap();
         let occ = build_occurrence(&evt, &a);
         assert!(occ.reasoning.is_none());

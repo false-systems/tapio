@@ -81,6 +81,15 @@ pub fn classify(event: &ContainerEvent) -> Option<ClassifiedAnomaly> {
 
 pub fn build_occurrence(event: &ContainerEvent, anomaly: &ClassifiedAnomaly) -> Occurrence {
     let f = EventFields::from(event);
+    let memory_limit = if f.memory_limit == 0 {
+        // BPF tracepoint doesn't expose the cgroup memory limit.
+        // Resolve via /proc/<pid>/cgroup + cgroupfs. Cached by cgroup_id.
+        // Very fast OOM kills may still get 0 if the cgroup is deleted before we read.
+        enrich_memory_limit(f.cgroup_id, f.pid).unwrap_or(0)
+    } else {
+        f.memory_limit
+    };
+
     Occurrence::new(
         anomaly.event_type,
         anomaly.severity.clone(),
@@ -93,10 +102,105 @@ pub fn build_occurrence(event: &ContainerEvent, anomaly: &ClassifiedAnomaly) -> 
         "exit_code": f.exit_code,
         "signal": f.signal,
         "memory_usage_bytes": f.memory_usage,
-        "memory_limit_bytes": f.memory_limit,
+        "memory_limit_bytes": memory_limit,
         "cgroup_id": f.cgroup_id,
         "timestamp_ns": f.timestamp_ns,
     }))
+}
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+static CGROUP_LIMIT_CACHE: std::sync::LazyLock<Mutex<HashMap<u64, u64>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Resolve cgroup memory limit. Uses a cache keyed by cgroup_id to avoid
+/// repeated filesystem walks on busy nodes.
+fn enrich_memory_limit(cgroup_id: u64, pid: u32) -> Option<u64> {
+    if cgroup_id == 0 {
+        return None;
+    }
+
+    // Check cache first
+    if let Ok(cache) = CGROUP_LIMIT_CACHE.lock()
+        && let Some(&limit) = cache.get(&cgroup_id)
+    {
+        return Some(limit);
+    }
+
+    // Resolve cgroup path via /proc/<pid>/cgroup (fast, no tree walk)
+    let limit = resolve_via_proc(pid)
+        .or_else(|| resolve_via_proc(1)) // fallback: init's cgroup hierarchy
+        .unwrap_or(0);
+
+    // Cache the result (even 0, to avoid re-walking for deleted cgroups)
+    if let Ok(mut cache) = CGROUP_LIMIT_CACHE.lock() {
+        // Cap cache size to prevent unbounded growth
+        if cache.len() > 10_000 {
+            cache.clear();
+        }
+        cache.insert(cgroup_id, limit);
+    }
+
+    if limit > 0 { Some(limit) } else { None }
+}
+
+/// Read cgroup path from /proc/<pid>/cgroup and resolve memory limit from cgroupfs.
+fn resolve_via_proc(pid: u32) -> Option<u64> {
+    use std::fs;
+
+    let cgroup_file = format!("/proc/{pid}/cgroup");
+    let content = fs::read_to_string(&cgroup_file).ok()?;
+
+    for line in content.lines() {
+        // cgroups v2: "0::/kubepods/burstable/pod-xyz/container-abc"
+        // cgroups v1: "6:memory:/kubepods/burstable/pod-xyz/container-abc"
+        let parts: Vec<&str> = line.splitn(3, ':').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+
+        let (hierarchy, controller, path) = (parts[0], parts[1], parts[2]);
+
+        // cgroups v2 unified
+        if hierarchy == "0" && controller.is_empty() && !path.is_empty() {
+            let mem_max = format!("/sys/fs/cgroup{path}/memory.max");
+            if let Some(limit) = read_limit_file(&mem_max) {
+                return Some(limit);
+            }
+        }
+
+        // cgroups v1 memory controller
+        if controller.contains("memory") && !path.is_empty() {
+            let limit_file = format!("/sys/fs/cgroup/memory{path}/memory.limit_in_bytes");
+            if let Some(limit) = read_limit_file(&limit_file) {
+                return Some(limit);
+            }
+        }
+    }
+
+    None
+}
+
+fn read_limit_file(path: &str) -> Option<u64> {
+    use std::fs;
+
+    let content = fs::read_to_string(path).ok()?;
+    let trimmed = content.trim();
+
+    // cgroups v2: "max" means no limit
+    if trimmed == "max" {
+        return Some(u64::MAX);
+    }
+
+    let val: u64 = trimmed.parse().ok()?;
+
+    // cgroups v1: very large value means no limit
+    if val >= (1_u64 << 62) {
+        return Some(u64::MAX);
+    }
+
+    Some(val)
 }
 
 #[cfg(target_os = "linux")]
