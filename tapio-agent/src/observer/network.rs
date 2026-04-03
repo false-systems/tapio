@@ -20,14 +20,15 @@ pub fn classify(event: &NetworkEvent) -> Option<ClassifiedAnomaly> {
         NET_EVENT_RST_RECEIVED => {
             let src_ip = event.src_ip_str();
             let src_port = event.src_port;
+            let dst_ip = event.dst_ip_str();
+            let dst_port = event.dst_port;
             Some(ClassifiedAnomaly {
                 event_type: NETWORK_CONNECTION_REFUSED,
                 severity: Severity::Warning,
                 outcome: Outcome::Failure,
                 error_code: "RST_RECEIVED",
                 error_message: format!(
-                    "TCP RST from {src_ip}:{src_port} (state={})",
-                    tcp_state_name(event.old_state),
+                    "TCP RST {src_ip}:{src_port} → {dst_ip}:{dst_port}",
                 ),
                 ebpf_event_type: et,
             })
@@ -115,11 +116,14 @@ pub fn build_occurrence(event: &NetworkEvent, anomaly: &ClassifiedAnomaly) -> Oc
     // Each event type has its own named fields — no overloading
     if let serde_json::Value::Object(ref mut map) = data {
         match anomaly.ebpf_event_type {
-            NET_EVENT_STATE_CHANGE | NET_EVENT_RST_RECEIVED => {
+            NET_EVENT_STATE_CHANGE => {
                 let old = event.old_state;
                 let new = event.new_state;
                 map.insert("old_state".into(), serde_json::json!(tcp_state_name(old)));
                 map.insert("new_state".into(), serde_json::json!(tcp_state_name(new)));
+            }
+            NET_EVENT_RST_RECEIVED => {
+                // RST tracepoint has no TCP state — omit meaningless fields
             }
             NET_EVENT_RETRANSMIT => {
                 let retrans = event.total_retrans;
@@ -279,12 +283,13 @@ mod tests {
 
     #[test]
     fn classify_rst_received() {
-        let mut evt = make_base_event(NET_EVENT_RST_RECEIVED);
-        evt.old_state = TCP_SYN_SENT;
+        let evt = make_base_event(NET_EVENT_RST_RECEIVED);
         let a = classify(&evt).expect("should classify RST");
         assert_eq!(a.event_type, NETWORK_CONNECTION_REFUSED);
         assert_eq!(a.error_code, "RST_RECEIVED");
         assert!(a.error_message.contains("127.0.0.1:12345"));
+        assert!(a.error_message.contains("127.0.0.2:80"));
+        assert!(!a.error_message.contains("UNKNOWN"));
     }
 
     #[test]
@@ -326,13 +331,23 @@ mod tests {
 
     #[test]
     fn build_occurrence_state_change_has_tcp_states() {
-        let mut evt = make_base_event(NET_EVENT_RST_RECEIVED);
-        evt.old_state = TCP_SYN_SENT;
+        let evt = make_state_event(TCP_SYN_SENT, TCP_CLOSE);
         let a = classify(&evt).unwrap();
         let occ = build_occurrence(&evt, &a);
         assert!(occ.validate().is_ok());
         let data = occ.data.unwrap();
         assert_eq!(data["old_state"], "SYN_SENT");
+        assert_eq!(data["new_state"], "CLOSE");
+    }
+
+    #[test]
+    fn build_occurrence_rst_has_no_state_fields() {
+        let evt = make_base_event(NET_EVENT_RST_RECEIVED);
+        let a = classify(&evt).unwrap();
+        let occ = build_occurrence(&evt, &a);
+        let data = occ.data.unwrap();
+        assert!(data.get("old_state").is_none());
+        assert!(data.get("new_state").is_none());
     }
 
     #[test]
