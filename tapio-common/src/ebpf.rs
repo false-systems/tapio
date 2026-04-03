@@ -39,25 +39,30 @@ pub const STORAGE_SEVERITY_NORMAL: u8 = 0;
 pub const STORAGE_SEVERITY_WARNING: u8 = 1;
 pub const STORAGE_SEVERITY_CRITICAL: u8 = 2;
 
-/// Network event from network_monitor.c — 72 bytes, packed.
+/// Network event from network_monitor.c — 80 bytes, packed.
+/// Each event type uses its own named fields — no overloading.
 ///
 /// C layout:
 /// ```c
 /// struct network_event {
-///     __u32 pid;            // 0
-///     __u32 src_ip;         // 4
-///     __u32 dst_ip;         // 8
-///     __u8  src_ipv6[16];   // 12
-///     __u8  dst_ipv6[16];   // 28
-///     __u16 src_port;       // 44
-///     __u16 dst_port;       // 46
-///     __u16 family;         // 48
-///     __u8  protocol;       // 50
-///     __u8  event_type;     // 51
-///     __u16 old_state;      // 52
-///     __u16 new_state;      // 54
-///     __u8  comm[16];       // 56
-/// } __attribute__((packed));
+///     __u32 pid;              // 0
+///     __u32 src_ip;           // 4
+///     __u32 dst_ip;           // 8
+///     __u8  src_ipv6[16];     // 12
+///     __u8  dst_ipv6[16];     // 28
+///     __u16 src_port;         // 44
+///     __u16 dst_port;         // 46
+///     __u16 family;           // 48
+///     __u8  protocol;         // 50
+///     __u8  event_type;       // 51
+///     __u16 old_state;        // 52  TCP state (state change events)
+///     __u16 new_state;        // 54  TCP state (state change events)
+///     __u16 rtt_baseline_ms;  // 56  baseline RTT in ms (RTT spike events)
+///     __u16 rtt_current_ms;   // 58  current RTT in ms (RTT spike events)
+///     __u16 total_retrans;    // 60  total retransmits (retransmit events)
+///     __u16 snd_cwnd;         // 62  congestion window (retransmit events)
+///     __u8  comm[16];         // 64
+/// } __attribute__((packed));  // 80 bytes
 /// ```
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
@@ -74,6 +79,10 @@ pub struct NetworkEvent {
     pub event_type: u8,
     pub old_state: u16,
     pub new_state: u16,
+    pub rtt_baseline_ms: u16,
+    pub rtt_current_ms: u16,
+    pub total_retrans: u16,
+    pub snd_cwnd: u16,
     pub comm: [u8; 16],
 }
 
@@ -238,8 +247,18 @@ impl StorageEvent {
 }
 
 /// PMC event from node_pmc_monitor.c — 36 bytes, packed.
-/// Parsed manually because C struct is __attribute__((packed))
-/// with u32 followed by u64 (no natural alignment).
+///
+/// C layout:
+/// ```c
+/// struct pmc_event {
+///     __u32 cpu;           // 0
+///     __u64 cycles;        // 4  (unaligned — hence packed)
+///     __u64 instructions;  // 12
+///     __u64 stall_cycles;  // 20
+///     __u64 timestamp;     // 28
+/// } __attribute__((packed)); // 36 bytes
+/// ```
+#[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct PmcEvent {
     pub cpu: u32,
@@ -250,31 +269,20 @@ pub struct PmcEvent {
 }
 
 impl PmcEvent {
-    pub fn from_bytes(data: &[u8]) -> Option<Self> {
-        if data.len() < 36 {
-            return None;
-        }
-        Some(Self {
-            cpu: u32::from_le_bytes(data[0..4].try_into().ok()?),
-            cycles: u64::from_le_bytes(data[4..12].try_into().ok()?),
-            instructions: u64::from_le_bytes(data[12..20].try_into().ok()?),
-            stall_cycles: u64::from_le_bytes(data[20..28].try_into().ok()?),
-            timestamp: u64::from_le_bytes(data[28..36].try_into().ok()?),
-        })
-    }
-
     pub fn ipc(&self) -> f64 {
-        if self.cycles == 0 {
+        let cycles = self.cycles;
+        if cycles == 0 {
             return 0.0;
         }
-        self.instructions as f64 / self.cycles as f64
+        self.instructions as f64 / cycles as f64
     }
 
     pub fn stall_pct(&self) -> f64 {
-        if self.cycles == 0 {
+        let cycles = self.cycles;
+        if cycles == 0 {
             return 0.0;
         }
-        (self.stall_cycles as f64 / self.cycles as f64) * 100.0
+        (self.stall_cycles as f64 / cycles as f64) * 100.0
     }
 }
 
@@ -291,7 +299,7 @@ mod tests {
 
     #[test]
     fn network_event_size() {
-        assert_eq!(size_of::<NetworkEvent>(), 72);
+        assert_eq!(size_of::<NetworkEvent>(), 80);
     }
 
     #[test]
@@ -305,27 +313,30 @@ mod tests {
     }
 
     #[test]
-    fn pmc_event_from_bytes() {
-        let mut data = [0u8; 36];
-        data[0..4].copy_from_slice(&42u32.to_le_bytes()); // cpu
-        data[4..12].copy_from_slice(&1000u64.to_le_bytes()); // cycles
-        data[12..20].copy_from_slice(&800u64.to_le_bytes()); // instructions
-        data[20..28].copy_from_slice(&200u64.to_le_bytes()); // stall_cycles
-        data[28..36].copy_from_slice(&999u64.to_le_bytes()); // timestamp
+    fn pmc_event_size() {
+        assert_eq!(size_of::<PmcEvent>(), 36);
+    }
 
-        let evt = PmcEvent::from_bytes(&data).unwrap();
-        assert_eq!(evt.cpu, 42);
-        assert_eq!(evt.cycles, 1000);
-        assert_eq!(evt.instructions, 800);
-        assert_eq!(evt.stall_cycles, 200);
-        assert_eq!(evt.timestamp, 999);
+    #[test]
+    fn pmc_event_ipc_and_stall() {
+        let evt = unsafe {
+            let mut e = std::mem::zeroed::<PmcEvent>();
+            e.cpu = 0;
+            e.cycles = 1000;
+            e.instructions = 800;
+            e.stall_cycles = 200;
+            e.timestamp = 999;
+            e
+        };
         assert!((evt.ipc() - 0.8).abs() < f64::EPSILON);
         assert!((evt.stall_pct() - 20.0).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn pmc_event_from_short_bytes() {
-        assert!(PmcEvent::from_bytes(&[0u8; 35]).is_none());
+    fn pmc_event_zero_cycles() {
+        let evt = unsafe { std::mem::zeroed::<PmcEvent>() };
+        assert!((evt.ipc() - 0.0).abs() < f64::EPSILON);
+        assert!((evt.stall_pct() - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]

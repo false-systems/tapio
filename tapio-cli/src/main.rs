@@ -86,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Recent { json, since } => cmd_recent(&cli.data_dir, json, since.as_deref())?,
         Command::Health { observer } => cmd_health(&cli.data_dir, observer.as_deref())?,
-        Command::Mcp => anyhow::bail!("MCP server not yet implemented"),
+        Command::Mcp => cmd_mcp(&cli.data_dir).await?,
     }
 
     Ok(())
@@ -332,6 +332,241 @@ fn cmd_health(data_dir: &Path, observer_filter: Option<&str>) -> anyhow::Result<
         )?;
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// MCP Server (stdio transport, JSON-RPC 2.0)
+// ---------------------------------------------------------------------------
+
+async fn cmd_mcp(data_dir: &Path) -> anyhow::Result<()> {
+    use std::io::BufRead;
+
+    let stdin = io::stdin();
+    let reader = stdin.lock();
+    let mut line = String::new();
+    let mut reader = io::BufReader::new(reader);
+
+    loop {
+        line.clear();
+        let n = reader.read_line(&mut line)?;
+        if n == 0 {
+            break; // EOF
+        }
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let request: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => {
+                mcp_write_error(None, -32700, "Parse error")?;
+                continue;
+            }
+        };
+
+        let id = request.get("id").cloned();
+        let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        let params = request
+            .get("params")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
+
+        match method {
+            "initialize" => {
+                let result = serde_json::json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "serverInfo": {
+                        "name": "tapio",
+                        "version": env!("CARGO_PKG_VERSION"),
+                    }
+                });
+                mcp_write_result(id, result)?;
+            }
+            "notifications/initialized" => {
+                // No response needed for notifications
+            }
+            "tools/list" => {
+                let tools = serde_json::json!({
+                    "tools": [
+                        {
+                            "name": "tapio_recent_anomalies",
+                            "description": "Get recent kernel anomalies from the last N minutes",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "minutes": { "type": "number", "default": 5, "description": "Time window in minutes" },
+                                    "observer": { "type": "string", "enum": ["network", "container", "storage", "node", "all"], "default": "all" },
+                                    "severity": { "type": "string", "enum": ["warning", "error", "critical", "all"], "default": "all" }
+                                }
+                            }
+                        },
+                        {
+                            "name": "tapio_node_health",
+                            "description": "Get current node health summary across all observers",
+                            "inputSchema": { "type": "object", "properties": {} }
+                        },
+                        {
+                            "name": "tapio_watch_stream",
+                            "description": "Get the most recent anomalies (snapshot, not streaming)",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "observer": { "type": "string", "description": "Filter by observer" },
+                                    "max_events": { "type": "number", "default": 50, "description": "Maximum events to return" }
+                                }
+                            }
+                        }
+                    ]
+                });
+                mcp_write_result(id, tools)?;
+            }
+            "tools/call" => {
+                let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                let args = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+                let result = mcp_call_tool(data_dir, tool_name, &args)?;
+                mcp_write_result(id, result)?;
+            }
+            _ => {
+                mcp_write_error(id, -32601, &format!("Method not found: {method}"))?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn mcp_call_tool(
+    data_dir: &Path,
+    name: &str,
+    args: &serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    match name {
+        "tapio_recent_anomalies" => {
+            let minutes = args.get("minutes").and_then(|v| v.as_f64()).unwrap_or(5.0);
+            let observer = args
+                .get("observer")
+                .and_then(|v| v.as_str())
+                .unwrap_or("all");
+            let severity = args
+                .get("severity")
+                .and_then(|v| v.as_str())
+                .unwrap_or("all");
+
+            let mut occs = load_occurrences(data_dir)?;
+            let cutoff = (chrono::Utc::now() - chrono::Duration::seconds((minutes * 60.0) as i64))
+                .to_rfc3339();
+            occs.retain(|o| o.timestamp >= cutoff);
+
+            if observer != "all" {
+                occs.retain(|o| observer_category(&o.occurrence_type) == observer);
+            }
+            if severity != "all" {
+                occs.retain(|o| {
+                    let s = match o.severity {
+                        Severity::Warning => "warning",
+                        Severity::Error => "error",
+                        Severity::Critical => "critical",
+                        _ => "other",
+                    };
+                    s == severity
+                });
+            }
+
+            occs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+            let content = serde_json::to_string(&occs)?;
+            Ok(serde_json::json!({
+                "content": [{ "type": "text", "text": content }]
+            }))
+        }
+        "tapio_node_health" => {
+            let occs = load_occurrences(data_dir)?;
+            let one_hour_ago = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+            let recent: Vec<&Occurrence> = occs
+                .iter()
+                .filter(|o| o.timestamp >= one_hour_ago)
+                .collect();
+
+            let mut by_observer: HashMap<&str, (usize, usize)> = HashMap::new();
+            for occ in &recent {
+                let cat = observer_category(&occ.occurrence_type);
+                let entry = by_observer.entry(cat).or_insert((0, 0));
+                entry.0 += 1;
+                if matches!(occ.severity, Severity::Critical) {
+                    entry.1 += 1;
+                }
+            }
+
+            let total: usize = by_observer.values().map(|(c, _)| c).sum();
+            let total_critical: usize = by_observer.values().map(|(_, c)| c).sum();
+
+            let health = serde_json::json!({
+                "status": health_status(total, total_critical),
+                "total_anomalies_1h": total,
+                "total_critical_1h": total_critical,
+                "observers": by_observer.iter().map(|(k, (count, critical))| {
+                    serde_json::json!({ "name": k, "anomalies": count, "critical": critical })
+                }).collect::<Vec<_>>(),
+            });
+
+            let content = serde_json::to_string_pretty(&health)?;
+            Ok(serde_json::json!({
+                "content": [{ "type": "text", "text": content }]
+            }))
+        }
+        "tapio_watch_stream" => {
+            let observer = args.get("observer").and_then(|v| v.as_str());
+            let max = args
+                .get("max_events")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(50) as usize;
+
+            let mut occs = load_occurrences(data_dir)?;
+            if let Some(obs) = observer {
+                occs.retain(|o| observer_category(&o.occurrence_type) == obs);
+            }
+            occs.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+            occs.truncate(max);
+
+            let content = serde_json::to_string(&occs)?;
+            Ok(serde_json::json!({
+                "content": [{ "type": "text", "text": content }]
+            }))
+        }
+        _ => Ok(serde_json::json!({
+            "content": [{ "type": "text", "text": format!("Unknown tool: {name}") }],
+            "isError": true,
+        })),
+    }
+}
+
+fn mcp_write_result(id: Option<serde_json::Value>, result: serde_json::Value) -> io::Result<()> {
+    let response = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": result,
+    });
+    let mut out = io::stdout().lock();
+    serde_json::to_writer(&mut out, &response).map_err(io::Error::other)?;
+    writeln!(out)?;
+    out.flush()
+}
+
+fn mcp_write_error(id: Option<serde_json::Value>, code: i32, message: &str) -> io::Result<()> {
+    let response = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": code, "message": message },
+    });
+    let mut out = io::stdout().lock();
+    serde_json::to_writer(&mut out, &response).map_err(io::Error::other)?;
+    writeln!(out)?;
+    out.flush()
 }
 
 // ---------------------------------------------------------------------------

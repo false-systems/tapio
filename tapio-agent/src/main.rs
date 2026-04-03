@@ -34,7 +34,7 @@ impl Write for BrokenPipeGuard {
     about = "eBPF kernel observer for Kubernetes"
 )]
 struct Args {
-    /// Output sinks (stdout, file). Can be specified multiple times.
+    /// Output sinks (stdout, file, polku). Can be specified multiple times.
     #[arg(long = "sink", default_values_t = vec!["stdout".to_string()])]
     sinks: Vec<String>,
 
@@ -45,6 +45,10 @@ struct Args {
     /// Directory for file sink output
     #[arg(long, default_value = ".tapio/occurrences")]
     data_dir: String,
+
+    /// POLKU endpoint for polku sink (e.g. http://localhost:8765)
+    #[arg(long, default_value = "http://localhost:8765")]
+    polku_endpoint: String,
 }
 
 fn create_sinks(args: &Args) -> anyhow::Result<Vec<Box<dyn tapio_common::sink::Sink>>> {
@@ -53,6 +57,11 @@ fn create_sinks(args: &Args) -> anyhow::Result<Vec<Box<dyn tapio_common::sink::S
         match name.as_str() {
             "stdout" => sinks.push(Box::new(sink::stdout::StdoutSink)),
             "file" => sinks.push(Box::new(sink::file::FileSink::new(&args.data_dir))),
+            "polku" => sinks.push(Box::new(sink::polku::PolkuSink::new(
+                &args.polku_endpoint,
+                100,
+                std::time::Duration::from_secs(1),
+            ))),
             other => anyhow::bail!("unknown sink: {other}"),
         }
     }
@@ -102,7 +111,9 @@ async fn main() -> anyhow::Result<()> {
     // Ignore SIGPIPE so broken pipes (e.g. piping to `head`) return EPIPE
     // instead of aborting the process (panic=abort in release profile).
     #[cfg(target_os = "linux")]
-    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN); }
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
 
     // Use a non-panicking writer for tracing — default stderr writer panics
     // on broken pipe, which with panic=abort kills the process.

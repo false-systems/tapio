@@ -81,6 +81,15 @@ pub fn classify(event: &ContainerEvent) -> Option<ClassifiedAnomaly> {
 
 pub fn build_occurrence(event: &ContainerEvent, anomaly: &ClassifiedAnomaly) -> Occurrence {
     let f = EventFields::from(event);
+    let memory_limit = if f.memory_limit == 0 {
+        // BPF tracepoint doesn't expose the cgroup memory limit.
+        // Attempt to read it from cgroupfs using the cgroup_id.
+        // Very fast OOM kills may still get 0 if the cgroup is deleted before we read.
+        enrich_memory_limit(f.cgroup_id).unwrap_or(0)
+    } else {
+        f.memory_limit
+    };
+
     Occurrence::new(
         anomaly.event_type,
         anomaly.severity.clone(),
@@ -93,10 +102,86 @@ pub fn build_occurrence(event: &ContainerEvent, anomaly: &ClassifiedAnomaly) -> 
         "exit_code": f.exit_code,
         "signal": f.signal,
         "memory_usage_bytes": f.memory_usage,
-        "memory_limit_bytes": f.memory_limit,
+        "memory_limit_bytes": memory_limit,
         "cgroup_id": f.cgroup_id,
         "timestamp_ns": f.timestamp_ns,
     }))
+}
+
+/// Resolve cgroup memory limit from cgroupfs using the cgroup inode ID.
+/// Walks /sys/fs/cgroup looking for a directory whose inode matches cgroup_id,
+/// then reads memory.max (cgroups v2) or memory.limit_in_bytes (cgroups v1).
+fn enrich_memory_limit(cgroup_id: u64) -> Option<u64> {
+    if cgroup_id == 0 {
+        return None;
+    }
+    // Try cgroups v2 unified hierarchy first
+    if let Some(limit) = walk_cgroup_tree("/sys/fs/cgroup", cgroup_id) {
+        return Some(limit);
+    }
+    // Fall back to cgroups v1 memory controller
+    walk_cgroup_tree("/sys/fs/cgroup/memory", cgroup_id)
+}
+
+fn walk_cgroup_tree(root: &str, target_ino: u64) -> Option<u64> {
+    let root_path = std::path::Path::new(root);
+    if !root_path.is_dir() {
+        return None;
+    }
+    walk_dir_for_ino(root_path, target_ino)
+}
+
+fn walk_dir_for_ino(dir: &std::path::Path, target_ino: u64) -> Option<u64> {
+    use std::fs;
+    use std::os::unix::fs::MetadataExt;
+
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if let Ok(meta) = fs::metadata(&path)
+            && meta.ino() == target_ino
+        {
+            return read_memory_limit(&path);
+        }
+        // Recurse into subdirectories
+        if let Some(limit) = walk_dir_for_ino(&path, target_ino) {
+            return Some(limit);
+        }
+    }
+    None
+}
+
+fn read_memory_limit(cgroup_dir: &std::path::Path) -> Option<u64> {
+    use std::fs;
+
+    // cgroups v2: memory.max
+    let v2_path = cgroup_dir.join("memory.max");
+    if let Ok(content) = fs::read_to_string(&v2_path) {
+        let trimmed = content.trim();
+        if trimmed == "max" {
+            return Some(u64::MAX); // No limit set
+        }
+        if let Ok(val) = trimmed.parse::<u64>() {
+            return Some(val);
+        }
+    }
+
+    // cgroups v1: memory.limit_in_bytes
+    let v1_path = cgroup_dir.join("memory.limit_in_bytes");
+    if let Ok(content) = fs::read_to_string(&v1_path)
+        && let Ok(val) = content.trim().parse::<u64>()
+    {
+        // v1 uses a very large value (PAGE_COUNTER_MAX * PAGE_SIZE) for "no limit"
+        if val < (1_u64 << 62) {
+            return Some(val);
+        }
+        return Some(u64::MAX);
+    }
+
+    None
 }
 
 #[cfg(target_os = "linux")]
