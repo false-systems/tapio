@@ -15,8 +15,10 @@ pub struct ClassifiedAnomaly {
 }
 
 pub fn classify(event: &PmcEvent) -> Option<ClassifiedAnomaly> {
+    let cpu = event.cpu;
     let ipc = event.ipc();
     let stall_pct = event.stall_pct();
+    let cycles = event.cycles;
 
     if stall_pct >= STALL_PCT_CRITICAL {
         return Some(ClassifiedAnomaly {
@@ -24,7 +26,7 @@ pub fn classify(event: &PmcEvent) -> Option<ClassifiedAnomaly> {
             severity: Severity::Critical,
             outcome: Outcome::InProgress,
             error_code: "CPU_STALL",
-            error_message: format!("CPU {} stall {stall_pct:.1}% (ipc={ipc:.2})", event.cpu,),
+            error_message: format!("CPU {cpu} stall {stall_pct:.1}% (ipc={ipc:.2})"),
         });
     }
 
@@ -35,19 +37,18 @@ pub fn classify(event: &PmcEvent) -> Option<ClassifiedAnomaly> {
             outcome: Outcome::InProgress,
             error_code: "MEMORY_PRESSURE",
             error_message: format!(
-                "CPU {} memory pressure stall {stall_pct:.1}% (ipc={ipc:.2})",
-                event.cpu,
+                "CPU {cpu} memory pressure stall {stall_pct:.1}% (ipc={ipc:.2})",
             ),
         });
     }
 
-    if ipc < IPC_DEGRADATION_THRESHOLD && event.cycles > 0 {
+    if ipc < IPC_DEGRADATION_THRESHOLD && cycles > 0 {
         return Some(ClassifiedAnomaly {
             event_type: NODE_IPC_DEGRADATION,
             severity: Severity::Warning,
             outcome: Outcome::InProgress,
             error_code: "IPC_DEGRADATION",
-            error_message: format!("CPU {} low IPC {ipc:.2} (stall {stall_pct:.1}%)", event.cpu,),
+            error_message: format!("CPU {cpu} low IPC {ipc:.2} (stall {stall_pct:.1}%)"),
         });
     }
 
@@ -55,6 +56,14 @@ pub fn classify(event: &PmcEvent) -> Option<ClassifiedAnomaly> {
 }
 
 pub fn build_occurrence(event: &PmcEvent, anomaly: &ClassifiedAnomaly) -> Occurrence {
+    let cpu = event.cpu;
+    let cycles = event.cycles;
+    let instructions = event.instructions;
+    let stall_cycles = event.stall_cycles;
+    let ipc = event.ipc();
+    let stall_pct = event.stall_pct();
+    let timestamp = event.timestamp;
+
     Occurrence::new(
         anomaly.event_type,
         anomaly.severity.clone(),
@@ -62,13 +71,13 @@ pub fn build_occurrence(event: &PmcEvent, anomaly: &ClassifiedAnomaly) -> Occurr
     )
     .with_error(anomaly.error_code, &anomaly.error_message)
     .with_data(serde_json::json!({
-        "cpu": event.cpu,
-        "cycles": event.cycles,
-        "instructions": event.instructions,
-        "stall_cycles": event.stall_cycles,
-        "ipc": event.ipc(),
-        "stall_pct": event.stall_pct(),
-        "timestamp_ns": event.timestamp,
+        "cpu": cpu,
+        "cycles": cycles,
+        "instructions": instructions,
+        "stall_cycles": stall_cycles,
+        "ipc": ipc,
+        "stall_pct": stall_pct,
+        "timestamp_ns": timestamp,
     }))
 }
 
@@ -309,7 +318,12 @@ pub async fn run(
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
                 while let Some(item) = ring_buf.next() {
                     let data = item.as_ref();
-                    let Some(event) = PmcEvent::from_bytes(data) else { continue };
+                    if data.len() < std::mem::size_of::<PmcEvent>() {
+                        continue;
+                    }
+                    let event = unsafe {
+                        std::ptr::read_unaligned(data.as_ptr() as *const PmcEvent)
+                    };
                     event_count += 1;
                     if let Some(anomaly) = classify(&event) {
                         let occ = build_occurrence(&event, &anomaly);
