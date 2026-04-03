@@ -6,7 +6,7 @@ use tapio_common::sink::{Sink, SinkError};
 
 /// Sink that batches occurrences and POSTs them to POLKU's HTTP ingest endpoint.
 /// Buffers events and flushes when buffer_size is reached or flush_interval elapses.
-/// On send failure, retains the buffer for retry on next flush.
+/// On send failure, retains the buffer for retry with exponential backoff.
 /// If the buffer exceeds 10x buffer_size, drops oldest events.
 pub struct PolkuSink {
     inner: Mutex<PolkuInner>,
@@ -18,18 +18,26 @@ struct PolkuInner {
     buffer_size: usize,
     flush_interval: Duration,
     last_flush: Instant,
+    next_retry: Instant,
+    backoff: Duration,
     max_buffer: usize,
 }
 
+const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+const MAX_BACKOFF: Duration = Duration::from_secs(60);
+
 impl PolkuSink {
     pub fn new(endpoint: &str, buffer_size: usize, flush_interval: Duration) -> Self {
+        let now = Instant::now();
         Self {
             inner: Mutex::new(PolkuInner {
                 endpoint: endpoint.to_string(),
                 buffer: Vec::with_capacity(buffer_size),
                 buffer_size,
                 flush_interval,
-                last_flush: Instant::now(),
+                last_flush: now,
+                next_retry: now,
+                backoff: INITIAL_BACKOFF,
                 max_buffer: buffer_size * 10,
             }),
         }
@@ -55,9 +63,11 @@ impl Sink for PolkuSink {
 
         inner.buffer.push(occurrence.clone());
 
-        // Flush if buffer is full or interval elapsed
-        if inner.buffer.len() >= inner.buffer_size
-            || inner.last_flush.elapsed() >= inner.flush_interval
+        // Flush if buffer is full or interval elapsed (respecting backoff)
+        let now = Instant::now();
+        if now >= inner.next_retry
+            && (inner.buffer.len() >= inner.buffer_size
+                || inner.last_flush.elapsed() >= inner.flush_interval)
         {
             flush_inner(&mut inner);
         }
@@ -92,17 +102,27 @@ fn flush_inner(inner: &mut PolkuInner) {
         }
     };
 
-    // Synchronous HTTP POST — the Sink trait is sync.
-    // Uses a minimal TCP connection to avoid pulling in reqwest/hyper.
-    match post_json(&inner.endpoint, &payload) {
+    // Release mutex before blocking I/O by extracting what we need
+    let endpoint = inner.endpoint.clone();
+
+    match post_json(&endpoint, &payload) {
         Ok(()) => {
             tracing::debug!(count = inner.buffer.len(), "polku sink: batch sent");
             inner.buffer.clear();
             inner.last_flush = Instant::now();
+            inner.backoff = INITIAL_BACKOFF;
         }
         Err(e) => {
-            // Retain buffer for retry on next flush
-            tracing::warn!(error = %e, buffered = inner.buffer.len(), "polku sink: send failed, will retry");
+            // Exponential backoff: don't retry on every send() during outages
+            let now = Instant::now();
+            inner.next_retry = now + inner.backoff;
+            inner.backoff = (inner.backoff * 2).min(MAX_BACKOFF);
+            tracing::warn!(
+                error = %e,
+                buffered = inner.buffer.len(),
+                retry_in_secs = inner.backoff.as_secs(),
+                "polku sink: send failed, backing off"
+            );
         }
     }
 }
@@ -129,12 +149,7 @@ fn post_json(endpoint: &str, body: &[u8]) -> Result<(), String> {
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
 
     let request = format!(
-        "POST {path} HTTP/1.1\r\n\
-         Host: {host_port}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n",
+        "POST {path} HTTP/1.1\r\nHost: {host_port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
 

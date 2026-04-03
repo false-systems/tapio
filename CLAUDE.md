@@ -34,7 +34,7 @@ Rust edition 2024, MSRV 1.85. tapio-agent only compiles on Linux (aya dependency
 
 - **tapio-common**: Shared types. `#[repr(C)]` eBPF event structs mirroring the C programs, `kernel.*` event type hierarchy, FALSE Protocol `Occurrence` builder, `Sink` trait.
 - **tapio-agent**: DaemonSet binary. Loads eBPF C programs via aya, reads ring buffers, parses events, filters anomalies, enriches with K8s context (kube-rs), emits Occurrences to sinks. Linux-only (aya requires kernel). Internal modules: `observer/` (four observer submodules), `sink/` (`StdoutSink`, `FileSink`), `enricher.rs` (K8s pod enrichment, also `cfg(target_os = "linux")`).
-- **tapio-cli**: User/AI interface. Single-file crate (`main.rs`). CLI commands (`tapio status`, `tapio watch`, `tapio health`, `tapio recent`). Reads from `.tapio/occurrences/*.json` — decoupled from the agent process. MCP server (`tapio mcp`) is stubbed.
+- **tapio-cli**: User/AI interface. Single-file crate (`main.rs`). CLI commands (`tapio status`, `tapio watch`, `tapio health`, `tapio recent`). Reads from `.tapio/occurrences/*.json` — decoupled from the agent process. MCP server (`tapio mcp`) exposes `tapio_recent_anomalies`, `tapio_node_health`, `tapio_watch_stream` via stdio JSON-RPC 2.0.
 
 ### eBPF programs (C, in `ebpf/`)
 

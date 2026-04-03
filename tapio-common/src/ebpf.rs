@@ -328,15 +328,15 @@ mod tests {
             e.timestamp = 999;
             e
         };
-        assert!((evt.ipc() - 0.8).abs() < f64::EPSILON);
-        assert!((evt.stall_pct() - 20.0).abs() < f64::EPSILON);
+        assert!((evt.ipc() - 0.8).abs() < 1e-12);
+        assert!((evt.stall_pct() - 20.0).abs() < 1e-12);
     }
 
     #[test]
     fn pmc_event_zero_cycles() {
         let evt = unsafe { std::mem::zeroed::<PmcEvent>() };
-        assert!((evt.ipc() - 0.0).abs() < f64::EPSILON);
-        assert!((evt.stall_pct() - 0.0).abs() < f64::EPSILON);
+        assert!((evt.ipc()).abs() < 1e-12);
+        assert!((evt.stall_pct()).abs() < 1e-12);
     }
 
     #[test]

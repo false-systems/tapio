@@ -367,11 +367,17 @@ async fn cmd_mcp(data_dir: &Path) -> anyhow::Result<()> {
         };
 
         let id = request.get("id").cloned();
+        let is_notification = id.is_none() || id.as_ref().is_some_and(|v| v.is_null());
         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = request
             .get("params")
             .cloned()
             .unwrap_or(serde_json::json!({}));
+
+        // JSON-RPC: notifications (no id) get no response
+        if is_notification {
+            continue;
+        }
 
         match method {
             "initialize" => {
@@ -384,9 +390,6 @@ async fn cmd_mcp(data_dir: &Path) -> anyhow::Result<()> {
                     }
                 });
                 mcp_write_result(id, result)?;
-            }
-            "notifications/initialized" => {
-                // No response needed for notifications
             }
             "tools/list" => {
                 let tools = serde_json::json!({
@@ -429,8 +432,14 @@ async fn cmd_mcp(data_dir: &Path) -> anyhow::Result<()> {
                     .get("arguments")
                     .cloned()
                     .unwrap_or(serde_json::json!({}));
-                let result = mcp_call_tool(data_dir, tool_name, &args)?;
-                mcp_write_result(id, result)?;
+                match mcp_call_tool(data_dir, tool_name, &args) {
+                    Ok(result) => mcp_write_result(id, result)?,
+                    Err(err) => mcp_write_error(
+                        id,
+                        -32603,
+                        &format!("Tool call failed for '{tool_name}': {err}"),
+                    )?,
+                }
             }
             _ => {
                 mcp_write_error(id, -32601, &format!("Method not found: {method}"))?;
