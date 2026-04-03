@@ -208,6 +208,7 @@ async fn main() -> anyhow::Result<()> {
 
         let _ = tokio::join!(net, ctr, stg, pmc);
         info!("all observers stopped");
+        Ok(())
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -215,6 +216,4 @@ async fn main() -> anyhow::Result<()> {
         let _ = (args, multi_sink);
         anyhow::bail!("eBPF requires Linux — tapio-agent cannot run on this platform");
     }
-
-    Ok(())
 }

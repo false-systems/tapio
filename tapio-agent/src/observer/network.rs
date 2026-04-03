@@ -27,9 +27,7 @@ pub fn classify(event: &NetworkEvent) -> Option<ClassifiedAnomaly> {
                 severity: Severity::Warning,
                 outcome: Outcome::Failure,
                 error_code: "RST_RECEIVED",
-                error_message: format!(
-                    "TCP RST {src_ip}:{src_port} → {dst_ip}:{dst_port}",
-                ),
+                error_message: format!("TCP RST {src_ip}:{src_port} → {dst_ip}:{dst_port}",),
                 ebpf_event_type: et,
             })
         }
