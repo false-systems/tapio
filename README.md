@@ -22,8 +22,8 @@ inet_sock_set_state ──┐
 tcp_receive_reset  ───┤         parse
 tcp_retransmit_skb ───┼── ring  filter (anomaly?)  enrich ──►   stdout
                       │  buffer                    (kube-rs)    file (.tapio/)
-sched_process_exit ───┤                                         POLKU → AHTI
-oom/mark_victim    ───┤                                         Grafana (OTLP)
+sched_process_exit ───┤                                         POLKU (planned)
+oom/mark_victim    ───┤                                         Grafana (planned)
                       │
 block_rq_issue     ───┤
 block_rq_complete  ───┤
@@ -39,10 +39,10 @@ perf_event counters ──┘
 
 | Observer | Tracepoints | Anomalies |
 |----------|------------|-----------|
-| Network | `inet_sock_set_state`, `tcp_receive_reset`, `tcp_retransmit_skb` | `kernel.network.connection_refused`, `connection_timeout`, `retransmit_spike`, `rtt_degradation`, `rst_storm` |
-| Container | `sched_process_exit`, `oom/mark_victim` | `kernel.container.oom_kill`, `abnormal_exit` |
-| Storage | `block_rq_issue`, `block_rq_complete` | `kernel.storage.io_error`, `latency_spike` |
-| Node PMC | `perf_event` (cycles, instructions, stalls) | `kernel.node.cpu_stall`, `memory_pressure`, `ipc_degradation` |
+| Network | `inet_sock_set_state`, `tcp_receive_reset`, `tcp_retransmit_skb` | `kernel.network.connection_refused`, `kernel.network.connection_timeout`, `kernel.network.retransmit_spike`, `kernel.network.rtt_degradation`, `kernel.network.rst_storm` |
+| Container | `sched_process_exit`, `oom/mark_victim` | `kernel.container.oom_kill`, `kernel.container.abnormal_exit` |
+| Storage | `block_rq_issue`, `block_rq_complete` | `kernel.storage.io_error`, `kernel.storage.latency_spike` |
+| Node PMC | `perf_event` (cycles, instructions, stalls) | `kernel.node.cpu_stall`, `kernel.node.memory_pressure`, `kernel.node.ipc_degradation` |
 
 Edge filtering happens at two levels. The storage observer filters in BPF — only I/O errors and latency spikes cross to userspace. The container observer filters in BPF for abnormal exits (non-zero exit code or signal). The network observer emits on state transitions and anomalies; Rust classifies retransmit spikes, RTT degradation, and connection failures. The PMC observer sends all samples; Rust detects IPC degradation and memory stalls.
 
@@ -54,31 +54,39 @@ Occurrences carry raw kernel data. TAPIO fills factual fields (error code, messa
 
 ```json
 {
+  "id": "01JA1B2C3D4E5F6G7H8J9K0L1M",
+  "timestamp": "2026-04-03T14:23:01.042Z",
   "source": "tapio",
   "type": "kernel.container.oom_kill",
+  "protocol_version": "1.0",
   "severity": "critical",
   "outcome": "failure",
   "error": {
     "code": "OOM_KILL",
-    "message": "OOM kill pid=1234 (usage=512MB, limit=512MB)"
+    "message": "OOM kill pid=1234 (usage=512MB, limit=0MB)"
   },
   "context": {
     "node": "worker-3",
     "namespace": "default",
     "entities": [
-      { "kind": "pod", "id": "default/checkout-api-7f8b9" }
+      { "kind": "pod", "id": "default/checkout-api-7f8b9", "name": "checkout-api-7f8b9" },
+      { "kind": "deployment", "id": "default/checkout-api", "name": "checkout-api" }
     ]
   },
   "data": {
     "pid": 1234,
+    "tid": 1234,
     "exit_code": 137,
     "signal": 9,
     "memory_usage_bytes": 536870912,
-    "memory_limit_bytes": 536870912,
-    "cgroup_id": 8429
+    "memory_limit_bytes": 0,
+    "cgroup_id": 8429,
+    "timestamp_ns": 1743691381042000000
   }
 }
 ```
+
+Note: `memory_limit_bytes` is 0 for OOM kills — the BPF tracepoint doesn't expose the cgroup limit. `context` is populated when K8s enrichment is enabled (`NODE_NAME` set).
 
 ---
 
@@ -102,7 +110,7 @@ The CLI reads from `.tapio/occurrences/*.json` — decoupled from the agent proc
 ## Agent
 
 ```bash
-tapio-agent --sink=stdout                  # JSON lines to stderr
+tapio-agent --sink=stdout                  # JSON lines to stdout
 tapio-agent --sink=file                    # .tapio/occurrences/*.json
 tapio-agent --sink=stdout --sink=file      # both
 tapio-agent --ebpf-dir /opt/tapio/ebpf    # compiled .o location
@@ -121,11 +129,13 @@ cargo test --workspace                  # 61 tests
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-eBPF programs are compiled separately:
+eBPF programs are compiled separately — all four are required:
 
 ```bash
-clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I ebpf/headers \
-  -c ebpf/network_monitor.c -o /opt/tapio/ebpf/network_monitor.o
+for prog in network_monitor container_monitor storage_monitor node_pmc_monitor; do
+  clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I ebpf/headers \
+    -c ebpf/${prog}.c -o /opt/tapio/ebpf/${prog}.o
+done
 ```
 
 Rust edition 2024, MSRV 1.85. The agent requires Linux with kernel 5.8+ and BTF. The CLI runs on any platform.
