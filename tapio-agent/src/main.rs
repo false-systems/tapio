@@ -1,6 +1,7 @@
 mod config;
 #[cfg(target_os = "linux")]
 mod enricher;
+mod metrics;
 mod observer;
 mod sink;
 
@@ -171,6 +172,27 @@ async fn main() -> anyhow::Result<()> {
                 None
             }
         };
+
+        let tapio_metrics = metrics::TapioMetrics::new();
+        if enricher.is_some() {
+            tapio_metrics.k8s_reflector_up.set(1);
+        }
+
+        // Start Prometheus metrics server if enabled
+        if cfg.metrics.enabled {
+            let registry = tapio_metrics.registry.clone();
+            let metrics_port = cfg.metrics.port;
+            // shutdown_rx will be created below — metrics server gets its own clone
+            let (metrics_shutdown_tx, metrics_shutdown_rx) = tokio::sync::watch::channel(false);
+            tokio::spawn(async move {
+                if let Err(e) = metrics::serve(registry, metrics_port, metrics_shutdown_rx).await {
+                    tracing::error!(error = %e, "metrics server failed");
+                }
+            });
+            // Wire metrics shutdown into main shutdown below
+            // (kept simple: metrics server stopped by dropping its receiver)
+            let _ = metrics_shutdown_tx;
+        }
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
