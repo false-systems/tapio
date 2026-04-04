@@ -1,3 +1,4 @@
+mod config;
 #[cfg(target_os = "linux")]
 mod enricher;
 mod observer;
@@ -34,6 +35,10 @@ impl Write for BrokenPipeGuard {
     about = "eBPF kernel observer for Kubernetes"
 )]
 struct Args {
+    /// Path to TOML config file
+    #[arg(long, default_value = "/etc/tapio/tapio.toml")]
+    config: String,
+
     /// Output sinks (stdout, file, polku). Can be specified multiple times.
     #[arg(long = "sink", default_values_t = vec!["stdout".to_string()])]
     sinks: Vec<String>,
@@ -123,6 +128,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let args = Args::parse();
+    let _cfg = config::load(std::path::Path::new(&args.config))?;
     info!("tapio v4 — kernel eyes");
 
     let sinks = create_sinks(&args)?;
