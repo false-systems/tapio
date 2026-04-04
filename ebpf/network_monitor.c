@@ -200,7 +200,9 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 				__u64 abs_us = get_config(CONFIG_RTT_SPIKE_ABS_US, RTT_SPIKE_ABS_US);
 				if (rtt_us > (baseline->baseline_us * ratio) || rtt_us > abs_us) {
 					struct network_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
-					if (evt) {
+					if (!evt) {
+						metric_inc(METRIC_LOST_EVENTS);
+					} else {
 						__builtin_memset(evt, 0, sizeof(*evt));
 
 						__u64 pid_tgid = bpf_get_current_pid_tgid();
@@ -241,6 +243,7 @@ skip_rtt_tracking:
 
 		struct network_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
 		if (!evt) {
+			metric_inc(METRIC_LOST_EVENTS);
 			return 0;
 		}
 
@@ -292,6 +295,7 @@ int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
 {
 	struct network_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
 	if (!evt) {
+		metric_inc(METRIC_LOST_EVENTS);
 		return 0;
 	}
 
@@ -370,8 +374,10 @@ int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 	struct network_event *evt;
 
 	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
-	if (!evt)
+	if (!evt) {
+		metric_inc(METRIC_LOST_EVENTS);
 		return 0;
+	}
 
 	__builtin_memset(evt, 0, sizeof(*evt));
 

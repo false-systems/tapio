@@ -55,7 +55,11 @@ pub fn classify(event: &PmcEvent) -> Option<ClassifiedAnomaly> {
     None
 }
 
-pub fn build_occurrence(event: &PmcEvent, anomaly: &ClassifiedAnomaly) -> Occurrence {
+pub fn build_occurrence(
+    event: &PmcEvent,
+    anomaly: &ClassifiedAnomaly,
+    boot_offset_ns: u64,
+) -> Occurrence {
     let cpu = event.cpu;
     let cycles = event.cycles;
     let instructions = event.instructions;
@@ -64,10 +68,12 @@ pub fn build_occurrence(event: &PmcEvent, anomaly: &ClassifiedAnomaly) -> Occurr
     let stall_pct = event.stall_pct();
     let timestamp = event.timestamp;
 
-    Occurrence::new(
+    let wall_ns = boot_offset_ns.wrapping_add(timestamp);
+    Occurrence::new_at(
         anomaly.event_type,
         anomaly.severity.clone(),
         anomaly.outcome.clone(),
+        wall_ns,
     )
     .with_error(anomaly.error_code, &anomaly.error_message)
     .with_data(serde_json::json!({
@@ -228,6 +234,7 @@ fn set_perf_event_map(
 pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
+    boot_offset_ns: u64,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::Ebpf;
@@ -300,6 +307,8 @@ pub async fn run(
         )?;
     }
 
+    let metrics_fd = super::metrics_map_fd(&ebpf);
+
     let events_map = ebpf
         .map_mut("events")
         .ok_or_else(|| anyhow::anyhow!("map not found: events"))?;
@@ -308,6 +317,8 @@ pub async fn run(
     tracing::info!("PMC observer running");
     let mut event_count: u64 = 0;
     let mut anomaly_count: u64 = 0;
+    let mut tick_count: u64 = 0;
+    let mut prev_lost: u64 = 0;
 
     loop {
         tokio::select! {
@@ -316,22 +327,48 @@ pub async fn run(
                 break;
             }
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                while let Some(item) = ring_buf.next() {
-                    let data = item.as_ref();
-                    if data.len() < std::mem::size_of::<PmcEvent>() {
-                        continue;
-                    }
-                    let event = unsafe {
-                        std::ptr::read_unaligned(data.as_ptr() as *const PmcEvent)
-                    };
-                    event_count += 1;
-                    if let Some(anomaly) = classify(&event) {
-                        let occ = build_occurrence(&event, &anomaly);
-                        anomaly_count += 1;
-                        if let Err(e) = sink.send(&occ) {
-                            tracing::warn!(error = %e, "sink error");
+                tick_count += 1;
+                if tick_count % super::LOST_EVENTS_CHECK_INTERVAL == 0 {
+                    if let Some(fd) = metrics_fd {
+                        let lost = super::read_percpu_sum(fd, super::METRIC_LOST_EVENTS, num_cpus as usize);
+                        if lost > prev_lost {
+                            tracing::warn!(
+                                observer = "pmc",
+                                lost_total = lost,
+                                lost_delta = lost - prev_lost,
+                                "ring buffer events lost"
+                            );
+                            prev_lost = lost;
                         }
                     }
+                }
+                let drained = tokio::task::block_in_place(|| {
+                    let mut count = 0usize;
+                    while let Some(item) = ring_buf.next() {
+                        let data = item.as_ref();
+                        if data.len() < std::mem::size_of::<PmcEvent>() {
+                            count += 1;
+                            if count >= super::MAX_DRAIN_PER_TICK { break; }
+                            continue;
+                        }
+                        let event = unsafe {
+                            std::ptr::read_unaligned(data.as_ptr() as *const PmcEvent)
+                        };
+                        event_count += 1;
+                        if let Some(anomaly) = classify(&event) {
+                            let occ = build_occurrence(&event, &anomaly, boot_offset_ns);
+                            anomaly_count += 1;
+                            if let Err(e) = sink.send(&occ) {
+                                tracing::warn!(error = %e, "sink error");
+                            }
+                        }
+                        count += 1;
+                        if count >= super::MAX_DRAIN_PER_TICK { break; }
+                    }
+                    count
+                });
+                if drained >= super::MAX_DRAIN_PER_TICK {
+                    tracing::warn!(observer = "pmc", drained, "ring buffer drain capped");
                 }
             }
         }
@@ -401,7 +438,7 @@ mod tests {
     fn build_occurrence_valid() {
         let evt = make_pmc(1000, 400, 500);
         let a = classify(&evt).unwrap();
-        let occ = build_occurrence(&evt, &a);
+        let occ = build_occurrence(&evt, &a, 0);
         assert!(occ.validate().is_ok());
         assert_eq!(occ.occurrence_type, NODE_CPU_STALL);
         let data = occ.data.unwrap();

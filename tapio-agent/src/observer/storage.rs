@@ -47,11 +47,17 @@ pub fn classify(event: &StorageEvent) -> Option<ClassifiedAnomaly> {
     }
 }
 
-pub fn build_occurrence(event: &StorageEvent, anomaly: &ClassifiedAnomaly) -> Occurrence {
-    Occurrence::new(
+pub fn build_occurrence(
+    event: &StorageEvent,
+    anomaly: &ClassifiedAnomaly,
+    boot_offset_ns: u64,
+) -> Occurrence {
+    let wall_ns = boot_offset_ns.wrapping_add(event.timestamp_ns);
+    Occurrence::new_at(
         anomaly.event_type,
         anomaly.severity.clone(),
         anomaly.outcome.clone(),
+        wall_ns,
     )
     .with_error(anomaly.error_code, &anomaly.error_message)
     .with_data(serde_json::json!({
@@ -74,6 +80,7 @@ pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
     enricher: Option<&crate::enricher::K8sEnricher>,
+    boot_offset_ns: u64,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::{Ebpf, maps::RingBuf, programs::TracePoint};
@@ -95,6 +102,9 @@ pub async fn run(
         tracing::info!(tracepoint = %format!("{category}/{tp}"), "attached");
     }
 
+    let nr_cpus = aya::util::nr_cpus().map_err(|(msg, e)| anyhow::anyhow!("{msg}: {e}"))?;
+    let metrics_fd = super::metrics_map_fd(&ebpf);
+
     let events_map = ebpf
         .map_mut("events")
         .ok_or_else(|| anyhow::anyhow!("map not found: events"))?;
@@ -103,6 +113,8 @@ pub async fn run(
     tracing::info!("storage observer running");
     let mut event_count: u64 = 0;
     let mut anomaly_count: u64 = 0;
+    let mut tick_count: u64 = 0;
+    let mut prev_lost: u64 = 0;
 
     loop {
         tokio::select! {
@@ -111,28 +123,54 @@ pub async fn run(
                 break;
             }
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                while let Some(item) = ring_buf.next() {
-                    let data = item.as_ref();
-                    if data.len() < std::mem::size_of::<StorageEvent>() {
-                        continue;
+                tick_count += 1;
+                if tick_count % super::LOST_EVENTS_CHECK_INTERVAL == 0 {
+                    if let Some(fd) = metrics_fd {
+                        let lost = super::read_percpu_sum(fd, super::METRIC_LOST_EVENTS, nr_cpus);
+                        if lost > prev_lost {
+                            tracing::warn!(
+                                observer = "storage",
+                                lost_total = lost,
+                                lost_delta = lost - prev_lost,
+                                "ring buffer events lost"
+                            );
+                            prev_lost = lost;
+                        }
                     }
-                    let event = unsafe {
-                        std::ptr::read_unaligned(data.as_ptr() as *const StorageEvent)
-                    };
-                    event_count += 1;
-                    if let Some(anomaly) = classify(&event) {
-                        let mut occ = build_occurrence(&event, &anomaly);
-                        if let Some(enricher) = enricher {
-                            let cgroup_id = event.cgroup_id;
-                            if let Some(ctx) = enricher.enrich(cgroup_id) {
-                                occ.context = Some(ctx);
+                }
+                let drained = tokio::task::block_in_place(|| {
+                    let mut count = 0usize;
+                    while let Some(item) = ring_buf.next() {
+                        let data = item.as_ref();
+                        if data.len() < std::mem::size_of::<StorageEvent>() {
+                            count += 1;
+                            if count >= super::MAX_DRAIN_PER_TICK { break; }
+                            continue;
+                        }
+                        let event = unsafe {
+                            std::ptr::read_unaligned(data.as_ptr() as *const StorageEvent)
+                        };
+                        event_count += 1;
+                        if let Some(anomaly) = classify(&event) {
+                            let mut occ = build_occurrence(&event, &anomaly, boot_offset_ns);
+                            if let Some(enricher) = enricher {
+                                let cgroup_id = event.cgroup_id;
+                                if let Some(ctx) = enricher.enrich(cgroup_id) {
+                                    occ.context = Some(ctx);
+                                }
+                            }
+                            anomaly_count += 1;
+                            if let Err(e) = sink.send(&occ) {
+                                tracing::warn!(error = %e, "sink error");
                             }
                         }
-                        anomaly_count += 1;
-                        if let Err(e) = sink.send(&occ) {
-                            tracing::warn!(error = %e, "sink error");
-                        }
+                        count += 1;
+                        if count >= super::MAX_DRAIN_PER_TICK { break; }
                     }
+                    count
+                });
+                if drained >= super::MAX_DRAIN_PER_TICK {
+                    tracing::warn!(observer = "storage", drained, "ring buffer drain capped");
                 }
             }
         }
@@ -198,7 +236,7 @@ mod tests {
     fn build_occurrence_valid() {
         let evt = make_event(5, STORAGE_SEVERITY_CRITICAL, 0);
         let a = classify(&evt).unwrap();
-        let occ = build_occurrence(&evt, &a);
+        let occ = build_occurrence(&evt, &a, 0);
         assert!(occ.validate().is_ok());
         assert_eq!(occ.occurrence_type, STORAGE_IO_ERROR);
         let data = occ.data.unwrap();

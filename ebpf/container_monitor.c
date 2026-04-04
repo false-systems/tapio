@@ -8,6 +8,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
+#include "headers/metrics.h"
 
 // Event types (MUST match Rust ContainerEvent.event_type in tapio-common/src/ebpf.rs)
 #define EVENT_TYPE_OOM_KILL 0
@@ -67,7 +68,8 @@ int handle_oom(struct trace_event_raw_mark_victim *ctx) {
 	// Reserve space in ring buffer
 	struct container_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
 	if (!evt) {
-		return 0;  // Ring buffer full - drop event (backpressure)
+		metric_inc(METRIC_LOST_EVENTS);
+		return 0;
 	}
 
 	// Capture timestamp and event type
@@ -141,6 +143,7 @@ int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
 	// Reserve space in ring buffer
 	struct container_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
 	if (!evt) {
+		metric_inc(METRIC_LOST_EVENTS);
 		return 0;
 	}
 

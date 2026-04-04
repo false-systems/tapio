@@ -154,6 +154,7 @@ pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
     enricher: Option<&crate::enricher::K8sEnricher>,
+    _boot_offset_ns: u64,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::{Ebpf, maps::RingBuf, programs::TracePoint};
@@ -176,6 +177,9 @@ pub async fn run(
         tracing::info!(tracepoint = %format!("{category}/{tp}"), "attached");
     }
 
+    let nr_cpus = aya::util::nr_cpus().map_err(|(msg, e)| anyhow::anyhow!("{msg}: {e}"))?;
+    let metrics_fd = super::metrics_map_fd(&ebpf);
+
     let events_map = ebpf
         .map_mut("events")
         .ok_or_else(|| anyhow::anyhow!("map not found: events"))?;
@@ -184,6 +188,8 @@ pub async fn run(
     tracing::info!("network observer running (RTT baseline floor: 100ms)");
     let mut event_count: u64 = 0;
     let mut anomaly_count: u64 = 0;
+    let mut tick_count: u64 = 0;
+    let mut prev_lost: u64 = 0;
 
     loop {
         tokio::select! {
@@ -192,28 +198,54 @@ pub async fn run(
                 break;
             }
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                while let Some(item) = ring_buf.next() {
-                    let data = item.as_ref();
-                    if data.len() < std::mem::size_of::<NetworkEvent>() {
-                        continue;
+                tick_count += 1;
+                if tick_count % super::LOST_EVENTS_CHECK_INTERVAL == 0 {
+                    if let Some(fd) = metrics_fd {
+                        let lost = super::read_percpu_sum(fd, super::METRIC_LOST_EVENTS, nr_cpus);
+                        if lost > prev_lost {
+                            tracing::warn!(
+                                observer = "network",
+                                lost_total = lost,
+                                lost_delta = lost - prev_lost,
+                                "ring buffer events lost"
+                            );
+                            prev_lost = lost;
+                        }
                     }
-                    let event = unsafe {
-                        std::ptr::read_unaligned(data.as_ptr() as *const NetworkEvent)
-                    };
-                    event_count += 1;
-                    if let Some(anomaly) = classify(&event) {
-                        let mut occ = build_occurrence(&event, &anomaly);
-                        if let Some(enricher) = enricher {
-                            let pid = event.pid;
-                            if let Some(ctx) = enricher.enrich_by_pid(pid) {
-                                occ.context = Some(ctx);
+                }
+                let drained = tokio::task::block_in_place(|| {
+                    let mut count = 0usize;
+                    while let Some(item) = ring_buf.next() {
+                        let data = item.as_ref();
+                        if data.len() < std::mem::size_of::<NetworkEvent>() {
+                            count += 1;
+                            if count >= super::MAX_DRAIN_PER_TICK { break; }
+                            continue;
+                        }
+                        let event = unsafe {
+                            std::ptr::read_unaligned(data.as_ptr() as *const NetworkEvent)
+                        };
+                        event_count += 1;
+                        if let Some(anomaly) = classify(&event) {
+                            let mut occ = build_occurrence(&event, &anomaly);
+                            if let Some(enricher) = enricher {
+                                let pid = event.pid;
+                                if let Some(ctx) = enricher.enrich_by_pid(pid) {
+                                    occ.context = Some(ctx);
+                                }
+                            }
+                            anomaly_count += 1;
+                            if let Err(e) = sink.send(&occ) {
+                                tracing::warn!(error = %e, "sink error");
                             }
                         }
-                        anomaly_count += 1;
-                        if let Err(e) = sink.send(&occ) {
-                            tracing::warn!(error = %e, "sink error");
-                        }
+                        count += 1;
+                        if count >= super::MAX_DRAIN_PER_TICK { break; }
                     }
+                    count
+                });
+                if drained >= super::MAX_DRAIN_PER_TICK {
+                    tracing::warn!(observer = "network", drained, "ring buffer drain capped");
                 }
             }
         }

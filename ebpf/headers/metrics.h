@@ -18,13 +18,16 @@ struct {
 // Metric Index Definitions (Namespaced per Observer)
 // ============================================================================
 
-// Network Observer Metrics (0-99)
-#define METRIC_NETWORK_EVENTS_TOTAL       0
-#define METRIC_NETWORK_RETRANSMITS_TOTAL  1
-#define METRIC_NETWORK_RTT_SAMPLES_TOTAL  2
-#define METRIC_NETWORK_RST_TOTAL          3
-#define METRIC_NETWORK_RTT_SPIKES_TOTAL   4
-#define METRIC_NETWORK_BASELINE_REJECTED  5
+// Cross-observer metrics (shared index space)
+#define METRIC_LOST_EVENTS                0  // Ring buffer reserve failures (events dropped)
+
+// Network Observer Metrics (10-99)
+#define METRIC_NETWORK_EVENTS_TOTAL       10
+#define METRIC_NETWORK_RETRANSMITS_TOTAL  11
+#define METRIC_NETWORK_RTT_SAMPLES_TOTAL  12
+#define METRIC_NETWORK_RST_TOTAL          13
+#define METRIC_NETWORK_RTT_SPIKES_TOTAL   14
+#define METRIC_NETWORK_BASELINE_REJECTED  15
 
 // ============================================================================
 // Helper Functions
