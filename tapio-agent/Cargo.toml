@@ -18,6 +18,9 @@ serde_json = { workspace = true }
 toml = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
+prometheus = { workspace = true }
+axum = { workspace = true }
+tokio-util = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 aya = { workspace = true }
