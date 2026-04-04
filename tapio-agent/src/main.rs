@@ -135,6 +135,24 @@ async fn main() -> anyhow::Result<()> {
     {
         use std::sync::Arc;
 
+        // Calculate boot-time offset: wall_clock_ns - monotonic_ns.
+        // bpf_ktime_get_ns() returns CLOCK_MONOTONIC nanoseconds.
+        // Adding this offset converts event timestamps to wall clock.
+        let boot_offset_ns = {
+            let wall_ns = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before UNIX epoch")
+                .as_nanos() as u64;
+            let mut ts = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+            let mono_ns = ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64;
+            wall_ns.wrapping_sub(mono_ns)
+        };
+        info!(boot_offset_ns, "clock offset calculated");
+
         // Try to set up K8s enrichment (optional — agent runs without it)
         let enricher = match enricher::K8sEnricher::new().await {
             Ok(e) => {
@@ -163,8 +181,14 @@ async fn main() -> anyhow::Result<()> {
         let dir1 = ebpf_dir.clone();
         let net = tokio::spawn(async move {
             let path = format!("{dir1}/network_monitor.o");
-            if let Err(e) =
-                observer::network::run(&path, sink1.as_ref(), enricher1.as_deref(), rx1).await
+            if let Err(e) = observer::network::run(
+                &path,
+                sink1.as_ref(),
+                enricher1.as_deref(),
+                boot_offset_ns,
+                rx1,
+            )
+            .await
             {
                 tracing::error!(error = %e, "network observer failed");
             }
@@ -176,8 +200,14 @@ async fn main() -> anyhow::Result<()> {
         let dir2 = ebpf_dir.clone();
         let ctr = tokio::spawn(async move {
             let path = format!("{dir2}/container_monitor.o");
-            if let Err(e) =
-                observer::container::run(&path, sink2.as_ref(), enricher2.as_deref(), rx2).await
+            if let Err(e) = observer::container::run(
+                &path,
+                sink2.as_ref(),
+                enricher2.as_deref(),
+                boot_offset_ns,
+                rx2,
+            )
+            .await
             {
                 tracing::error!(error = %e, "container observer failed");
             }
@@ -189,8 +219,14 @@ async fn main() -> anyhow::Result<()> {
         let dir3 = ebpf_dir.clone();
         let stg = tokio::spawn(async move {
             let path = format!("{dir3}/storage_monitor.o");
-            if let Err(e) =
-                observer::storage::run(&path, sink3.as_ref(), enricher3.as_deref(), rx3).await
+            if let Err(e) = observer::storage::run(
+                &path,
+                sink3.as_ref(),
+                enricher3.as_deref(),
+                boot_offset_ns,
+                rx3,
+            )
+            .await
             {
                 tracing::error!(error = %e, "storage observer failed");
             }
@@ -201,7 +237,9 @@ async fn main() -> anyhow::Result<()> {
         let dir4 = ebpf_dir.clone();
         let pmc = tokio::spawn(async move {
             let path = format!("{dir4}/node_pmc_monitor.o");
-            if let Err(e) = observer::node_pmc::run(&path, sink4.as_ref(), rx4).await {
+            if let Err(e) =
+                observer::node_pmc::run(&path, sink4.as_ref(), boot_offset_ns, rx4).await
+            {
                 tracing::error!(error = %e, "PMC observer failed");
             }
         });

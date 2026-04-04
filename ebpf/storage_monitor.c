@@ -4,6 +4,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
+#include "headers/metrics.h"
 
 // Operation types
 #define OP_READ  0
@@ -165,8 +166,9 @@ int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
 	// Reserve ring buffer space
 	struct storage_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
 	if (!evt) {
+		metric_inc(METRIC_LOST_EVENTS);
 		bpf_map_delete_elem(&inflight_io, &key);
-		return 0;  // Backpressure - drop event
+		return 0;
 	}
 
 	// Fill event

@@ -6,6 +6,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include "headers/node_pmc_monitor.h"
+#include "headers/metrics.h"
 
 char LICENSE[] SEC("license") = "GPL";
 
@@ -47,7 +48,8 @@ int sample_pmc(struct bpf_perf_event_data *ctx)
 	// Reserve space in ring buffer
 	event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
 	if (!event) {
-		return 0; // Ring buffer full, drop sample
+		metric_inc(METRIC_LOST_EVENTS);
+		return 0;
 	}
 
 	// Read PMC counter values

@@ -135,6 +135,35 @@ impl Occurrence {
         }
     }
 
+    /// Create an occurrence with a precise wall-clock timestamp (nanoseconds since UNIX epoch).
+    /// Use this when the event timestamp comes from bpf_ktime_get_ns() converted via boot offset.
+    pub fn new_at(
+        occurrence_type: &str,
+        severity: Severity,
+        outcome: Outcome,
+        wall_ns: u64,
+    ) -> Self {
+        let secs = (wall_ns / 1_000_000_000) as i64;
+        let nsecs = (wall_ns % 1_000_000_000) as u32;
+        let ts = chrono::DateTime::from_timestamp(secs, nsecs)
+            .unwrap_or_else(Utc::now)
+            .to_rfc3339();
+        Self {
+            id: ulid::Ulid::new().to_string(),
+            timestamp: ts,
+            source: "tapio".into(),
+            occurrence_type: occurrence_type.into(),
+            severity,
+            outcome,
+            protocol_version: "1.0".into(),
+            error: None,
+            context: None,
+            reasoning: None,
+            history: None,
+            data: None,
+        }
+    }
+
     pub fn with_error(mut self, code: &str, message: &str) -> Self {
         self.error = Some(OccurrenceError {
             code: code.into(),
@@ -286,5 +315,19 @@ mod tests {
         assert!(!json.contains("reasoning"));
         assert!(!json.contains("history"));
         assert!(!json.contains("data"));
+    }
+
+    #[test]
+    fn new_at_uses_provided_timestamp() {
+        // 2024-01-15T12:00:00Z = 1705320000 seconds
+        let wall_ns: u64 = 1_705_320_000 * 1_000_000_000;
+        let occ = Occurrence::new_at(
+            "kernel.test.event",
+            Severity::Info,
+            Outcome::Success,
+            wall_ns,
+        );
+        assert!(occ.timestamp.starts_with("2024-01-15"));
+        assert!(occ.validate().is_ok());
     }
 }

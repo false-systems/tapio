@@ -159,9 +159,7 @@ Sinks implement `tapio_common::sink::Sink` (sync `send`/`flush`/`name`). Current
 
 ## Known limitations
 
-**IPv6 connection tracking is incomplete.** RTT baseline and retransmit tracking use IPv4-only map keys. IPv6 events are captured but lack per-connection intelligence.
-
-**Anomaly thresholds are hardcoded.** Retransmit rate, RTT spike ratio, I/O latency cutoffs, IPC degradation — all fixed constants. Configurable thresholds are not yet implemented.
+**Anomaly thresholds are hardcoded.** RTT spike ratio, stall percentages, IPC degradation — all fixed constants. Configurable thresholds are not yet implemented.
 
 ---
 
