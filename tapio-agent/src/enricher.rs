@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use dashmap::DashMap;
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::Pod;
@@ -9,7 +11,7 @@ pub struct K8sEnricher {
     store: reflector::Store<Pod>,
     node_name: String,
     /// cgroup_id → pod UID cache (None = resolved but no pod found)
-    cgroup_cache: DashMap<u64, Option<String>>,
+    cgroup_cache: Arc<DashMap<u64, Option<String>>>,
 }
 
 impl K8sEnricher {
@@ -25,11 +27,24 @@ impl K8sEnricher {
         let (store, writer) = reflector::store();
         let stream = reflector::reflector(writer, watcher(pods, wc));
 
+        let cgroup_cache = Arc::new(DashMap::new());
+        let cache_for_reflector = cgroup_cache.clone();
+
         tokio::spawn(async move {
             futures::pin_mut!(stream);
             while let Some(event) = stream.next().await {
-                if let Err(e) = event {
-                    tracing::warn!(error = %e, "pod reflector error");
+                match event {
+                    Ok(watcher::Event::Delete(pod)) => {
+                        if let Some(uid) = pod.metadata.uid.as_deref() {
+                            let uid_owned = uid.to_string();
+                            let removed = cache_for_reflector
+                                .retain(|_, v| v.as_deref() != Some(uid_owned.as_str()));
+                            tracing::debug!(pod_uid = uid, "cleaned stale cgroup cache entries");
+                            let _ = removed;
+                        }
+                    }
+                    Err(e) => tracing::warn!(error = %e, "pod reflector error"),
+                    _ => {}
                 }
             }
         });
@@ -39,7 +54,7 @@ impl K8sEnricher {
         Ok(Self {
             store,
             node_name,
-            cgroup_cache: DashMap::new(),
+            cgroup_cache,
         })
     }
 
