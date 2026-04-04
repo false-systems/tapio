@@ -21,6 +21,9 @@ anyhow = { workspace = true }
 prometheus = { workspace = true }
 axum = { workspace = true }
 tokio-util = { workspace = true }
+prost = { workspace = true }
+flate2 = { workspace = true }
+chrono = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 aya = { workspace = true }

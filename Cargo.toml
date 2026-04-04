@@ -46,6 +46,9 @@ tokio-util = "0.7"
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 
+# Compression (OTLP gzip)
+flate2 = "1"
+
 # System
 libc = "0.2"
 

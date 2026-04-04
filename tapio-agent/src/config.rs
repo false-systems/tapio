@@ -14,6 +14,7 @@ pub struct Config {
 
     pub thresholds: Thresholds,
     pub metrics: Metrics,
+    pub grafana: Grafana,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +62,26 @@ impl Default for Metrics {
         Self {
             enabled: false,
             port: 9090,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct Grafana {
+    pub endpoint: String,
+    pub auth_header: Option<String>,
+    pub batch_size: usize,
+    pub flush_interval_secs: u64,
+}
+
+impl Default for Grafana {
+    fn default() -> Self {
+        Self {
+            endpoint: "http://localhost:4318".into(),
+            auth_header: None,
+            batch_size: 100,
+            flush_interval_secs: 5,
         }
     }
 }
