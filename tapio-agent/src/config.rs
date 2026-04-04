@@ -1,0 +1,127 @@
+use serde::Deserialize;
+use std::path::Path;
+
+/// Agent configuration loaded from TOML file.
+/// CLI flags take precedence — fields here are all optional so missing values
+/// fall through to CLI defaults.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Config {
+    pub sinks: Option<Vec<String>>,
+    pub ebpf_dir: Option<String>,
+    pub data_dir: Option<String>,
+    pub polku_endpoint: Option<String>,
+
+    pub thresholds: Thresholds,
+    pub metrics: Metrics,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct Thresholds {
+    /// PMC: stall percentage for warning (memory_pressure). Default 20.0.
+    pub stall_pct_warning: f64,
+    /// PMC: stall percentage for critical (cpu_stall). Default 40.0.
+    pub stall_pct_critical: f64,
+    /// PMC: instructions-per-cycle below which IPC degradation fires. Default 1.0.
+    pub ipc_degradation: f64,
+    /// Network (eBPF): RTT spike ratio vs baseline. Default 2.
+    pub rtt_spike_ratio: u64,
+    /// Network (eBPF): absolute RTT spike threshold in microseconds. Default 500000.
+    pub rtt_spike_abs_us: u64,
+}
+
+impl Default for Thresholds {
+    fn default() -> Self {
+        Self {
+            stall_pct_warning: 20.0,
+            stall_pct_critical: 40.0,
+            ipc_degradation: 1.0,
+            rtt_spike_ratio: 2,
+            rtt_spike_abs_us: 500_000,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct Metrics {
+    pub enabled: bool,
+    pub port: u16,
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: 9090,
+        }
+    }
+}
+
+/// Load config from a TOML file. Returns default config if file doesn't exist.
+pub fn load(path: &Path) -> anyhow::Result<Config> {
+    if !path.exists() {
+        tracing::debug!(path = %path.display(), "config file not found, using defaults");
+        return Ok(Config::default());
+    }
+
+    let content = std::fs::read_to_string(path)?;
+    let config: Config = toml::from_str(&content)?;
+    tracing::info!(path = %path.display(), "loaded config");
+    Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_toml_uses_defaults() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.thresholds.stall_pct_warning, 20.0);
+        assert_eq!(config.thresholds.ipc_degradation, 1.0);
+        assert_eq!(config.metrics.port, 9090);
+        assert!(!config.metrics.enabled);
+    }
+
+    #[test]
+    fn partial_thresholds_override() {
+        let config: Config = toml::from_str(
+            r#"
+            [thresholds]
+            stall_pct_warning = 15.0
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.thresholds.stall_pct_warning, 15.0);
+        assert_eq!(config.thresholds.stall_pct_critical, 40.0);
+    }
+
+    #[test]
+    fn sinks_from_config() {
+        let config: Config = toml::from_str(
+            r#"
+            sinks = ["stdout", "file"]
+            ebpf_dir = "/custom/ebpf"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.sinks.unwrap(), vec!["stdout", "file"]);
+        assert_eq!(config.ebpf_dir.unwrap(), "/custom/ebpf");
+    }
+
+    #[test]
+    fn metrics_section() {
+        let config: Config = toml::from_str(
+            r#"
+            [metrics]
+            enabled = true
+            port = 8080
+            "#,
+        )
+        .unwrap();
+        assert!(config.metrics.enabled);
+        assert_eq!(config.metrics.port, 8080);
+    }
+}
