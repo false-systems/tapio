@@ -128,7 +128,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let args = Args::parse();
-    let _cfg = config::load(std::path::Path::new(&args.config))?;
+    #[allow(unused_variables)]
+    let cfg = config::load(std::path::Path::new(&args.config))?;
     info!("tapio v4 — kernel eyes");
 
     let sinks = create_sinks(&args)?;
@@ -181,6 +182,15 @@ async fn main() -> anyhow::Result<()> {
 
         let ebpf_dir = args.ebpf_dir.clone();
 
+        let net_thresholds = observer::network::NetworkThresholds {
+            rtt_spike_ratio: cfg.thresholds.rtt_spike_ratio,
+            rtt_spike_abs_us: cfg.thresholds.rtt_spike_abs_us,
+        };
+        let stg_thresholds = observer::storage::StorageThresholds {
+            io_latency_warning_ns: cfg.thresholds.io_latency_warning_ns,
+            io_latency_critical_ns: cfg.thresholds.io_latency_critical_ns,
+        };
+
         let sink1: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
         let enricher1 = enricher.clone();
         let rx1 = shutdown_rx.clone();
@@ -192,6 +202,7 @@ async fn main() -> anyhow::Result<()> {
                 sink1.as_ref(),
                 enricher1.as_deref(),
                 boot_offset_ns,
+                net_thresholds,
                 rx1,
             )
             .await
@@ -230,6 +241,7 @@ async fn main() -> anyhow::Result<()> {
                 sink3.as_ref(),
                 enricher3.as_deref(),
                 boot_offset_ns,
+                stg_thresholds,
                 rx3,
             )
             .await
@@ -238,13 +250,20 @@ async fn main() -> anyhow::Result<()> {
             }
         });
 
+        let pmc_thresholds = observer::node_pmc::PmcThresholds {
+            stall_pct_warning: cfg.thresholds.stall_pct_warning,
+            stall_pct_critical: cfg.thresholds.stall_pct_critical,
+            ipc_degradation: cfg.thresholds.ipc_degradation,
+        };
+
         let sink4: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
         let rx4 = shutdown_rx.clone();
         let dir4 = ebpf_dir.clone();
         let pmc = tokio::spawn(async move {
             let path = format!("{dir4}/node_pmc_monitor.o");
             if let Err(e) =
-                observer::node_pmc::run(&path, sink4.as_ref(), boot_offset_ns, rx4).await
+                observer::node_pmc::run(&path, sink4.as_ref(), boot_offset_ns, pmc_thresholds, rx4)
+                    .await
             {
                 tracing::error!(error = %e, "PMC observer failed");
             }

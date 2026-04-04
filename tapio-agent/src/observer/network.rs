@@ -148,6 +148,11 @@ pub fn build_occurrence(event: &NetworkEvent, anomaly: &ClassifiedAnomaly) -> Oc
     .with_data(data)
 }
 
+pub struct NetworkThresholds {
+    pub rtt_spike_ratio: u64,
+    pub rtt_spike_abs_us: u64,
+}
+
 /// Load eBPF program and start the observation loop.
 #[cfg(target_os = "linux")]
 pub async fn run(
@@ -155,6 +160,7 @@ pub async fn run(
     sink: &dyn tapio_common::sink::Sink,
     enricher: Option<&crate::enricher::K8sEnricher>,
     _boot_offset_ns: u64,
+    thresholds: NetworkThresholds,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::{Ebpf, maps::RingBuf, programs::TracePoint};
@@ -162,6 +168,18 @@ pub async fn run(
 
     tracing::info!(path = ebpf_path, "loading network eBPF program");
     let mut ebpf = Ebpf::load_file(ebpf_path)?;
+
+    // Write thresholds to eBPF config map (indices match network_monitor.c)
+    if let Some(config_map) = ebpf.map_mut("config") {
+        let mut arr = aya::maps::Array::<_, u64>::try_from(config_map)?;
+        arr.set(0, thresholds.rtt_spike_ratio, 0)?; // CONFIG_RTT_SPIKE_RATIO
+        arr.set(1, thresholds.rtt_spike_abs_us, 0)?; // CONFIG_RTT_SPIKE_ABS_US
+        tracing::info!(
+            rtt_spike_ratio = thresholds.rtt_spike_ratio,
+            rtt_spike_abs_us = thresholds.rtt_spike_abs_us,
+            "network thresholds written to eBPF config map"
+        );
+    }
 
     for (name, category, tp) in [
         ("trace_inet_sock_set_state", "sock", "inet_sock_set_state"),
