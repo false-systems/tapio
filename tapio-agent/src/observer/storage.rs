@@ -75,12 +75,18 @@ pub fn build_occurrence(
     }))
 }
 
+pub struct StorageThresholds {
+    pub io_latency_warning_ns: u64,
+    pub io_latency_critical_ns: u64,
+}
+
 #[cfg(target_os = "linux")]
 pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
     enricher: Option<&crate::enricher::K8sEnricher>,
     boot_offset_ns: u64,
+    thresholds: StorageThresholds,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::{Ebpf, maps::RingBuf, programs::TracePoint};
@@ -88,6 +94,18 @@ pub async fn run(
 
     tracing::info!(path = ebpf_path, "loading storage eBPF program");
     let mut ebpf = Ebpf::load_file(ebpf_path)?;
+
+    // Write thresholds to eBPF config map (indices match storage_monitor.c)
+    if let Some(config_map) = ebpf.map_mut("config") {
+        let mut arr = aya::maps::Array::<_, u64>::try_from(config_map)?;
+        arr.set(0, thresholds.io_latency_warning_ns, 0)?; // CONFIG_LATENCY_WARNING_NS
+        arr.set(1, thresholds.io_latency_critical_ns, 0)?; // CONFIG_LATENCY_CRITICAL_NS
+        tracing::info!(
+            warning_ns = thresholds.io_latency_warning_ns,
+            critical_ns = thresholds.io_latency_critical_ns,
+            "storage thresholds written to eBPF config map"
+        );
+    }
 
     for (name, category, tp) in [
         ("trace_block_rq_issue", "block", "block_rq_issue"),

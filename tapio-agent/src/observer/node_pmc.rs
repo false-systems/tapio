@@ -2,9 +2,11 @@ use tapio_common::ebpf::*;
 use tapio_common::events::*;
 use tapio_common::occurrence::{Occurrence, Outcome, Severity};
 
-const STALL_PCT_WARNING: f64 = 20.0;
-const STALL_PCT_CRITICAL: f64 = 40.0;
-const IPC_DEGRADATION_THRESHOLD: f64 = 1.0;
+pub struct PmcThresholds {
+    pub stall_pct_warning: f64,
+    pub stall_pct_critical: f64,
+    pub ipc_degradation: f64,
+}
 
 pub struct ClassifiedAnomaly {
     pub event_type: &'static str,
@@ -14,13 +16,13 @@ pub struct ClassifiedAnomaly {
     pub error_message: String,
 }
 
-pub fn classify(event: &PmcEvent) -> Option<ClassifiedAnomaly> {
+pub fn classify(event: &PmcEvent, thresholds: &PmcThresholds) -> Option<ClassifiedAnomaly> {
     let cpu = event.cpu;
     let ipc = event.ipc();
     let stall_pct = event.stall_pct();
     let cycles = event.cycles;
 
-    if stall_pct >= STALL_PCT_CRITICAL {
+    if stall_pct >= thresholds.stall_pct_critical {
         return Some(ClassifiedAnomaly {
             event_type: NODE_CPU_STALL,
             severity: Severity::Critical,
@@ -30,7 +32,7 @@ pub fn classify(event: &PmcEvent) -> Option<ClassifiedAnomaly> {
         });
     }
 
-    if stall_pct >= STALL_PCT_WARNING {
+    if stall_pct >= thresholds.stall_pct_warning {
         return Some(ClassifiedAnomaly {
             event_type: NODE_MEMORY_PRESSURE,
             severity: Severity::Warning,
@@ -42,7 +44,7 @@ pub fn classify(event: &PmcEvent) -> Option<ClassifiedAnomaly> {
         });
     }
 
-    if ipc < IPC_DEGRADATION_THRESHOLD && cycles > 0 {
+    if ipc < thresholds.ipc_degradation && cycles > 0 {
         return Some(ClassifiedAnomaly {
             event_type: NODE_IPC_DEGRADATION,
             severity: Severity::Warning,
@@ -235,6 +237,7 @@ pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
     boot_offset_ns: u64,
+    thresholds: PmcThresholds,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::Ebpf;
@@ -355,7 +358,7 @@ pub async fn run(
                             std::ptr::read_unaligned(data.as_ptr() as *const PmcEvent)
                         };
                         event_count += 1;
-                        if let Some(anomaly) = classify(&event) {
+                        if let Some(anomaly) = classify(&event, &thresholds) {
                             let occ = build_occurrence(&event, &anomaly, boot_offset_ns);
                             anomaly_count += 1;
                             if let Err(e) = sink.send(&occ) {
@@ -388,6 +391,14 @@ pub async fn run(
 mod tests {
     use super::*;
 
+    fn default_thresholds() -> PmcThresholds {
+        PmcThresholds {
+            stall_pct_warning: 20.0,
+            stall_pct_critical: 40.0,
+            ipc_degradation: 1.0,
+        }
+    }
+
     fn make_pmc(cycles: u64, instructions: u64, stall_cycles: u64) -> PmcEvent {
         PmcEvent {
             cpu: 0,
@@ -401,7 +412,7 @@ mod tests {
     #[test]
     fn classify_critical_stall() {
         let evt = make_pmc(1000, 400, 500); // 50% stalls
-        let a = classify(&evt).expect("should classify critical stall");
+        let a = classify(&evt, &default_thresholds()).expect("should classify critical stall");
         assert_eq!(a.event_type, NODE_CPU_STALL);
         assert!(matches!(a.severity, Severity::Critical));
     }
@@ -409,7 +420,7 @@ mod tests {
     #[test]
     fn classify_memory_pressure() {
         let evt = make_pmc(1000, 600, 250); // 25% stalls
-        let a = classify(&evt).expect("should classify memory pressure");
+        let a = classify(&evt, &default_thresholds()).expect("should classify memory pressure");
         assert_eq!(a.event_type, NODE_MEMORY_PRESSURE);
         assert!(matches!(a.severity, Severity::Warning));
     }
@@ -417,7 +428,7 @@ mod tests {
     #[test]
     fn classify_ipc_degradation() {
         let evt = make_pmc(1000, 500, 100); // IPC=0.5, stalls=10%
-        let a = classify(&evt).expect("should classify IPC degradation");
+        let a = classify(&evt, &default_thresholds()).expect("should classify IPC degradation");
         assert_eq!(a.event_type, NODE_IPC_DEGRADATION);
         assert!(a.error_message.contains("0.50"));
     }
@@ -425,19 +436,19 @@ mod tests {
     #[test]
     fn classify_normal_returns_none() {
         let evt = make_pmc(1000, 1500, 100); // IPC=1.5, stalls=10%
-        assert!(classify(&evt).is_none());
+        assert!(classify(&evt, &default_thresholds()).is_none());
     }
 
     #[test]
     fn classify_zero_cycles_returns_none() {
         let evt = make_pmc(0, 0, 0);
-        assert!(classify(&evt).is_none());
+        assert!(classify(&evt, &default_thresholds()).is_none());
     }
 
     #[test]
     fn build_occurrence_valid() {
         let evt = make_pmc(1000, 400, 500);
-        let a = classify(&evt).unwrap();
+        let a = classify(&evt, &default_thresholds()).unwrap();
         let occ = build_occurrence(&evt, &a, 0);
         assert!(occ.validate().is_ok());
         assert_eq!(occ.occurrence_type, NODE_CPU_STALL);

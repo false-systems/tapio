@@ -29,6 +29,10 @@ pub struct Thresholds {
     pub rtt_spike_ratio: u64,
     /// Network (eBPF): absolute RTT spike threshold in microseconds. Default 500000.
     pub rtt_spike_abs_us: u64,
+    /// Storage (eBPF): I/O latency warning threshold in nanoseconds. Default 50ms.
+    pub io_latency_warning_ns: u64,
+    /// Storage (eBPF): I/O latency critical threshold in nanoseconds. Default 200ms.
+    pub io_latency_critical_ns: u64,
 }
 
 impl Default for Thresholds {
@@ -39,6 +43,8 @@ impl Default for Thresholds {
             ipc_degradation: 1.0,
             rtt_spike_ratio: 2,
             rtt_spike_abs_us: 500_000,
+            io_latency_warning_ns: 50_000_000,
+            io_latency_critical_ns: 200_000_000,
         }
     }
 }
