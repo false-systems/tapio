@@ -190,6 +190,8 @@ pub async fn run(
     let mut anomaly_count: u64 = 0;
     let mut tick_count: u64 = 0;
     let mut prev_lost: u64 = 0;
+    let mut enrich_total: u64 = 0;
+    let mut enrich_miss: u64 = 0;
 
     loop {
         tokio::select! {
@@ -212,6 +214,18 @@ pub async fn run(
                             prev_lost = lost;
                         }
                     }
+                    if enrich_total > 0 {
+                        let miss_pct = (enrich_miss as f64 / enrich_total as f64) * 100.0;
+                        if miss_pct > 10.0 {
+                            tracing::warn!(
+                                observer = "network",
+                                miss_pct = format!("{miss_pct:.1}"),
+                                enrich_miss,
+                                enrich_total,
+                                "enrichment miss rate exceeds 10%"
+                            );
+                        }
+                    }
                 }
                 let drained = tokio::task::block_in_place(|| {
                     let mut count = 0usize;
@@ -230,8 +244,11 @@ pub async fn run(
                             let mut occ = build_occurrence(&event, &anomaly);
                             if let Some(enricher) = enricher {
                                 let pid = event.pid;
+                                enrich_total += 1;
                                 if let Some(ctx) = enricher.enrich_by_pid(pid) {
                                     occ.context = Some(ctx);
+                                } else {
+                                    enrich_miss += 1;
                                 }
                             }
                             anomaly_count += 1;
