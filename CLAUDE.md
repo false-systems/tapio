@@ -71,7 +71,7 @@ eBPF (C) → ring buffer → parse (#[repr(C)] structs) → filter (anomaly?) �
 
 ### Sinks (pluggable output)
 
-Implement the `Sink` trait from `tapio-common/src/sink.rs` (synchronous — async wrappers belong in the agent). Current: `StdoutSink` (JSON lines), `FileSink` (one `.json` per occurrence in `.tapio/`), `PolkuSink` (HTTP POST with batching and exponential backoff) in `tapio-agent/src/sink/`, plus `MultiSink` (fan-out, logs errors, doesn't short-circuit) defined in `tapio-agent/src/main.rs`. Planned: `GrafanaSink` (OTLP).
+Implement the `Sink` trait from `tapio-common/src/sink.rs` (synchronous — async wrappers belong in the agent). Current: `StdoutSink` (JSON lines), `FileSink` (one `.json` per occurrence in `.tapio/`), `PolkuSink` (HTTP POST with batching and exponential backoff), `GrafanaSink` (OTLP/HTTP with gzip, maps Occurrences to LogRecords) in `tapio-agent/src/sink/`, plus `MultiSink` (fan-out, logs errors, doesn't short-circuit) defined in `tapio-agent/src/main.rs`.
 
 ### FALSE Protocol
 
@@ -98,7 +98,8 @@ Each observer module (`network.rs`, `container.rs`, `storage.rs`, `node_pmc.rs`)
 ## Agent CLI flags
 
 The `tapio-agent` binary accepts:
-- `--sink <name>` — output sink (`stdout`, `file`, `polku`), repeatable for multi-sink
+- `--config <path>` — TOML config file (default: `/etc/tapio/tapio.toml`)
+- `--sink <name>` — output sink (`stdout`, `file`, `polku`, `grafana`), repeatable for multi-sink
 - `--ebpf-dir <path>` — directory with compiled `.o` files (default: `/opt/tapio/ebpf`)
 - `--data-dir <path>` — directory for file sink output (default: `.tapio/occurrences`)
 
@@ -111,6 +112,6 @@ The `tapio-agent` binary accepts:
 ## Observability
 
 - **Logging**: `tracing` crate, env-filtered via `RUST_LOG`
-- **Metrics** (planned): `prometheus` crate on `:9090` via axum — workspace deps exist but not yet wired into the agent
-- **Metric prefix**: `tapio_` (e.g., `tapio_anomalies_total`, `tapio_events_processed_total`)
+- **Metrics**: `prometheus` crate on configurable port (default `:9090`) via axum. Enable with `[metrics] enabled = true` in config. Families: `tapio_events_total`, `tapio_anomalies_total`, `tapio_lost_events_total`, `tapio_sink_writes_total`, `tapio_k8s_cache_size`, `tapio_k8s_reflector_up`
+- **Metric prefix**: `tapio_`
 - **eBPF-side metrics**: Per-CPU counters in `tapio_metrics` map (defined in `metrics.h`), including `METRIC_NETWORK_BASELINE_REJECTED` for RTT baseline health
