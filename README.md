@@ -153,13 +153,7 @@ ebpf/             4 C programs + shared headers
 
 The BPF/Rust boundary is defined by packed C structs mirrored in `tapio-common/src/ebpf.rs`. Size assertions enforce layout agreement at compile time. CO-RE (`preserve_access_index` + `bpf_core_read`) handles kernel struct field access across versions; tracepoint argument structs use stable kernel ABI layouts.
 
-Sinks implement `tapio_common::sink::Sink` (sync `send`/`flush`/`name`). Current: `StdoutSink`, `FileSink`, `PolkuSink` (HTTP POST with batching), `MultiSink`. Planned: `GrafanaSink` (OTLP).
-
----
-
-## Known limitations
-
-**Anomaly thresholds are hardcoded.** RTT spike ratio, stall percentages, IPC degradation — all fixed constants. Configurable thresholds are not yet implemented.
+Sinks implement `tapio_common::sink::Sink` (sync `send`/`flush`/`name`). Current: `StdoutSink`, `FileSink`, `PolkuSink` (HTTP POST with batching), `GrafanaSink` (OTLP/HTTP with gzip), `MultiSink`.
 
 ---
 
