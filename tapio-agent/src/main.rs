@@ -57,7 +57,10 @@ struct Args {
     polku_endpoint: String,
 }
 
-fn create_sinks(args: &Args) -> anyhow::Result<Vec<Box<dyn tapio_common::sink::Sink>>> {
+fn create_sinks(
+    args: &Args,
+    cfg: &config::Config,
+) -> anyhow::Result<Vec<Box<dyn tapio_common::sink::Sink>>> {
     let mut sinks: Vec<Box<dyn tapio_common::sink::Sink>> = Vec::new();
     for name in &args.sinks {
         match name.as_str() {
@@ -67,6 +70,12 @@ fn create_sinks(args: &Args) -> anyhow::Result<Vec<Box<dyn tapio_common::sink::S
                 &args.polku_endpoint,
                 100,
                 std::time::Duration::from_secs(1),
+            ))),
+            "grafana" => sinks.push(Box::new(sink::grafana::GrafanaSink::new(
+                &cfg.grafana.endpoint,
+                cfg.grafana.auth_header.clone(),
+                cfg.grafana.batch_size,
+                std::time::Duration::from_secs(cfg.grafana.flush_interval_secs),
             ))),
             other => anyhow::bail!("unknown sink: {other}"),
         }
@@ -133,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
     let cfg = config::load(std::path::Path::new(&args.config))?;
     info!("tapio v4 — kernel eyes");
 
-    let sinks = create_sinks(&args)?;
+    let sinks = create_sinks(&args, &cfg)?;
     let sink_names: Vec<&str> = sinks.iter().map(|s| s.name()).collect();
     info!(sinks = ?sink_names, "sinks configured");
 
