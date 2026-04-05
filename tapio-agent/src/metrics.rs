@@ -10,16 +10,23 @@ pub struct TapioMetrics {
     pub registry: Arc<Registry>,
 
     // Observer health
+    #[allow(dead_code)]
     pub events_total: IntCounterVec,
+    #[allow(dead_code)]
     pub anomalies_total: IntCounterVec,
+    #[allow(dead_code)]
     pub lost_events_total: IntCounterVec,
+    #[allow(dead_code)]
     pub drain_cap_total: IntCounterVec,
+    #[allow(dead_code)]
     pub enrichment_miss_total: IntCounterVec,
 
     // Sink health
+    #[allow(dead_code)]
     pub sink_writes_total: IntCounterVec,
 
     // K8s enrichment
+    #[allow(dead_code)]
     pub k8s_cache_size: IntGauge,
     pub k8s_reflector_up: IntGauge,
 }
