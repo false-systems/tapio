@@ -331,24 +331,22 @@ pub async fn run(
             }
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
                 tick_count += 1;
-                if tick_count % super::LOST_EVENTS_CHECK_INTERVAL == 0 {
-                    if let Some(fd) = metrics_fd {
-                        let lost = super::read_percpu_sum(fd, super::METRIC_LOST_EVENTS, num_cpus as usize);
-                        if lost > prev_lost {
-                            tracing::warn!(
-                                observer = "pmc",
-                                lost_total = lost,
-                                lost_delta = lost - prev_lost,
-                                "ring buffer events lost"
-                            );
-                            prev_lost = lost;
-                        }
+                if tick_count.is_multiple_of(super::LOST_EVENTS_CHECK_INTERVAL) && let Some(fd) = metrics_fd {
+                    let lost = super::read_percpu_sum(fd, super::METRIC_LOST_EVENTS, num_cpus as usize);
+                    if lost > prev_lost {
+                        tracing::warn!(
+                            observer = "pmc",
+                            lost_total = lost,
+                            lost_delta = lost - prev_lost,
+                            "ring buffer events lost"
+                        );
+                        prev_lost = lost;
                     }
                 }
                 let drained = tokio::task::block_in_place(|| {
                     let mut count = 0usize;
                     while let Some(item) = ring_buf.next() {
-                        let data = item.as_ref();
+                        let data: &[u8] = item.as_ref();
                         if data.len() < std::mem::size_of::<PmcEvent>() {
                             count += 1;
                             if count >= super::MAX_DRAIN_PER_TICK { break; }
