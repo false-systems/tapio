@@ -37,10 +37,9 @@ impl K8sEnricher {
                     Ok(watcher::Event::Delete(pod)) => {
                         if let Some(uid) = pod.metadata.uid.as_deref() {
                             let uid_owned = uid.to_string();
-                            let removed = cache_for_reflector
-                                .retain(|_, v| v.as_deref() != Some(uid_owned.as_str()));
+                            cache_for_reflector
+                                .retain(|_: &u64, v: &mut Option<String>| v.as_deref() != Some(uid_owned.as_str()));
                             tracing::debug!(pod_uid = uid, "cleaned stale cgroup cache entries");
-                            let _ = removed;
                         }
                     }
                     Err(e) => tracing::warn!(error = %e, "pod reflector error"),

@@ -4,8 +4,9 @@ use std::sync::Arc;
 use prometheus::{IntCounterVec, IntGauge, Opts, Registry, TextEncoder};
 
 /// All TAPIO Prometheus metrics, registered against a non-global Registry.
+/// Fields are registered at startup but not yet wired to observers (audit issue #4).
 #[derive(Clone)]
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[allow(dead_code)]
 pub struct TapioMetrics {
     pub registry: Arc<Registry>,
 
