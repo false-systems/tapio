@@ -4,29 +4,23 @@ use std::sync::Arc;
 use prometheus::{IntCounterVec, IntGauge, Opts, Registry, TextEncoder};
 
 /// All TAPIO Prometheus metrics, registered against a non-global Registry.
+/// Fields are registered at startup but not yet wired to observers (audit issue #4).
 #[derive(Clone)]
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[allow(dead_code)]
 pub struct TapioMetrics {
     pub registry: Arc<Registry>,
 
     // Observer health
-    #[allow(dead_code)]
     pub events_total: IntCounterVec,
-    #[allow(dead_code)]
     pub anomalies_total: IntCounterVec,
-    #[allow(dead_code)]
     pub lost_events_total: IntCounterVec,
-    #[allow(dead_code)]
     pub drain_cap_total: IntCounterVec,
-    #[allow(dead_code)]
     pub enrichment_miss_total: IntCounterVec,
 
     // Sink health
-    #[allow(dead_code)]
     pub sink_writes_total: IntCounterVec,
 
     // K8s enrichment
-    #[allow(dead_code)]
     pub k8s_cache_size: IntGauge,
     pub k8s_reflector_up: IntGauge,
 }
