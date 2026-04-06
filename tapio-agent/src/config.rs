@@ -55,6 +55,9 @@ impl Default for Thresholds {
 pub struct Metrics {
     pub enabled: bool,
     pub port: u16,
+    /// Bind address for /metrics endpoint. Default 127.0.0.1 (localhost only).
+    /// Set to "0.0.0.0" to expose to the node network.
+    pub bind_address: String,
 }
 
 impl Default for Metrics {
@@ -62,6 +65,7 @@ impl Default for Metrics {
         Self {
             enabled: false,
             port: 9090,
+            bind_address: "127.0.0.1".into(),
         }
     }
 }
