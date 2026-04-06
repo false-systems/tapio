@@ -163,9 +163,16 @@ async fn cmd_watch(data_dir: &Path, json: bool, filters: &[&str]) -> anyhow::Res
             _ = tokio::signal::ctrl_c() => break,
             _ = tokio::time::sleep(Duration::from_millis(200)) => {
                 if !data_dir.exists() { continue; }
+                let entries = match std::fs::read_dir(data_dir) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        eprintln!("warning: failed to read {}: {e}", data_dir.display());
+                        continue;
+                    }
+                };
                 let mut new_occs = Vec::new();
-                for entry in std::fs::read_dir(data_dir)? {
-                    let entry = entry?;
+                for entry in entries {
+                    let Ok(entry) = entry else { continue };
                     if !seen.insert(entry.file_name()) { continue; }
                     let path = entry.path();
                     if path.extension().is_some_and(|e| e == "json")
