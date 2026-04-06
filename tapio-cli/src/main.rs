@@ -366,17 +366,18 @@ async fn cmd_mcp(data_dir: &Path) -> anyhow::Result<()> {
             }
         };
 
+        // JSON-RPC 2.0: missing "id" field = notification (no response).
+        // Present "id" field (even if null) = request (must respond).
+        let has_id = request.get("id").is_some();
         let id = request.get("id").cloned();
-        let is_notification = id.is_none() || id.as_ref().is_some_and(|v| v.is_null());
         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = request
             .get("params")
             .cloned()
             .unwrap_or(serde_json::json!({}));
 
-        // JSON-RPC: notifications (no id) get no response
-        if is_notification {
-            continue;
+        if !has_id {
+            continue; // notification — no response
         }
 
         match method {
