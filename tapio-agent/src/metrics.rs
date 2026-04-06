@@ -27,7 +27,7 @@ pub struct TapioMetrics {
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 impl TapioMetrics {
-    pub fn new() -> Self {
+    pub fn new() -> anyhow::Result<Self> {
         let registry = Registry::new();
 
         let events_total = IntCounterVec::new(
@@ -37,8 +37,8 @@ impl TapioMetrics {
             ),
             &["observer"],
         )
-        .expect("metric");
-        registry.register(Box::new(events_total.clone())).unwrap();
+        ?;
+        registry.register(Box::new(events_total.clone()))?;
 
         let anomalies_total = IntCounterVec::new(
             Opts::new(
@@ -47,10 +47,10 @@ impl TapioMetrics {
             ),
             &["observer", "anomaly_type"],
         )
-        .expect("metric");
+        ?;
         registry
             .register(Box::new(anomalies_total.clone()))
-            .unwrap();
+            ?;
 
         let lost_events_total = IntCounterVec::new(
             Opts::new(
@@ -59,10 +59,10 @@ impl TapioMetrics {
             ),
             &["observer"],
         )
-        .expect("metric");
+        ?;
         registry
             .register(Box::new(lost_events_total.clone()))
-            .unwrap();
+            ?;
 
         let drain_cap_total = IntCounterVec::new(
             Opts::new(
@@ -71,10 +71,10 @@ impl TapioMetrics {
             ),
             &["observer"],
         )
-        .expect("metric");
+        ?;
         registry
             .register(Box::new(drain_cap_total.clone()))
-            .unwrap();
+            ?;
 
         let enrichment_miss_total = IntCounterVec::new(
             Opts::new(
@@ -83,10 +83,10 @@ impl TapioMetrics {
             ),
             &["observer"],
         )
-        .expect("metric");
+        ?;
         registry
             .register(Box::new(enrichment_miss_total.clone()))
-            .unwrap();
+            ?;
 
         let sink_writes_total = IntCounterVec::new(
             Opts::new(
@@ -95,28 +95,28 @@ impl TapioMetrics {
             ),
             &["sink", "result"],
         )
-        .expect("metric");
+        ?;
         registry
             .register(Box::new(sink_writes_total.clone()))
-            .unwrap();
+            ?;
 
         let k8s_cache_size = IntGauge::new(
             "tapio_k8s_cache_size",
             "Current cgroup_id to pod map entries",
         )
-        .expect("metric");
-        registry.register(Box::new(k8s_cache_size.clone())).unwrap();
+        ?;
+        registry.register(Box::new(k8s_cache_size.clone()))?;
 
         let k8s_reflector_up = IntGauge::new(
             "tapio_k8s_reflector_up",
             "1 if K8s reflector is connected, 0 if not",
         )
-        .expect("metric");
+        ?;
         registry
             .register(Box::new(k8s_reflector_up.clone()))
-            .unwrap();
+            ?;
 
-        Self {
+        Ok(Self {
             registry: Arc::new(registry),
             events_total,
             anomalies_total,
@@ -126,7 +126,7 @@ impl TapioMetrics {
             sink_writes_total,
             k8s_cache_size,
             k8s_reflector_up,
-        }
+        })
     }
 }
 
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn metrics_register_without_panic() {
-        let m = TapioMetrics::new();
+        let m = TapioMetrics::new().expect("metrics registration");
         m.events_total.with_label_values(&["network"]).inc();
         m.anomalies_total
             .with_label_values(&["network", "kernel.network.rst_storm"])
@@ -196,7 +196,9 @@ mod tests {
         let encoder = TextEncoder::new();
         let families = m.registry.gather();
         let mut buf = String::new();
-        encoder.encode_utf8(&families, &mut buf).unwrap();
+        encoder
+            .encode_utf8(&families, &mut buf)
+            .expect("encode metrics");
         assert!(buf.contains("tapio_events_total"));
         assert!(buf.contains("tapio_anomalies_total"));
         assert!(buf.contains("tapio_k8s_cache_size 42"));
