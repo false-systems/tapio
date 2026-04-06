@@ -173,7 +173,8 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 			baseline->last_activity_ns = now_ns;
 
 			if (baseline->state == RTT_STATE_LEARNING) {
-				baseline->sample_count++;
+				if (baseline->sample_count < 255)
+					baseline->sample_count++;
 				baseline->baseline_us = (baseline->baseline_us * (baseline->sample_count - 1) + rtt_us) / baseline->sample_count;
 
 				if (baseline->sample_count >= LEARNING_SAMPLES) {
