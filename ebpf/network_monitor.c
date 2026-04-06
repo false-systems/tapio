@@ -157,7 +157,9 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 	}
 
 	// RTT tracking for ESTABLISHED connections with valid RTT
+	metric_inc(METRIC_NETWORK_EVENTS_TOTAL);
 	if (args->newstate == TCP_ESTABLISHED && rtt_us > 0) {
+		metric_inc(METRIC_NETWORK_RTT_SAMPLES_TOTAL);
 		struct rtt_baseline *baseline = bpf_map_lookup_elem(&baseline_rtt, &key);
 
 		if (!baseline) {
@@ -229,6 +231,7 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 						evt->rtt_current_ms = current_ms > 65535 ? 65535 : (__u16)current_ms;
 
 						bpf_ringbuf_submit(evt, 0);
+						metric_inc(METRIC_NETWORK_RTT_SPIKES_TOTAL);
 					}
 				}
 			}
