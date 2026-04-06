@@ -182,7 +182,7 @@ async fn main() -> anyhow::Result<()> {
             }
         };
 
-        let tapio_metrics = metrics::TapioMetrics::new();
+        let tapio_metrics = metrics::TapioMetrics::new()?;
         if enricher.is_some() {
             tapio_metrics.k8s_reflector_up.set(1);
         }
