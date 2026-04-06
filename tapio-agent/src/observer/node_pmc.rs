@@ -238,6 +238,7 @@ pub async fn run(
     sink: &dyn tapio_common::sink::Sink,
     boot_offset_ns: u64,
     thresholds: PmcThresholds,
+    metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::Ebpf;
@@ -356,9 +357,11 @@ pub async fn run(
                             std::ptr::read_unaligned(data.as_ptr() as *const PmcEvent)
                         };
                         event_count += 1;
+                        metrics.events_total.with_label_values(&["node_pmc"]).inc();
                         if let Some(anomaly) = classify(&event, &thresholds) {
                             let occ = build_occurrence(&event, &anomaly, boot_offset_ns);
                             anomaly_count += 1;
+                            metrics.anomalies_total.with_label_values(&["node_pmc", anomaly.event_type]).inc();
                             if let Err(e) = sink.send(&occ) {
                                 tracing::warn!(error = %e, "sink error");
                             }
@@ -369,6 +372,7 @@ pub async fn run(
                     count
                 });
                 if drained >= super::MAX_DRAIN_PER_TICK {
+                    metrics.drain_cap_total.with_label_values(&["node_pmc"]).inc();
                     tracing::warn!(observer = "pmc", drained, "ring buffer drain capped");
                 }
             }
