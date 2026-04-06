@@ -71,6 +71,19 @@ impl K8sEnricher {
 
         // Try to resolve cgroup_id → pod UID via filesystem stat
         let pod_uid = self.resolve_cgroup_id(cgroup_id);
+
+        // Cap cache at 10k entries — evict ~20% when full
+        if self.cgroup_cache.len() > 10_000 {
+            let evict: Vec<u64> = self
+                .cgroup_cache
+                .iter()
+                .take(self.cgroup_cache.len() / 5)
+                .map(|e| *e.key())
+                .collect();
+            for k in evict {
+                self.cgroup_cache.remove(&k);
+            }
+        }
         self.cgroup_cache.insert(cgroup_id, pod_uid.clone());
 
         pod_uid.and_then(|uid| self.context_for_uid(&uid))
