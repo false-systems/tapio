@@ -95,6 +95,14 @@ pub fn load(path: &Path) -> anyhow::Result<Config> {
 
     let content = std::fs::read_to_string(path)?;
     let config: Config = toml::from_str(&content)?;
+
+    // Validate auth_header — reject CR/LF to prevent HTTP header injection
+    if let Some(ref auth) = config.grafana.auth_header {
+        if auth.contains(['\r', '\n', '\0']) {
+            anyhow::bail!("grafana.auth_header contains invalid characters (CR/LF/null)");
+        }
+    }
+
     tracing::info!(path = %path.display(), "loaded config");
     Ok(config)
 }
