@@ -190,11 +190,14 @@ async fn main() -> anyhow::Result<()> {
         // Start Prometheus metrics server if enabled
         if cfg.metrics.enabled {
             let registry = tapio_metrics.registry.clone();
-            let metrics_port = cfg.metrics.port;
+            let metrics_addr: std::net::SocketAddr =
+                format!("{}:{}", cfg.metrics.bind_address, cfg.metrics.port)
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("invalid metrics bind address: {e}"))?;
             // shutdown_rx will be created below — metrics server gets its own clone
             let (metrics_shutdown_tx, metrics_shutdown_rx) = tokio::sync::watch::channel(false);
             tokio::spawn(async move {
-                if let Err(e) = metrics::serve(registry, metrics_port, metrics_shutdown_rx).await {
+                if let Err(e) = metrics::serve(registry, metrics_addr, metrics_shutdown_rx).await {
                     tracing::error!(error = %e, "metrics server failed");
                 }
             });
