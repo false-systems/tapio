@@ -10,6 +10,11 @@
 #include "headers/tcp.h"
 #include "headers/metrics.h"
 
+// Limit constant for __u8 sample counter saturation
+#ifndef UINT8_MAX
+#define UINT8_MAX 255
+#endif
+
 // Event types for distinguishing tracepoint sources
 #define EVENT_TYPE_STATE_CHANGE  0  // inet_sock_set_state
 #define EVENT_TYPE_RST_RECEIVED  1  // tcp_receive_reset
@@ -173,7 +178,8 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 			baseline->last_activity_ns = now_ns;
 
 			if (baseline->state == RTT_STATE_LEARNING) {
-				baseline->sample_count++;
+				if (baseline->sample_count < UINT8_MAX)
+					baseline->sample_count++;
 				baseline->baseline_us = (baseline->baseline_us * (baseline->sample_count - 1) + rtt_us) / baseline->sample_count;
 
 				if (baseline->sample_count >= LEARNING_SAMPLES) {
