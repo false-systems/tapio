@@ -36,8 +36,7 @@ impl TapioMetrics {
                 "Total events drained from ring buffer",
             ),
             &["observer"],
-        )
-        ?;
+        )?;
         registry.register(Box::new(events_total.clone()))?;
 
         let anomalies_total = IntCounterVec::new(
@@ -46,11 +45,8 @@ impl TapioMetrics {
                 "Total anomalies detected and emitted",
             ),
             &["observer", "anomaly_type"],
-        )
-        ?;
-        registry
-            .register(Box::new(anomalies_total.clone()))
-            ?;
+        )?;
+        registry.register(Box::new(anomalies_total.clone()))?;
 
         let lost_events_total = IntCounterVec::new(
             Opts::new(
@@ -58,11 +54,8 @@ impl TapioMetrics {
                 "Ring buffer reserve failures in eBPF (events dropped)",
             ),
             &["observer"],
-        )
-        ?;
-        registry
-            .register(Box::new(lost_events_total.clone()))
-            ?;
+        )?;
+        registry.register(Box::new(lost_events_total.clone()))?;
 
         let drain_cap_total = IntCounterVec::new(
             Opts::new(
@@ -70,11 +63,8 @@ impl TapioMetrics {
                 "Times ring buffer drain hit the per-tick cap",
             ),
             &["observer"],
-        )
-        ?;
-        registry
-            .register(Box::new(drain_cap_total.clone()))
-            ?;
+        )?;
+        registry.register(Box::new(drain_cap_total.clone()))?;
 
         let enrichment_miss_total = IntCounterVec::new(
             Opts::new(
@@ -82,11 +72,8 @@ impl TapioMetrics {
                 "Enrichment lookups that returned no pod context",
             ),
             &["observer"],
-        )
-        ?;
-        registry
-            .register(Box::new(enrichment_miss_total.clone()))
-            ?;
+        )?;
+        registry.register(Box::new(enrichment_miss_total.clone()))?;
 
         let sink_writes_total = IntCounterVec::new(
             Opts::new(
@@ -94,27 +81,20 @@ impl TapioMetrics {
                 "Total sink write attempts by result",
             ),
             &["sink", "result"],
-        )
-        ?;
-        registry
-            .register(Box::new(sink_writes_total.clone()))
-            ?;
+        )?;
+        registry.register(Box::new(sink_writes_total.clone()))?;
 
         let k8s_cache_size = IntGauge::new(
             "tapio_k8s_cache_size",
             "Current cgroup_id to pod map entries",
-        )
-        ?;
+        )?;
         registry.register(Box::new(k8s_cache_size.clone()))?;
 
         let k8s_reflector_up = IntGauge::new(
             "tapio_k8s_reflector_up",
             "1 if K8s reflector is connected, 0 if not",
-        )
-        ?;
-        registry
-            .register(Box::new(k8s_reflector_up.clone()))
-            ?;
+        )?;
+        registry.register(Box::new(k8s_reflector_up.clone()))?;
 
         Ok(Self {
             registry: Arc::new(registry),
