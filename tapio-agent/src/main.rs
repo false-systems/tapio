@@ -110,10 +110,17 @@ impl tapio_common::sink::Sink for MultiSink {
     }
 
     fn flush(&self) -> Result<(), tapio_common::sink::SinkError> {
+        let mut last_err = None;
         for s in &self.sinks {
-            s.flush()?;
+            if let Err(e) = s.flush() {
+                tracing::warn!(sink = s.name(), error = %e, "flush error");
+                last_err = Some(e);
+            }
         }
-        Ok(())
+        match last_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     fn name(&self) -> &str {
