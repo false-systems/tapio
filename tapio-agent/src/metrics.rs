@@ -130,7 +130,7 @@ impl TapioMetrics {
     }
 }
 
-/// Serve /metrics on the given address. Runs until the shutdown token is cancelled.
+/// Serve /metrics on the given address. Runs until the shutdown signal is received.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub async fn serve(
     registry: Arc<Registry>,

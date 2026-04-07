@@ -155,4 +155,27 @@ mod tests {
         assert!(config.metrics.enabled);
         assert_eq!(config.metrics.port, 8080);
     }
+
+    #[test]
+    fn metrics_default_bind_address_is_valid_ip() {
+        let config = Config::default();
+        let ip: std::net::IpAddr = config.metrics.bind_address.parse().unwrap();
+        assert!(ip.is_loopback());
+    }
+
+    #[test]
+    fn metrics_bind_address_ipv6() {
+        let config: Config = toml::from_str(
+            r#"
+            [metrics]
+            enabled = true
+            bind_address = "::1"
+            "#,
+        )
+        .unwrap();
+        let ip: std::net::IpAddr = config.metrics.bind_address.parse().unwrap();
+        assert!(ip.is_loopback());
+        let addr = std::net::SocketAddr::new(ip, config.metrics.port);
+        assert_eq!(addr.to_string(), "[::1]:9090");
+    }
 }
