@@ -59,11 +59,32 @@ struct inet_connection_sock {
 //   - srtt_us:        trace_inet_sock_set_state (RTT tracking)
 //   - total_retrans:  trace_tcp_retransmit_skb (retransmit tracking)
 //   - snd_cwnd:       trace_tcp_retransmit_skb (congestion window)
+//
+// snd_cwnd was renamed to snd_cwnd_ in Linux 6.12 (made private with accessor).
+// We define both struct variants and use bpf_core_field_exists() to pick the right one.
 struct tcp_sock {
-	struct inet_connection_sock inet_conn;  // Parent struct (inheritance)
-	__u32 srtt_us;        // Smoothed RTT in microseconds (divided by 8)
-	__u32 total_retrans;  // Total retransmissions for this connection
-	__u32 snd_cwnd;       // Congestion window (packets)
+	struct inet_connection_sock inet_conn;
+	__u32 srtt_us;
+	__u32 total_retrans;
+	__u32 snd_cwnd;       // pre-6.12 kernels
 } __attribute__((preserve_access_index));
+
+struct tcp_sock_v612 {
+	struct inet_connection_sock inet_conn;
+	__u32 srtt_us;
+	__u32 total_retrans;
+	__u32 snd_cwnd_;      // 6.12+ kernels (renamed)
+} __attribute__((preserve_access_index));
+
+// Read snd_cwnd with CO-RE fallback for the 6.12+ rename.
+static __always_inline __u32 read_snd_cwnd(const void *sk) {
+	__u32 cwnd = 0;
+	if (bpf_core_field_exists(((struct tcp_sock *)0)->snd_cwnd)) {
+		bpf_core_read(&cwnd, sizeof(cwnd), &((struct tcp_sock *)sk)->snd_cwnd);
+	} else {
+		bpf_core_read(&cwnd, sizeof(cwnd), &((struct tcp_sock_v612 *)sk)->snd_cwnd_);
+	}
+	return cwnd;
+}
 
 #endif /* __TAPIO_TCP_H__ */

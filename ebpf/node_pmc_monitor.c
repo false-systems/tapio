@@ -10,6 +10,13 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
+// bpf_perf_event_read_value output struct (not in vmlinux_minimal.h)
+struct bpf_perf_event_value {
+	__u64 counter;
+	__u64 enabled;  // time counter was enabled (ns)
+	__u64 running;  // time counter was actually running (ns)
+};
+
 // Ring buffer for sending PMC events to userspace
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -36,6 +43,17 @@ struct {
 	__uint(value_size, sizeof(__u32));
 } pmc_stalls SEC(".maps");
 
+// Read a PMC counter using bpf_perf_event_read_value (preferred over
+// the deprecated bpf_perf_event_read). Returns the counter value,
+// or -1 on error.
+static __always_inline __s64 read_pmc(void *map, __u32 cpu) {
+	struct bpf_perf_event_value val = {};
+	if (bpf_perf_event_read_value(map, cpu, &val, sizeof(val)) != 0) {
+		return -1;
+	}
+	return (__s64)val.counter;
+}
+
 // eBPF program attached to perf_event
 // Fires on timer (e.g., every 100ms) to sample PMC counters
 SEC("perf_event")
@@ -52,13 +70,12 @@ int sample_pmc(struct bpf_perf_event_data *ctx)
 		return 0;
 	}
 
-	// Read PMC counter values
-	// Note: bpf_perf_event_read returns -EINVAL/-ENOENT on error
-	__s64 cycles = bpf_perf_event_read(&pmc_cycles, cpu);
-	__s64 instructions = bpf_perf_event_read(&pmc_instructions, cpu);
-	__s64 stalls = bpf_perf_event_read(&pmc_stalls, cpu);
+	// Read PMC counter values via bpf_perf_event_read_value
+	__s64 cycles = read_pmc(&pmc_cycles, cpu);
+	__s64 instructions = read_pmc(&pmc_instructions, cpu);
+	__s64 stalls = read_pmc(&pmc_stalls, cpu);
 
-	// Check for errors (negative values -1 to -255)
+	// Check for errors (negative = read failed)
 	if (cycles < 0 || instructions < 0) {
 		bpf_ringbuf_discard(event, 0);
 		return 0;

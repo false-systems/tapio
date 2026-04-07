@@ -76,10 +76,11 @@ int handle_oom(struct trace_event_raw_mark_victim *ctx) {
 	evt->timestamp_ns = bpf_ktime_get_ns();
 	evt->type = EVENT_TYPE_OOM_KILL;
 
-	// Capture PID/TID from tracepoint
+	// ctx->pid is the VICTIM's PID (from tracepoint args).
+	// bpf_get_current_pid_tgid() returns the OOM KILLER's context, not the victim's.
+	// We emit the victim PID; userspace enriches via /proc/<pid>/cgroup.
 	evt->pid = ctx->pid;
-	__u64 pid_tgid = bpf_get_current_pid_tgid();
-	evt->tid = pid_tgid & 0xFFFFFFFF;
+	evt->tid = 0;  // victim TID not available from this tracepoint
 
 	// OOM kills always have exit code 137 (128 + SIGKILL=9)
 	evt->exit_code = 137;
@@ -94,9 +95,9 @@ int handle_oom(struct trace_event_raw_mark_victim *ctx) {
 	// Will be enriched by userspace from cgroupfs (if still available)
 	evt->memory_limit = 0;
 
-	// Capture cgroup ID - survives cgroup deletion (Issue #566)
-	// K8s pod context derived in Rust userspace using this ID
-	evt->cgroup_id = bpf_get_current_cgroup_id();
+	// cgroup_id from bpf_get_current_cgroup_id() is the OOM KILLER's cgroup,
+	// not the victim's. Set to 0 so userspace knows to enrich via victim PID instead.
+	evt->cgroup_id = 0;
 
 	bpf_ringbuf_submit(evt, 0);
 	return 0;
