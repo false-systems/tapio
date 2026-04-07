@@ -336,7 +336,7 @@ pub async fn run(
                     let lost = super::read_percpu_sum(fd, super::METRIC_LOST_EVENTS, num_cpus as usize);
                     if lost > prev_lost {
                         tracing::warn!(
-                            observer = "pmc",
+                            observer = "node_pmc",
                             lost_total = lost,
                             lost_delta = lost - prev_lost,
                             "ring buffer events lost"
@@ -373,7 +373,7 @@ pub async fn run(
                 });
                 if drained >= super::MAX_DRAIN_PER_TICK {
                     metrics.drain_cap_total.with_label_values(&["node_pmc"]).inc();
-                    tracing::warn!(observer = "pmc", drained, "ring buffer drain capped");
+                    tracing::warn!(observer = "node_pmc", drained, "ring buffer drain capped");
                 }
             }
         }
