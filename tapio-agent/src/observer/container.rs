@@ -141,9 +141,13 @@ fn enrich_memory_limit(cgroup_id: u64, pid: u32) -> Option<u64> {
 
     // Cache the result (even 0, to avoid re-walking for deleted cgroups)
     if let Ok(mut cache) = CGROUP_LIMIT_CACHE.lock() {
-        // Cap cache size to prevent unbounded growth
+        // Evict ~20% of entries when cache exceeds cap, avoiding thundering herd
         if cache.len() > 10_000 {
-            cache.clear();
+            let evict_count = cache.len() / 5;
+            let keys_to_evict: Vec<u64> = cache.keys().take(evict_count).copied().collect();
+            for k in keys_to_evict {
+                cache.remove(&k);
+            }
         }
         cache.insert(cgroup_id, limit);
     }
