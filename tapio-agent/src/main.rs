@@ -135,6 +135,9 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+        // Prevent the process from gaining new privileges (e.g., via execve of
+        // setuid binaries). Reduces blast radius if the agent is compromised.
+        libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
     }
 
     // Use a non-panicking writer for tracing — default stderr writer panics
