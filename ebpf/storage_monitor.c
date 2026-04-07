@@ -171,6 +171,9 @@ int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
 		return 0;
 	}
 
+	// Zero-init before filling — prevents leaking kernel stack via padding bytes
+	__builtin_memset(evt, 0, sizeof(*evt));
+
 	// Fill event
 	evt->timestamp_ns = now_ns;
 	evt->latency_ns = latency_ns;

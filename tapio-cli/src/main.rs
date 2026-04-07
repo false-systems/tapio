@@ -163,9 +163,16 @@ async fn cmd_watch(data_dir: &Path, json: bool, filters: &[&str]) -> anyhow::Res
             _ = tokio::signal::ctrl_c() => break,
             _ = tokio::time::sleep(Duration::from_millis(200)) => {
                 if !data_dir.exists() { continue; }
+                let entries = match std::fs::read_dir(data_dir) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        eprintln!("warning: failed to read {}: {e}", data_dir.display());
+                        continue;
+                    }
+                };
                 let mut new_occs = Vec::new();
-                for entry in std::fs::read_dir(data_dir)? {
-                    let entry = entry?;
+                for entry in entries {
+                    let Ok(entry) = entry else { continue };
                     if !seen.insert(entry.file_name()) { continue; }
                     let path = entry.path();
                     if path.extension().is_some_and(|e| e == "json")
@@ -366,17 +373,18 @@ async fn cmd_mcp(data_dir: &Path) -> anyhow::Result<()> {
             }
         };
 
+        // JSON-RPC 2.0: missing "id" field = notification (no response).
+        // Present "id" field (even if null) = request (must respond).
+        let has_id = request.get("id").is_some();
         let id = request.get("id").cloned();
-        let is_notification = id.is_none() || id.as_ref().is_some_and(|v| v.is_null());
         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = request
             .get("params")
             .cloned()
             .unwrap_or(serde_json::json!({}));
 
-        // JSON-RPC: notifications (no id) get no response
-        if is_notification {
-            continue;
+        if !has_id {
+            continue; // notification — no response
         }
 
         match method {
@@ -664,6 +672,9 @@ fn parse_duration(s: &str) -> anyhow::Result<chrono::Duration> {
     let num: i64 = num_str
         .parse()
         .map_err(|_| anyhow::anyhow!("invalid duration number: {num_str}"))?;
+    if num <= 0 {
+        anyhow::bail!("duration must be positive: {s}");
+    }
     match unit {
         "s" => Ok(chrono::Duration::seconds(num)),
         "m" => Ok(chrono::Duration::minutes(num)),
@@ -700,6 +711,8 @@ mod tests {
         assert!(parse_duration("abc").is_err());
         assert!(parse_duration("5x").is_err());
         assert!(parse_duration("").is_err());
+        assert!(parse_duration("-5m").is_err());
+        assert!(parse_duration("0s").is_err());
     }
 
     #[test]

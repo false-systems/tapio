@@ -305,14 +305,21 @@ pub async fn run(
                             let mut occ = build_occurrence(&event, &anomaly, boot_offset_ns);
                             if let Some(enricher) = enricher {
                                 let cgroup_id = event.cgroup_id;
-                                if cgroup_id != 0 {
-                                    enrich_total += 1;
-                                    if let Some(ctx) = enricher.enrich(cgroup_id) {
-                                        occ.context = Some(ctx);
-                                    } else {
-                                        enrich_miss += 1;
-                                        metrics.enrichment_miss_total.with_label_values(&["container"]).inc();
-                                    }
+                                let pid = event.pid;
+                                enrich_total += 1;
+                                let ctx = if cgroup_id != 0 {
+                                    // Normal path: enrich by cgroup_id (exit events)
+                                    enricher.enrich(cgroup_id)
+                                } else {
+                                    // OOM path: cgroup_id is 0 (BPF can't get victim's cgroup),
+                                    // enrich via /proc/<victim_pid>/cgroup instead
+                                    enricher.enrich_by_pid(pid)
+                                };
+                                if let Some(ctx) = ctx {
+                                    occ.context = Some(ctx);
+                                } else {
+                                    enrich_miss += 1;
+                                    metrics.enrichment_miss_total.with_label_values(&["container"]).inc();
                                 }
                             }
                             anomaly_count += 1;
