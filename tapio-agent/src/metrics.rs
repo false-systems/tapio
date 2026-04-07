@@ -110,11 +110,11 @@ impl TapioMetrics {
     }
 }
 
-/// Serve /metrics on the given port. Runs until the shutdown token is cancelled.
+/// Serve /metrics on the given address. Runs until the shutdown signal is received.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub async fn serve(
     registry: Arc<Registry>,
-    port: u16,
+    addr: SocketAddr,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use axum::{Router, http::header, routing::get};
@@ -143,7 +143,6 @@ pub async fn serve(
         }),
     );
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!(%addr, "prometheus metrics endpoint starting");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

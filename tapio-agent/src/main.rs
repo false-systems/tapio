@@ -202,10 +202,15 @@ async fn main() -> anyhow::Result<()> {
         // Start Prometheus metrics server if enabled
         if cfg.metrics.enabled {
             let registry = tapio_metrics.registry.clone();
-            let metrics_port = cfg.metrics.port;
+            let metrics_ip: std::net::IpAddr = cfg
+                .metrics
+                .bind_address
+                .parse()
+                .map_err(|e| anyhow::anyhow!("invalid metrics bind_address: {e}"))?;
+            let metrics_addr = std::net::SocketAddr::new(metrics_ip, cfg.metrics.port);
             let metrics_shutdown_rx = shutdown_rx.clone();
             tokio::spawn(async move {
-                if let Err(e) = metrics::serve(registry, metrics_port, metrics_shutdown_rx).await {
+                if let Err(e) = metrics::serve(registry, metrics_addr, metrics_shutdown_rx).await {
                     tracing::error!(error = %e, "metrics server failed");
                 }
             });
