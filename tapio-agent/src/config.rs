@@ -4,14 +4,12 @@ use std::path::Path;
 /// Agent configuration loaded from TOML file.
 /// CLI flags take precedence — fields here are all optional so missing values
 /// fall through to CLI defaults.
+/// Agent configuration loaded from TOML file.
+/// Operational paths (sinks, ebpf_dir, data_dir) are CLI-only flags.
+/// The config file controls thresholds, metrics, and grafana settings.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub sinks: Option<Vec<String>>,
-    pub ebpf_dir: Option<String>,
-    pub data_dir: Option<String>,
-    pub polku_endpoint: Option<String>,
-
     pub thresholds: Thresholds,
     pub metrics: Metrics,
     pub grafana: Grafana,
@@ -139,7 +137,8 @@ mod tests {
     }
 
     #[test]
-    fn sinks_from_config() {
+    fn unknown_fields_ignored() {
+        // Operational paths (sinks, ebpf_dir) are CLI-only — config ignores them
         let config: Config = toml::from_str(
             r#"
             sinks = ["stdout", "file"]
@@ -147,8 +146,8 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(config.sinks.unwrap(), vec!["stdout", "file"]);
-        assert_eq!(config.ebpf_dir.unwrap(), "/custom/ebpf");
+        // Should parse without error, fields silently ignored
+        assert_eq!(config.thresholds.stall_pct_warning, 20.0);
     }
 
     #[test]
