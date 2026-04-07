@@ -441,11 +441,8 @@ read_tcp_sock:
 			}
 			evt->total_retrans = total_retrans > 65535 ? 65535 : (__u16)total_retrans;
 
-			__u32 snd_cwnd = 0;
-			if (bpf_core_read(&snd_cwnd, sizeof(snd_cwnd), &tp->snd_cwnd) != 0) {
-				bpf_ringbuf_discard(evt, 0);
-				return 0;
-			}
+			// snd_cwnd renamed to snd_cwnd_ in Linux 6.12 — CO-RE fallback
+			__u32 snd_cwnd = read_snd_cwnd(sk);
 			evt->snd_cwnd = snd_cwnd > 65535 ? 65535 : (__u16)snd_cwnd;
 		}
 	}
