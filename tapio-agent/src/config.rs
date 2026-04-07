@@ -86,6 +86,16 @@ impl Default for Grafana {
     }
 }
 
+/// Reject CR, LF, and null bytes in the auth header to prevent HTTP header injection.
+fn validate_auth_header(header: &Option<String>) -> anyhow::Result<()> {
+    if let Some(value) = header
+        && value.contains(&['\r', '\n', '\0'][..])
+    {
+        anyhow::bail!("grafana.auth_header contains invalid characters (CR/LF/null)");
+    }
+    Ok(())
+}
+
 /// Load config from a TOML file. Returns default config if file doesn't exist.
 pub fn load(path: &Path) -> anyhow::Result<Config> {
     if !path.exists() {
@@ -96,12 +106,7 @@ pub fn load(path: &Path) -> anyhow::Result<Config> {
     let content = std::fs::read_to_string(path)?;
     let config: Config = toml::from_str(&content)?;
 
-    // Validate auth_header — reject CR/LF to prevent HTTP header injection
-    if let Some(ref auth) = config.grafana.auth_header {
-        if auth.contains(['\r', '\n', '\0']) {
-            anyhow::bail!("grafana.auth_header contains invalid characters (CR/LF/null)");
-        }
-    }
+    validate_auth_header(&config.grafana.auth_header)?;
 
     tracing::info!(path = %path.display(), "loaded config");
     Ok(config)
@@ -144,6 +149,35 @@ mod tests {
         .unwrap();
         assert_eq!(config.sinks.unwrap(), vec!["stdout", "file"]);
         assert_eq!(config.ebpf_dir.unwrap(), "/custom/ebpf");
+    }
+
+    #[test]
+    fn auth_header_rejects_cr() {
+        let header = Some("Bearer token\rfoo".into());
+        assert!(validate_auth_header(&header).is_err());
+    }
+
+    #[test]
+    fn auth_header_rejects_lf() {
+        let header = Some("Bearer token\nfoo".into());
+        assert!(validate_auth_header(&header).is_err());
+    }
+
+    #[test]
+    fn auth_header_rejects_null() {
+        let header = Some("Bearer token\0foo".into());
+        assert!(validate_auth_header(&header).is_err());
+    }
+
+    #[test]
+    fn auth_header_accepts_valid() {
+        let header = Some("Bearer my-secret-token".into());
+        assert!(validate_auth_header(&header).is_ok());
+    }
+
+    #[test]
+    fn auth_header_accepts_none() {
+        assert!(validate_auth_header(&None).is_ok());
     }
 
     #[test]
