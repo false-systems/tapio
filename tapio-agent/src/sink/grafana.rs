@@ -309,42 +309,69 @@ impl GrafanaSink {
     }
 }
 
+/// Max buffer entries before oldest are dropped (10x batch_size).
+const MAX_BUFFER_MULTIPLIER: usize = 10;
+
 impl Sink for GrafanaSink {
     fn send(&self, occurrence: &Occurrence) -> Result<(), SinkError> {
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|e| SinkError::Send(e.to_string()))?;
+        let batch = {
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|e| SinkError::Send(e.to_string()))?;
 
-        inner.buffer.push(occurrence.clone());
+            // Backpressure: cap buffer at 10x batch_size
+            let max_buffer = self.batch_size * MAX_BUFFER_MULTIPLIER;
+            if inner.buffer.len() >= max_buffer {
+                let drain_count = inner.buffer.len() - self.batch_size;
+                inner.buffer.drain(..drain_count);
+                tracing::warn!(
+                    dropped = drain_count,
+                    "grafana sink buffer overflow, dropped oldest events"
+                );
+            }
 
-        let should_flush = inner.buffer.len() >= self.batch_size
-            || inner.last_flush.elapsed() >= self.flush_interval;
+            inner.buffer.push(occurrence.clone());
 
-        if should_flush {
-            let batch: Vec<Occurrence> = inner.buffer.drain(..).collect();
-            inner.last_flush = Instant::now();
-            drop(inner); // release lock before network I/O
-            self.export_batch(batch)?;
+            let should_flush = inner.buffer.len() >= self.batch_size
+                || inner.last_flush.elapsed() >= self.flush_interval;
+
+            if should_flush {
+                let batch: Vec<Occurrence> = inner.buffer.drain(..).collect();
+                inner.last_flush = Instant::now();
+                Some(batch)
+            } else {
+                None
+            }
+        }; // lock released
+
+        if let Some(batch) = batch
+            && let Err(e) = self.export_batch(batch)
+        {
+            tracing::warn!(error = %e, "grafana sink: batch export failed, data dropped");
         }
 
         Ok(())
     }
 
     fn flush(&self) -> Result<(), SinkError> {
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|e| SinkError::Send(e.to_string()))?;
+        let batch = {
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|e| SinkError::Send(e.to_string()))?;
+            if inner.buffer.is_empty() {
+                return Ok(());
+            }
+            let batch: Vec<Occurrence> = inner.buffer.drain(..).collect();
+            inner.last_flush = Instant::now();
+            batch
+        }; // lock released
 
-        if inner.buffer.is_empty() {
-            return Ok(());
+        if let Err(e) = self.export_batch(batch) {
+            tracing::warn!(error = %e, "grafana sink: flush export failed, data dropped");
         }
-
-        let batch: Vec<Occurrence> = inner.buffer.drain(..).collect();
-        inner.last_flush = Instant::now();
-        drop(inner);
-        self.export_batch(batch)
+        Ok(())
     }
 
     fn name(&self) -> &str {
