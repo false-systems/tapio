@@ -141,9 +141,13 @@ fn enrich_memory_limit(cgroup_id: u64, pid: u32) -> Option<u64> {
 
     // Cache the result (even 0, to avoid re-walking for deleted cgroups)
     if let Ok(mut cache) = CGROUP_LIMIT_CACHE.lock() {
-        // Cap cache size to prevent unbounded growth
+        // Evict ~20% of entries when cache exceeds cap, avoiding thundering herd
         if cache.len() > 10_000 {
-            cache.clear();
+            let evict_count = cache.len() / 5;
+            let keys_to_evict: Vec<u64> = cache.keys().take(evict_count).copied().collect();
+            for k in keys_to_evict {
+                cache.remove(&k);
+            }
         }
         cache.insert(cgroup_id, limit);
     }
@@ -215,6 +219,7 @@ pub async fn run(
     sink: &dyn tapio_common::sink::Sink,
     enricher: Option<&crate::enricher::K8sEnricher>,
     boot_offset_ns: u64,
+    metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::{Ebpf, maps::RingBuf, programs::TracePoint};
@@ -299,20 +304,30 @@ pub async fn run(
                             std::ptr::read_unaligned(data.as_ptr() as *const ContainerEvent)
                         };
                         event_count += 1;
+                        metrics.events_total.with_label_values(&["container"]).inc();
                         if let Some(anomaly) = classify(&event) {
                             let mut occ = build_occurrence(&event, &anomaly, boot_offset_ns);
                             if let Some(enricher) = enricher {
                                 let cgroup_id = event.cgroup_id;
-                                if cgroup_id != 0 {
-                                    enrich_total += 1;
-                                    if let Some(ctx) = enricher.enrich(cgroup_id) {
-                                        occ.context = Some(ctx);
-                                    } else {
-                                        enrich_miss += 1;
-                                    }
+                                let pid = event.pid;
+                                enrich_total += 1;
+                                let ctx = if cgroup_id != 0 {
+                                    // Normal path: enrich by cgroup_id (exit events)
+                                    enricher.enrich(cgroup_id)
+                                } else {
+                                    // OOM path: cgroup_id is 0 (BPF can't get victim's cgroup),
+                                    // enrich via /proc/<victim_pid>/cgroup instead
+                                    enricher.enrich_by_pid(pid)
+                                };
+                                if let Some(ctx) = ctx {
+                                    occ.context = Some(ctx);
+                                } else {
+                                    enrich_miss += 1;
+                                    metrics.enrichment_miss_total.with_label_values(&["container"]).inc();
                                 }
                             }
                             anomaly_count += 1;
+                            metrics.anomalies_total.with_label_values(&["container", anomaly.event_type]).inc();
                             if let Err(e) = sink.send(&occ) {
                                 tracing::warn!(error = %e, "sink error");
                             }
@@ -323,6 +338,7 @@ pub async fn run(
                     count
                 });
                 if drained >= super::MAX_DRAIN_PER_TICK {
+                    metrics.drain_cap_total.with_label_values(&["container"]).inc();
                     tracing::warn!(observer = "container", drained, "ring buffer drain capped");
                 }
             }

@@ -10,6 +10,11 @@
 #include "headers/tcp.h"
 #include "headers/metrics.h"
 
+// Limit constant for __u8 sample counter saturation
+#ifndef UINT8_MAX
+#define UINT8_MAX 255
+#endif
+
 // Event types for distinguishing tracepoint sources
 #define EVENT_TYPE_STATE_CHANGE  0  // inet_sock_set_state
 #define EVENT_TYPE_RST_RECEIVED  1  // tcp_receive_reset
@@ -157,7 +162,9 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 	}
 
 	// RTT tracking for ESTABLISHED connections with valid RTT
+	metric_inc(METRIC_NETWORK_EVENTS_TOTAL);
 	if (args->newstate == TCP_ESTABLISHED && rtt_us > 0) {
+		metric_inc(METRIC_NETWORK_RTT_SAMPLES_TOTAL);
 		struct rtt_baseline *baseline = bpf_map_lookup_elem(&baseline_rtt, &key);
 
 		if (!baseline) {
@@ -173,7 +180,8 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 			baseline->last_activity_ns = now_ns;
 
 			if (baseline->state == RTT_STATE_LEARNING) {
-				baseline->sample_count++;
+				if (baseline->sample_count < UINT8_MAX)
+					baseline->sample_count++;
 				baseline->baseline_us = (baseline->baseline_us * (baseline->sample_count - 1) + rtt_us) / baseline->sample_count;
 
 				if (baseline->sample_count >= LEARNING_SAMPLES) {
@@ -229,6 +237,7 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 						evt->rtt_current_ms = current_ms > 65535 ? 65535 : (__u16)current_ms;
 
 						bpf_ringbuf_submit(evt, 0);
+						metric_inc(METRIC_NETWORK_RTT_SPIKES_TOTAL);
 					}
 				}
 			}
@@ -441,11 +450,8 @@ read_tcp_sock:
 			}
 			evt->total_retrans = total_retrans > 65535 ? 65535 : (__u16)total_retrans;
 
-			__u32 snd_cwnd = 0;
-			if (bpf_core_read(&snd_cwnd, sizeof(snd_cwnd), &tp->snd_cwnd) != 0) {
-				bpf_ringbuf_discard(evt, 0);
-				return 0;
-			}
+			// snd_cwnd renamed to snd_cwnd_ in Linux 6.12 — CO-RE fallback
+			__u32 snd_cwnd = read_snd_cwnd(sk);
 			evt->snd_cwnd = snd_cwnd > 65535 ? 65535 : (__u16)snd_cwnd;
 		}
 	}

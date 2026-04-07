@@ -110,10 +110,17 @@ impl tapio_common::sink::Sink for MultiSink {
     }
 
     fn flush(&self) -> Result<(), tapio_common::sink::SinkError> {
+        let mut last_err = None;
         for s in &self.sinks {
-            s.flush()?;
+            if let Err(e) = s.flush() {
+                tracing::warn!(sink = s.name(), error = %e, "flush error");
+                last_err = Some(e);
+            }
         }
-        Ok(())
+        match last_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 
     fn name(&self) -> &str {
@@ -128,6 +135,9 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+        // Prevent the process from gaining new privileges (e.g., via execve of
+        // setuid binaries). Reduces blast radius if the agent is compromised.
+        libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
     }
 
     // Use a non-panicking writer for tracing — default stderr writer panics
@@ -182,10 +192,12 @@ async fn main() -> anyhow::Result<()> {
             }
         };
 
-        let tapio_metrics = metrics::TapioMetrics::new();
+        let tapio_metrics = metrics::TapioMetrics::new()?;
         if enricher.is_some() {
             tapio_metrics.k8s_reflector_up.set(1);
         }
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
         // Start Prometheus metrics server if enabled
         if cfg.metrics.enabled {
@@ -196,19 +208,13 @@ async fn main() -> anyhow::Result<()> {
                 .parse()
                 .map_err(|e| anyhow::anyhow!("invalid metrics bind_address: {e}"))?;
             let metrics_addr = std::net::SocketAddr::new(metrics_ip, cfg.metrics.port);
-            // shutdown_rx will be created below — metrics server gets its own clone
-            let (metrics_shutdown_tx, metrics_shutdown_rx) = tokio::sync::watch::channel(false);
+            let metrics_shutdown_rx = shutdown_rx.clone();
             tokio::spawn(async move {
                 if let Err(e) = metrics::serve(registry, metrics_addr, metrics_shutdown_rx).await {
                     tracing::error!(error = %e, "metrics server failed");
                 }
             });
-            // Wire metrics shutdown into main shutdown below
-            // (kept simple: metrics server stopped by dropping its receiver)
-            let _ = metrics_shutdown_tx;
         }
-
-        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
         tokio::spawn(async move {
             tokio::signal::ctrl_c().await.ok();
@@ -229,6 +235,7 @@ async fn main() -> anyhow::Result<()> {
 
         let sink1: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
         let enricher1 = enricher.clone();
+        let metrics1 = tapio_metrics.clone();
         let rx1 = shutdown_rx.clone();
         let dir1 = ebpf_dir.clone();
         let net = tokio::spawn(async move {
@@ -239,6 +246,7 @@ async fn main() -> anyhow::Result<()> {
                 enricher1.as_deref(),
                 boot_offset_ns,
                 net_thresholds,
+                &metrics1,
                 rx1,
             )
             .await
@@ -249,6 +257,7 @@ async fn main() -> anyhow::Result<()> {
 
         let sink2: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
         let enricher2 = enricher.clone();
+        let metrics2 = tapio_metrics.clone();
         let rx2 = shutdown_rx.clone();
         let dir2 = ebpf_dir.clone();
         let ctr = tokio::spawn(async move {
@@ -258,6 +267,7 @@ async fn main() -> anyhow::Result<()> {
                 sink2.as_ref(),
                 enricher2.as_deref(),
                 boot_offset_ns,
+                &metrics2,
                 rx2,
             )
             .await
@@ -268,6 +278,7 @@ async fn main() -> anyhow::Result<()> {
 
         let sink3: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
         let enricher3 = enricher.clone();
+        let metrics3 = tapio_metrics.clone();
         let rx3 = shutdown_rx.clone();
         let dir3 = ebpf_dir.clone();
         let stg = tokio::spawn(async move {
@@ -278,6 +289,7 @@ async fn main() -> anyhow::Result<()> {
                 enricher3.as_deref(),
                 boot_offset_ns,
                 stg_thresholds,
+                &metrics3,
                 rx3,
             )
             .await
@@ -293,13 +305,20 @@ async fn main() -> anyhow::Result<()> {
         };
 
         let sink4: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
+        let metrics4 = tapio_metrics.clone();
         let rx4 = shutdown_rx.clone();
         let dir4 = ebpf_dir.clone();
         let pmc = tokio::spawn(async move {
             let path = format!("{dir4}/node_pmc_monitor.o");
-            if let Err(e) =
-                observer::node_pmc::run(&path, sink4.as_ref(), boot_offset_ns, pmc_thresholds, rx4)
-                    .await
+            if let Err(e) = observer::node_pmc::run(
+                &path,
+                sink4.as_ref(),
+                boot_offset_ns,
+                pmc_thresholds,
+                &metrics4,
+                rx4,
+            )
+            .await
             {
                 tracing::error!(error = %e, "PMC observer failed");
             }
