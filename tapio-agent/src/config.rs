@@ -53,6 +53,9 @@ impl Default for Thresholds {
 pub struct Metrics {
     pub enabled: bool,
     pub port: u16,
+    /// Bind address for /metrics endpoint. Default 127.0.0.1 (localhost only).
+    /// Set to "0.0.0.0" to expose to the node network.
+    pub bind_address: String,
 }
 
 impl Default for Metrics {
@@ -60,6 +63,7 @@ impl Default for Metrics {
         Self {
             enabled: false,
             port: 9090,
+            bind_address: "127.0.0.1".into(),
         }
     }
 }
@@ -191,5 +195,28 @@ mod tests {
         .unwrap();
         assert!(config.metrics.enabled);
         assert_eq!(config.metrics.port, 8080);
+    }
+
+    #[test]
+    fn metrics_default_bind_address_is_valid_ip() {
+        let config = Config::default();
+        let ip: std::net::IpAddr = config.metrics.bind_address.parse().unwrap();
+        assert!(ip.is_loopback());
+    }
+
+    #[test]
+    fn metrics_bind_address_ipv6() {
+        let config: Config = toml::from_str(
+            r#"
+            [metrics]
+            enabled = true
+            bind_address = "::1"
+            "#,
+        )
+        .unwrap();
+        let ip: std::net::IpAddr = config.metrics.bind_address.parse().unwrap();
+        assert!(ip.is_loopback());
+        let addr = std::net::SocketAddr::new(ip, config.metrics.port);
+        assert_eq!(addr.to_string(), "[::1]:9090");
     }
 }
