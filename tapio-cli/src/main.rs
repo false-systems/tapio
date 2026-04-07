@@ -665,7 +665,7 @@ fn parse_duration(s: &str) -> anyhow::Result<chrono::Duration> {
         .parse()
         .map_err(|_| anyhow::anyhow!("invalid duration number: {num_str}"))?;
     if num <= 0 {
-        anyhow::bail!("duration must be positive (e.g. 5m, 1h)");
+        anyhow::bail!("duration must be positive: {s}");
     }
     match unit {
         "s" => Ok(chrono::Duration::seconds(num)),
