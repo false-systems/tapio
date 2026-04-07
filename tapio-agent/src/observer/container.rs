@@ -215,6 +215,7 @@ pub async fn run(
     sink: &dyn tapio_common::sink::Sink,
     enricher: Option<&crate::enricher::K8sEnricher>,
     boot_offset_ns: u64,
+    metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     use aya::{Ebpf, maps::RingBuf, programs::TracePoint};
@@ -299,6 +300,7 @@ pub async fn run(
                             std::ptr::read_unaligned(data.as_ptr() as *const ContainerEvent)
                         };
                         event_count += 1;
+                        metrics.events_total.with_label_values(&["container"]).inc();
                         if let Some(anomaly) = classify(&event) {
                             let mut occ = build_occurrence(&event, &anomaly, boot_offset_ns);
                             if let Some(enricher) = enricher {
@@ -317,9 +319,11 @@ pub async fn run(
                                     occ.context = Some(ctx);
                                 } else {
                                     enrich_miss += 1;
+                                    metrics.enrichment_miss_total.with_label_values(&["container"]).inc();
                                 }
                             }
                             anomaly_count += 1;
+                            metrics.anomalies_total.with_label_values(&["container", anomaly.event_type]).inc();
                             if let Err(e) = sink.send(&occ) {
                                 tracing::warn!(error = %e, "sink error");
                             }
@@ -330,6 +334,7 @@ pub async fn run(
                     count
                 });
                 if drained >= super::MAX_DRAIN_PER_TICK {
+                    metrics.drain_cap_total.with_label_values(&["container"]).inc();
                     tracing::warn!(observer = "container", drained, "ring buffer drain capped");
                 }
             }

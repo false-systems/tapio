@@ -220,6 +220,7 @@ async fn main() -> anyhow::Result<()> {
 
         let sink1: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
         let enricher1 = enricher.clone();
+        let metrics1 = tapio_metrics.clone();
         let rx1 = shutdown_rx.clone();
         let dir1 = ebpf_dir.clone();
         let net = tokio::spawn(async move {
@@ -230,6 +231,7 @@ async fn main() -> anyhow::Result<()> {
                 enricher1.as_deref(),
                 boot_offset_ns,
                 net_thresholds,
+                &metrics1,
                 rx1,
             )
             .await
@@ -240,6 +242,7 @@ async fn main() -> anyhow::Result<()> {
 
         let sink2: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
         let enricher2 = enricher.clone();
+        let metrics2 = tapio_metrics.clone();
         let rx2 = shutdown_rx.clone();
         let dir2 = ebpf_dir.clone();
         let ctr = tokio::spawn(async move {
@@ -249,6 +252,7 @@ async fn main() -> anyhow::Result<()> {
                 sink2.as_ref(),
                 enricher2.as_deref(),
                 boot_offset_ns,
+                &metrics2,
                 rx2,
             )
             .await
@@ -259,6 +263,7 @@ async fn main() -> anyhow::Result<()> {
 
         let sink3: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
         let enricher3 = enricher.clone();
+        let metrics3 = tapio_metrics.clone();
         let rx3 = shutdown_rx.clone();
         let dir3 = ebpf_dir.clone();
         let stg = tokio::spawn(async move {
@@ -269,6 +274,7 @@ async fn main() -> anyhow::Result<()> {
                 enricher3.as_deref(),
                 boot_offset_ns,
                 stg_thresholds,
+                &metrics3,
                 rx3,
             )
             .await
@@ -284,13 +290,20 @@ async fn main() -> anyhow::Result<()> {
         };
 
         let sink4: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
+        let metrics4 = tapio_metrics.clone();
         let rx4 = shutdown_rx.clone();
         let dir4 = ebpf_dir.clone();
         let pmc = tokio::spawn(async move {
             let path = format!("{dir4}/node_pmc_monitor.o");
-            if let Err(e) =
-                observer::node_pmc::run(&path, sink4.as_ref(), boot_offset_ns, pmc_thresholds, rx4)
-                    .await
+            if let Err(e) = observer::node_pmc::run(
+                &path,
+                sink4.as_ref(),
+                boot_offset_ns,
+                pmc_thresholds,
+                &metrics4,
+                rx4,
+            )
+            .await
             {
                 tracing::error!(error = %e, "PMC observer failed");
             }
