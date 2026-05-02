@@ -53,8 +53,9 @@ struct io_value {
 	__u64 issue_ns;       // Timestamp when I/O was issued
 	__u64 cgroup_id;      // Cgroup ID (captured at issue time)
 	__u32 bytes;          // I/O size
+	__u32 issuer_pid;     // PID that issued the I/O
 	__u8  opcode;         // READ or WRITE
-	__u8  padding[3];     // Alignment
+	__u8  padding[7];     // Alignment
 };
 
 // Runtime-configurable thresholds — populated by userspace at load time
@@ -101,6 +102,7 @@ int trace_block_rq_issue(struct trace_event_raw_block_rq *ctx) {
 	val.issue_ns = bpf_ktime_get_ns();
 	val.cgroup_id = bpf_get_current_cgroup_id();
 	val.bytes = BPF_CORE_READ(ctx, nr_sector) * 512;  // sectors → bytes
+	val.issuer_pid = bpf_get_current_pid_tgid() >> 32;
 
 	// Determine operation type from rwbs field (CO-RE safe)
 	// rwbs is a char array: R=read, W=write, D=discard, F=flush, etc.
@@ -182,7 +184,7 @@ int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
 	evt->dev_major = key.dev_major;
 	evt->dev_minor = key.dev_minor;
 	evt->bytes = val->bytes;
-	evt->pid = bpf_get_current_pid_tgid() >> 32;
+	evt->pid = val->issuer_pid;
 	evt->error_code = error_code;
 	evt->opcode = val->opcode;
 	evt->severity = severity;
