@@ -69,6 +69,7 @@ int sample_pmc(struct bpf_perf_event_data *ctx)
 		metric_inc(METRIC_LOST_EVENTS);
 		return 0;
 	}
+	__builtin_memset(event, 0, sizeof(*event));
 
 	// Read PMC counter values via bpf_perf_event_read_value
 	__s64 cycles = read_pmc(&pmc_cycles, cpu);
