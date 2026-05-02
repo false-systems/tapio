@@ -131,7 +131,8 @@ int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
 	// Read exit_code from task_struct (CO-RE: field offset resolved at load time via BTF)
 	// exit_code format: (exit_code << 8) | signal
 	__u32 exit_code = 0;
-	bpf_core_read(&exit_code, sizeof(exit_code), &task->exit_code);
+	if (bpf_core_read(&exit_code, sizeof(exit_code), &task->exit_code) != 0)
+		return 0;
 
 	__s32 code = exit_code >> 8;
 	__s32 sig = exit_code & 0x7F;
