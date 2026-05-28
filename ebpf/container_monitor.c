@@ -71,6 +71,7 @@ int handle_oom(struct trace_event_raw_mark_victim *ctx) {
 		metric_inc(METRIC_LOST_EVENTS);
 		return 0;
 	}
+	__builtin_memset(evt, 0, sizeof(*evt));
 
 	// Capture timestamp and event type
 	evt->timestamp_ns = bpf_ktime_get_ns();
@@ -148,6 +149,7 @@ int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
 		metric_inc(METRIC_LOST_EVENTS);
 		return 0;
 	}
+	__builtin_memset(evt, 0, sizeof(*evt));
 
 	// Capture timestamp and event type
 	evt->timestamp_ns = bpf_ktime_get_ns();
