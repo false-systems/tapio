@@ -409,9 +409,28 @@ int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 		__builtin_memcpy(evt->dst_ipv6, args->daddr_v6, 16);
 	}
 
+	// Read tcp_sock fields (requires BTF)
+	__u32 total_retrans = 0;
+	__u32 snd_cwnd = 0;
+	{
+		const struct sock *sk = args->skaddr;
+		if (sk) {
+			struct tcp_sock *tp = (struct tcp_sock *)sk;
+
+			if (bpf_core_read(&total_retrans, sizeof(total_retrans), &tp->total_retrans) != 0) {
+				bpf_ringbuf_discard(evt, 0);
+				return 0;
+			}
+
+			// snd_cwnd renamed to snd_cwnd_ in Linux 6.12 — CO-RE fallback
+			snd_cwnd = read_snd_cwnd(sk);
+		}
+	}
+
 	// Update conn_stats: track retransmits (IPv4 and IPv6)
 	{
 		struct conn_key key = {0};
+		__u8 track_stats = 1;
 		if (args->family == AF_INET) {
 			fill_conn_key_v4(&key, args->saddr, args->daddr,
 			                 args->sport, args->dport);
@@ -419,43 +438,27 @@ int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 			fill_conn_key_v6(&key, args->saddr_v6, args->daddr_v6,
 			                 args->sport, args->dport);
 		} else {
-			goto read_tcp_sock;
+			track_stats = 0;
 		}
 
-		struct retransmit_stats *stats = bpf_map_lookup_elem(&conn_stats, &key);
-		if (stats) {
-			stats->retransmits++;
-			stats->last_retransmit_ns = bpf_ktime_get_ns();
-		} else {
-			struct retransmit_stats new_stats = {
-				.retransmits = 1,
-				.last_retransmit_ns = bpf_ktime_get_ns(),
-				.rst_received = 0,
-			};
-			bpf_map_update_elem(&conn_stats, &key, &new_stats, BPF_NOEXIST);
-		}
-	}
-
-read_tcp_sock:
-	// Read tcp_sock fields (requires BTF)
-	{
-		const struct sock *sk = args->skaddr;
-		if (sk) {
-			struct tcp_sock *tp = (struct tcp_sock *)sk;
-
-			__u32 total_retrans = 0;
-			if (bpf_core_read(&total_retrans, sizeof(total_retrans), &tp->total_retrans) != 0) {
-				bpf_ringbuf_discard(evt, 0);
-				return 0;
+		if (track_stats) {
+			struct retransmit_stats *stats = bpf_map_lookup_elem(&conn_stats, &key);
+			if (stats) {
+				stats->retransmits++;
+				stats->last_retransmit_ns = bpf_ktime_get_ns();
+			} else {
+				struct retransmit_stats new_stats = {
+					.retransmits = 1,
+					.last_retransmit_ns = bpf_ktime_get_ns(),
+					.rst_received = 0,
+				};
+				bpf_map_update_elem(&conn_stats, &key, &new_stats, BPF_NOEXIST);
 			}
-			evt->total_retrans = total_retrans > 65535 ? 65535 : (__u16)total_retrans;
-
-			// snd_cwnd renamed to snd_cwnd_ in Linux 6.12 — CO-RE fallback
-			__u32 snd_cwnd = read_snd_cwnd(sk);
-			evt->snd_cwnd = snd_cwnd > 65535 ? 65535 : (__u16)snd_cwnd;
 		}
 	}
 
+	evt->total_retrans = total_retrans > 65535 ? 65535 : (__u16)total_retrans;
+	evt->snd_cwnd = snd_cwnd > 65535 ? 65535 : (__u16)snd_cwnd;
 	bpf_ringbuf_submit(evt, 0);
 	metric_inc(METRIC_NETWORK_RETRANSMITS_TOTAL);
 
