@@ -202,11 +202,11 @@ impl ContainerEvent {
 ///     __u32 dev_minor;      // 36
 ///     __u32 bytes;          // 40
 ///     __u32 pid;            // 44
-///     __u16 error_code;     // 48
-///     __u8  opcode;         // 50
-///     __u8  severity;       // 51
-///     __u8  comm[16];       // 52
-///     __u8  _pad[4];        // 68
+///     __s32 error_code;     // 48
+///     __u8  opcode;         // 52
+///     __u8  severity;       // 53
+///     __u8  comm[16];       // 54
+///     __u8  _pad[2];        // 70
 /// };
 /// ```
 #[repr(C)]
@@ -220,11 +220,11 @@ pub struct StorageEvent {
     pub dev_minor: u32,
     pub bytes: u32,
     pub pid: u32,
-    pub error_code: u16,
+    pub error_code: i32,
     pub opcode: u8,
     pub severity: u8,
     pub comm: [u8; 16],
-    pub _pad: [u8; 4],
+    pub _pad: [u8; 2],
 }
 
 impl StorageEvent {
@@ -295,7 +295,7 @@ fn format_ipv6(b: &[u8; 16]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::mem::size_of;
+    use std::mem::{offset_of, size_of};
 
     #[test]
     fn network_event_size() {
@@ -310,6 +310,23 @@ mod tests {
     #[test]
     fn storage_event_size() {
         assert_eq!(size_of::<StorageEvent>(), 72);
+    }
+
+    #[test]
+    fn storage_event_offsets() {
+        assert_eq!(offset_of!(StorageEvent, timestamp_ns), 0);
+        assert_eq!(offset_of!(StorageEvent, latency_ns), 8);
+        assert_eq!(offset_of!(StorageEvent, cgroup_id), 16);
+        assert_eq!(offset_of!(StorageEvent, sector), 24);
+        assert_eq!(offset_of!(StorageEvent, dev_major), 32);
+        assert_eq!(offset_of!(StorageEvent, dev_minor), 36);
+        assert_eq!(offset_of!(StorageEvent, bytes), 40);
+        assert_eq!(offset_of!(StorageEvent, pid), 44);
+        assert_eq!(offset_of!(StorageEvent, error_code), 48);
+        assert_eq!(offset_of!(StorageEvent, opcode), 52);
+        assert_eq!(offset_of!(StorageEvent, severity), 53);
+        assert_eq!(offset_of!(StorageEvent, comm), 54);
+        assert_eq!(offset_of!(StorageEvent, _pad), 70);
     }
 
     #[test]
