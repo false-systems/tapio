@@ -1,4 +1,4 @@
 pub mod file;
-pub mod grafana;
-pub mod polku;
+pub mod http;
+pub mod otlp;
 pub mod stdout;

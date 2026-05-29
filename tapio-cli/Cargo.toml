@@ -1,5 +1,6 @@
 [package]
 name = "tapio-cli"
+description = "Tapio CLI: inspect locally recorded kernel anomaly events (status, watch, recent, health) and MCP server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -22,3 +22,13 @@ impl Sink for StdoutSink {
         "stdout"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn name_is_stable() {
+        assert_eq!(StdoutSink.name(), "stdout");
+    }
+}
