@@ -34,11 +34,11 @@ struct storage_event {
 	__u32 dev_minor;      // offset 36
 	__u32 bytes;          // offset 40
 	__u32 pid;            // offset 44
-	__u16 error_code;     // offset 48
-	__u8  opcode;         // offset 50
-	__u8  severity;       // offset 51
-	__u8  comm[16];       // offset 52
-	__u8  _pad[4];        // offset 68, explicit padding to 72 bytes
+	__s32 error_code;     // offset 48
+	__u8  opcode;         // offset 52
+	__u8  severity;       // offset 53
+	__u8  comm[16];       // offset 54
+	__u8  _pad[2];        // offset 70, explicit padding to 72 bytes
 };
 
 // Key for tracking inflight I/O operations
@@ -130,7 +130,7 @@ int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
 	struct io_value *val;
 	__u64 now_ns;
 	__u64 latency_ns;
-	__u16 error_code;
+	__s32 error_code;
 	__u8 severity;
 
 	// Extract device info
