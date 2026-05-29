@@ -236,7 +236,7 @@ fn op_name(opcode: u8) -> &'static str {
 mod tests {
     use super::*;
 
-    fn make_event(error_code: u16, severity: u8, latency_ns: u64) -> StorageEvent {
+    fn make_event(error_code: i32, severity: u8, latency_ns: u64) -> StorageEvent {
         let mut evt = unsafe { std::mem::zeroed::<StorageEvent>() };
         evt.error_code = error_code;
         evt.severity = severity;
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn classify_io_error() {
-        let evt = make_event(5, STORAGE_SEVERITY_CRITICAL, 0);
+        let evt = make_event(-5, STORAGE_SEVERITY_CRITICAL, 0);
         let a = classify(&evt).expect("should classify error");
         assert_eq!(a.event_type, STORAGE_IO_ERROR);
         assert!(matches!(a.severity, Severity::Critical));
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn build_occurrence_valid() {
-        let evt = make_event(5, STORAGE_SEVERITY_CRITICAL, 0);
+        let evt = make_event(-5, STORAGE_SEVERITY_CRITICAL, 0);
         let a = classify(&evt).unwrap();
         let occ = build_occurrence(&evt, &a, 0);
         assert!(occ.validate().is_ok());
@@ -284,5 +284,6 @@ mod tests {
         let data = occ.data.unwrap();
         assert_eq!(data["comm"], "psql");
         assert_eq!(data["opcode"], "write");
+        assert_eq!(data["error_code"], -5);
     }
 }
