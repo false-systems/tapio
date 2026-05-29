@@ -33,14 +33,14 @@ impl Write for BrokenPipeGuard {
 #[command(
     name = "tapio-agent",
     version,
-    about = "eBPF kernel observer for Kubernetes"
+    about = "Opinionated eBPF observer for Linux and Kubernetes — emits structured kernel anomaly events"
 )]
 struct Args {
     /// Path to TOML config file
     #[arg(long, default_value = "/etc/tapio/tapio.toml")]
     config: String,
 
-    /// Output sinks (stdout, file, polku). Can be specified multiple times.
+    /// Output sinks (stdout, file, http, otlp). Can be specified multiple times.
     #[arg(long = "sink", default_values_t = vec!["stdout".to_string()])]
     sinks: Vec<String>,
 
@@ -52,9 +52,9 @@ struct Args {
     #[arg(long, default_value = ".tapio/occurrences")]
     data_dir: String,
 
-    /// POLKU endpoint for polku sink (e.g. http://localhost:8765)
+    /// Endpoint for the http sink — JSON POST ingest (e.g. http://localhost:8765)
     #[arg(long, default_value = "http://localhost:8765")]
-    polku_endpoint: String,
+    http_endpoint: String,
 }
 
 fn create_sinks(
@@ -66,16 +66,16 @@ fn create_sinks(
         match name.as_str() {
             "stdout" => sinks.push(Box::new(sink::stdout::StdoutSink)),
             "file" => sinks.push(Box::new(sink::file::FileSink::new(&args.data_dir))),
-            "polku" => sinks.push(Box::new(sink::polku::PolkuSink::new(
-                &args.polku_endpoint,
+            "http" => sinks.push(Box::new(sink::http::HttpSink::new(
+                &args.http_endpoint,
                 100,
                 std::time::Duration::from_secs(1),
             ))),
-            "grafana" => sinks.push(Box::new(sink::grafana::GrafanaSink::new(
-                &cfg.grafana.endpoint,
-                cfg.grafana.auth_header.clone(),
-                cfg.grafana.batch_size,
-                std::time::Duration::from_secs(cfg.grafana.flush_interval_secs),
+            "otlp" => sinks.push(Box::new(sink::otlp::OtlpSink::new(
+                &cfg.otlp.endpoint,
+                cfg.otlp.auth_header.clone(),
+                cfg.otlp.batch_size,
+                std::time::Duration::from_secs(cfg.otlp.flush_interval_secs),
             ))),
             other => anyhow::bail!("unknown sink: {other}"),
         }

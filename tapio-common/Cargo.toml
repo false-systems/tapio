@@ -1,5 +1,6 @@
 [package]
 name = "tapio-common"
+description = "Shared types for Tapio: kernel.* anomaly events, occurrence schema, and the Sink trait"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

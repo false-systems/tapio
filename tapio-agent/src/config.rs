@@ -4,15 +4,14 @@ use std::path::Path;
 /// Agent configuration loaded from TOML file.
 /// CLI flags take precedence — fields here are all optional so missing values
 /// fall through to CLI defaults.
-/// Agent configuration loaded from TOML file.
 /// Operational paths (sinks, ebpf_dir, data_dir) are CLI-only flags.
-/// The config file controls thresholds, metrics, and grafana settings.
+/// The config file controls thresholds, metrics, and otlp sink settings.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub thresholds: Thresholds,
     pub metrics: Metrics,
-    pub grafana: Grafana,
+    pub otlp: Otlp,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,16 +67,17 @@ impl Default for Metrics {
     }
 }
 
+/// OTLP/HTTP sink settings. Targets any OTLP-compatible logs collector.
 #[derive(Debug, Deserialize)]
 #[serde(default)]
-pub struct Grafana {
+pub struct Otlp {
     pub endpoint: String,
     pub auth_header: Option<String>,
     pub batch_size: usize,
     pub flush_interval_secs: u64,
 }
 
-impl Default for Grafana {
+impl Default for Otlp {
     fn default() -> Self {
         Self {
             endpoint: "http://localhost:4318".into(),
@@ -93,7 +93,7 @@ fn validate_auth_header(header: &Option<String>) -> anyhow::Result<()> {
     if let Some(value) = header
         && value.contains(&['\r', '\n', '\0'][..])
     {
-        anyhow::bail!("grafana.auth_header contains invalid characters (CR/LF/null)");
+        anyhow::bail!("otlp.auth_header contains invalid characters (CR/LF/null)");
     }
     Ok(())
 }
@@ -108,7 +108,7 @@ pub fn load(path: &Path) -> anyhow::Result<Config> {
     let content = std::fs::read_to_string(path)?;
     let config: Config = toml::from_str(&content)?;
 
-    validate_auth_header(&config.grafana.auth_header)?;
+    validate_auth_header(&config.otlp.auth_header)?;
 
     tracing::info!(path = %path.display(), "loaded config");
     Ok(config)

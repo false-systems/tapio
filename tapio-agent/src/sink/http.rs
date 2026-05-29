@@ -4,17 +4,17 @@ use std::time::{Duration, Instant};
 use tapio_common::occurrence::Occurrence;
 use tapio_common::sink::{Sink, SinkError};
 
-/// Sink that batches occurrences and POSTs them to POLKU's HTTP ingest endpoint.
+/// Sink that batches anomaly events and POSTs them as JSON to an HTTP endpoint.
 /// Buffers events and flushes when buffer_size is reached or flush_interval elapses.
-/// On send failure, batch is lost (logged). Exponential backoff prevents tight retry loops.
+/// On send failure, the batch is lost (logged). Exponential backoff prevents tight retry loops.
 /// If the buffer exceeds 10x buffer_size, drops oldest events.
-pub struct PolkuSink {
+pub struct HttpSink {
     endpoint: String,
     buffer_size: usize,
-    inner: Mutex<PolkuInner>,
+    inner: Mutex<HttpInner>,
 }
 
-struct PolkuInner {
+struct HttpInner {
     buffer: Vec<Occurrence>,
     flush_interval: Duration,
     last_flush: Instant,
@@ -26,13 +26,13 @@ struct PolkuInner {
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
-impl PolkuSink {
+impl HttpSink {
     pub fn new(endpoint: &str, buffer_size: usize, flush_interval: Duration) -> Self {
         let now = Instant::now();
         Self {
             endpoint: endpoint.to_string(),
             buffer_size,
-            inner: Mutex::new(PolkuInner {
+            inner: Mutex::new(HttpInner {
                 buffer: Vec::with_capacity(buffer_size),
                 flush_interval,
                 last_flush: now,
@@ -44,7 +44,7 @@ impl PolkuSink {
     }
 }
 
-impl Sink for PolkuSink {
+impl Sink for HttpSink {
     fn send(&self, occurrence: &Occurrence) -> Result<(), SinkError> {
         let batch = {
             let mut inner = self
@@ -58,7 +58,7 @@ impl Sink for PolkuSink {
                 inner.buffer.drain(..drain_count);
                 tracing::warn!(
                     dropped = drain_count,
-                    "polku sink buffer overflow, dropped oldest events"
+                    "http sink buffer overflow, dropped oldest events"
                 );
             }
 
@@ -106,11 +106,11 @@ impl Sink for PolkuSink {
     }
 
     fn name(&self) -> &str {
-        "polku"
+        "http"
     }
 }
 
-impl PolkuSink {
+impl HttpSink {
     /// POST batch to endpoint. On failure, batch is lost (logged + backoff updated).
     fn post_batch(&self, batch: Vec<Occurrence>) {
         if batch.is_empty() {
@@ -120,14 +120,14 @@ impl PolkuSink {
         let payload = match serde_json::to_vec(&batch) {
             Ok(p) => p,
             Err(e) => {
-                tracing::warn!(error = %e, "polku sink: failed to serialize batch");
+                tracing::warn!(error = %e, "http sink: failed to serialize batch");
                 return;
             }
         };
 
         match post_json(&self.endpoint, &payload) {
             Ok(()) => {
-                tracing::debug!(count = batch.len(), "polku sink: batch sent");
+                tracing::debug!(count = batch.len(), "http sink: batch sent");
                 if let Ok(mut inner) = self.inner.lock() {
                     inner.backoff = INITIAL_BACKOFF;
                 }
@@ -141,7 +141,7 @@ impl PolkuSink {
                 tracing::warn!(
                     error = %e,
                     dropped = batch.len(),
-                    "polku sink: send failed, batch dropped"
+                    "http sink: send failed, batch dropped"
                 );
             }
         }
@@ -187,10 +187,33 @@ fn post_json(endpoint: &str, body: &[u8]) -> Result<(), String> {
 
     if !status_line.starts_with("HTTP/1.1 2") && !status_line.starts_with("HTTP/1.0 2") {
         return Err(format!(
-            "POLKU returned non-2xx: {}",
+            "endpoint returned non-2xx: {}",
             status_line.lines().next().unwrap_or("empty")
         ));
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn name_is_stable() {
+        let sink = HttpSink::new("http://localhost:8765", 100, Duration::from_secs(1));
+        assert_eq!(sink.name(), "http");
+    }
+
+    #[test]
+    fn buffers_below_batch_size_without_sending() {
+        let sink = HttpSink::new("http://127.0.0.1:1", 100, Duration::from_secs(3600));
+        let occ = Occurrence::new(
+            "kernel.network.rst_storm",
+            tapio_common::occurrence::Severity::Error,
+            tapio_common::occurrence::Outcome::Failure,
+        );
+        // Below batch size and inside flush interval — should buffer, never attempt I/O.
+        assert!(sink.send(&occ).is_ok());
+    }
 }
