@@ -1,8 +1,8 @@
-//! TAPIO event types in the kernel.* namespace.
-//! These are the anomalies TAPIO detects at the eBPF edge.
+//! Tapio anomaly types in the kernel.* namespace.
+//! Each constant names a specific failure pattern Tapio detects close to the node.
+//! These are stable product concepts, not arbitrary event labels.
 
-/// Hierarchical event type following FALSE Protocol conventions.
-/// Format: kernel.<observer>.<anomaly>
+/// Hierarchical event type. Format: kernel.<observer>.<anomaly>
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct EventType(pub String);
 

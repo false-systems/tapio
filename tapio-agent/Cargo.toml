@@ -1,5 +1,6 @@
 [package]
 name = "tapio-agent"
+description = "Tapio agent: loads eBPF programs, filters kernel anomalies, enriches with Kubernetes context, emits to sinks (Linux-only)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
