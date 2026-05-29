@@ -134,9 +134,11 @@ fn occurrence_to_log_record(occ: &Occurrence) -> LogRecord {
     }
 }
 
-// ── GrafanaSink ──
+// ── OtlpSink ──
 
-pub struct GrafanaSink {
+/// Exports anomaly events as OTLP/HTTP logs (protobuf + gzip) to any
+/// OTLP-compatible collector. Batches and retries with backoff.
+pub struct OtlpSink {
     endpoint: String,
     auth_header: Option<String>,
     batch_size: usize,
@@ -150,7 +152,7 @@ struct SinkInner {
     last_flush: Instant,
 }
 
-impl GrafanaSink {
+impl OtlpSink {
     pub fn new(
         endpoint: &str,
         auth_header: Option<String>,
@@ -312,7 +314,7 @@ impl GrafanaSink {
 /// Max buffer entries before oldest are dropped (10x batch_size).
 const MAX_BUFFER_MULTIPLIER: usize = 10;
 
-impl Sink for GrafanaSink {
+impl Sink for OtlpSink {
     fn send(&self, occurrence: &Occurrence) -> Result<(), SinkError> {
         let batch = {
             let mut inner = self
@@ -327,7 +329,7 @@ impl Sink for GrafanaSink {
                 inner.buffer.drain(..drain_count);
                 tracing::warn!(
                     dropped = drain_count,
-                    "grafana sink buffer overflow, dropped oldest events"
+                    "otlp sink buffer overflow, dropped oldest events"
                 );
             }
 
@@ -348,7 +350,7 @@ impl Sink for GrafanaSink {
         if let Some(batch) = batch
             && let Err(e) = self.export_batch(batch)
         {
-            tracing::warn!(error = %e, "grafana sink: batch export failed, data dropped");
+            tracing::warn!(error = %e, "otlp sink: batch export failed, data dropped");
         }
 
         Ok(())
@@ -369,13 +371,13 @@ impl Sink for GrafanaSink {
         }; // lock released
 
         if let Err(e) = self.export_batch(batch) {
-            tracing::warn!(error = %e, "grafana sink: flush export failed, data dropped");
+            tracing::warn!(error = %e, "otlp sink: flush export failed, data dropped");
         }
         Ok(())
     }
 
     fn name(&self) -> &str {
-        "grafana"
+        "otlp"
     }
 }
 

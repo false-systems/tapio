@@ -6,7 +6,11 @@ use clap::{Parser, Subcommand};
 use tapio_common::occurrence::{Occurrence, Severity};
 
 #[derive(Parser)]
-#[command(name = "tapio", version, about = "Kernel eyes for Kubernetes")]
+#[command(
+    name = "tapio",
+    version,
+    about = "Inspect kernel anomaly events from the Tapio eBPF observer"
+)]
 struct Cli {
     /// Data directory for file sink output
     #[arg(long, env = "TAPIO_DATA_DIR", default_value = ".tapio/occurrences")]
@@ -781,5 +785,42 @@ mod tests {
     fn health_status_critical_by_severity() {
         assert_eq!(health_status(3, 3), "critical");
         assert_eq!(health_status(5, 10), "critical");
+    }
+
+    #[test]
+    fn load_occurrences_reads_from_configured_dir() {
+        use tapio_common::occurrence::Outcome;
+
+        let occ = Occurrence::new("kernel.storage.io_error", Severity::Error, Outcome::Failure)
+            .with_error("EIO", "I/O error on sda");
+        let dir = std::env::temp_dir().join(format!("tapio-cli-load-{}", occ.id));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(format!("{}.json", occ.id)),
+            serde_json::to_vec(&occ).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_occurrences(&dir).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].occurrence_type, "kernel.storage.io_error");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn missing_data_dir_returns_no_occurrences() {
+        let dir = std::env::temp_dir().join("tapio-cli-does-not-exist-zzz");
+        let loaded = load_occurrences(&dir).unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn data_dir_honors_tapio_data_dir_env() {
+        // SAFETY: single test owns this env var; no other test reads TAPIO_DATA_DIR.
+        unsafe { std::env::set_var("TAPIO_DATA_DIR", "/tmp/tapio-env-dir") };
+        let cli = Cli::try_parse_from(["tapio", "status"]).unwrap();
+        assert_eq!(cli.data_dir, PathBuf::from("/tmp/tapio-env-dir"));
+        unsafe { std::env::remove_var("TAPIO_DATA_DIR") };
     }
 }

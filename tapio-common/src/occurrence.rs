@@ -1,7 +1,8 @@
-/// FALSE Protocol Occurrence for TAPIO.
+/// A structured anomaly event emitted by Tapio.
 ///
-/// Wire format matches POLKU's OccurrenceIngestor exactly.
-/// TAPIO provides context, not reasoning — AI agents and AHTI fill reasoning blocks.
+/// In JSON output this is a FALSE Protocol-compatible occurrence document.
+/// Tapio fills factual fields only (type, severity, outcome, error, context, data).
+/// Reasoning and remediation are left empty — those belong to downstream systems.
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
@@ -48,7 +49,8 @@ pub enum Outcome {
 }
 
 /// Error block — factual kernel data.
-/// TAPIO fills code + message. Fields like what_failed exist for POLKU schema compat.
+/// Tapio fills code + message. The remaining fields exist for schema compatibility
+/// and are left empty — interpreting failures is a downstream concern.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OccurrenceError {
     pub code: String,
@@ -63,7 +65,7 @@ pub struct OccurrenceError {
     pub suggested_fix: Option<String>,
 }
 
-/// Reasoning block — TAPIO never fills this. Exists for schema compat.
+/// Reasoning block — Tapio never fills this. Exists for schema compat.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Reasoning {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,7 +80,7 @@ pub struct Reasoning {
     pub patterns_matched: Option<Vec<String>>,
 }
 
-/// History block — TAPIO never fills this. Exists for schema compat.
+/// History block — Tapio never fills this. Exists for schema compat.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct History {
     #[serde(skip_serializing_if = "Option::is_none")]
