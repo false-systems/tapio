@@ -1,7 +1,7 @@
 #ifndef __TAPIO_CONN_TRACKING_H__
 #define __TAPIO_CONN_TRACKING_H__
 
-// Shared connection tracking library for all Tapio observers
+// Shared connection key helpers for Tapio observers
 // Reusable across network, dns, http observers
 // Based on Cilium's layered library approach and Brendan Gregg patterns
 
@@ -47,14 +47,5 @@ static __always_inline void fill_conn_key_v6(
 	key->dport = dport;
 	key->family = AF_INET6;
 }
-
-// Per-connection retransmit/RST tracking (stored in LRU map)
-// Retransmit rate is not tracked at BPF level — no hook counts all TCP segments.
-struct retransmit_stats {
-	__u64 retransmits;        // Number of retransmissions
-	__u64 last_retransmit_ns; // Timestamp of last retransmit
-	__u8  rst_received;       // 1 if RST packet received, 0 otherwise
-	__u8  padding[7];         // Align to 8 bytes
-};
 
 #endif /* __TAPIO_CONN_TRACKING_H__ */
