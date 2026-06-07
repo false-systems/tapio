@@ -20,7 +20,8 @@ cargo test -p tapio-common                     # test single crate
 cargo test -p tapio-common -- test_name        # run single test
 cargo clippy --workspace --all-targets -- -D warnings   # lint
 cargo fmt --check                              # format check
-cargo build --release                          # release build (LTO + strip, ~8MB)
+cargo build --release -p tapio-agent           # Linux-only agent (~8MB, LTO + strip + opt-level=z + panic=abort)
+cargo build --release -p tapio-cli             # CLI — builds on any platform (no eBPF dependency)
 
 # CI (via sykli — requires cargo +nightly -Zscript)
 sykli                                          # run full pipeline: fmt → clippy → test → build
@@ -61,7 +62,9 @@ clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I ebpf/headers \
   -c ebpf/network_monitor.c -o /opt/tapio/ebpf/network_monitor.o
 ```
 
-Requires kernel 5.8+ and capabilities: `CAP_BPF`, `CAP_PERFMON`, `CAP_NET_ADMIN`. The agent runs as a privileged DaemonSet.
+Use `-D__TARGET_ARCH_arm64` instead of `-D__TARGET_ARCH_x86` for arm64 nodes. All four `.o` files are required at runtime. The BPF/userspace boundary uses CO-RE (`preserve_access_index` + `bpf_core_read`) for kernel struct field access across versions; tracepoint argument structs rely on stable kernel ABI layouts.
+
+Requires kernel 5.8+ (with BTF) and capabilities: `CAP_BPF`, `CAP_PERFMON`, `CAP_NET_ADMIN`. The agent runs as a privileged DaemonSet.
 
 ### Event flow
 
