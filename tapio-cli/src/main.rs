@@ -176,14 +176,17 @@ async fn cmd_watch(data_dir: &Path, json: bool, filters: &[&str]) -> anyhow::Res
                 };
                 let mut new_occs = Vec::new();
                 for entry in entries {
-                    let Ok(entry) = entry else { continue };
+                    let Ok(entry) = entry else {
+                        eprintln!("warning: failed to read occurrence directory entry");
+                        continue;
+                    };
                     if !seen.insert(entry.file_name()) { continue; }
                     let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "json")
-                        && let Ok(data) = std::fs::read_to_string(&path)
-                        && let Ok(occ) = serde_json::from_str::<Occurrence>(&data)
-                    {
-                        new_occs.push(occ);
+                    if path.extension().is_some_and(|e| e == "json") {
+                        match read_occurrence_file(&path) {
+                            Ok(occ) => new_occs.push(occ),
+                            Err(e) => eprintln!("warning: skipped {}: {e}", path.display()),
+                        }
                     }
                 }
                 new_occs.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
@@ -610,16 +613,30 @@ fn load_occurrences(data_dir: &Path) -> anyhow::Result<Vec<Occurrence>> {
         return Ok(occurrences);
     }
     for entry in std::fs::read_dir(data_dir)? {
-        let entry = entry?;
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                eprintln!("warning: failed to read occurrence directory entry: {e}");
+                continue;
+            }
+        };
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "json")
-            && let Ok(data) = std::fs::read_to_string(&path)
-            && let Ok(occ) = serde_json::from_str::<Occurrence>(&data)
-        {
-            occurrences.push(occ);
+        if path.extension().is_some_and(|e| e == "json") {
+            match read_occurrence_file(&path) {
+                Ok(occ) => occurrences.push(occ),
+                Err(e) => eprintln!("warning: skipped {}: {e}", path.display()),
+            }
         }
     }
     Ok(occurrences)
+}
+
+fn read_occurrence_file(path: &Path) -> anyhow::Result<Occurrence> {
+    let data = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("failed to read occurrence file: {e}"))?;
+    let occ = serde_json::from_str::<Occurrence>(&data)
+        .map_err(|e| anyhow::anyhow!("failed to parse occurrence JSON: {e}"))?;
+    Ok(occ)
 }
 
 fn observer_category(occurrence_type: &str) -> &str {
@@ -809,6 +826,32 @@ mod tests {
     }
 
     #[test]
+    fn load_occurrences_skips_corrupt_json_with_warning_path() {
+        let dir = std::env::temp_dir().join(format!("tapio-cli-corrupt-{}", ulid_like_test_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("bad.json"), b"{not-json").unwrap();
+
+        let loaded = load_occurrences(&dir).unwrap();
+        assert!(loaded.is_empty());
+        assert!(
+            read_occurrence_file(&dir.join("bad.json"))
+                .unwrap_err()
+                .to_string()
+                .contains("failed to parse occurrence JSON")
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_occurrence_file_reports_missing_file() {
+        let path =
+            std::env::temp_dir().join(format!("tapio-cli-missing-{}.json", ulid_like_test_id()));
+        let err = read_occurrence_file(&path).unwrap_err();
+        assert!(err.to_string().contains("failed to read occurrence file"));
+    }
+
+    #[test]
     fn missing_data_dir_returns_no_occurrences() {
         let dir = std::env::temp_dir().join("tapio-cli-does-not-exist-zzz");
         let loaded = load_occurrences(&dir).unwrap();
@@ -822,5 +865,15 @@ mod tests {
         let cli = Cli::try_parse_from(["tapio", "status"]).unwrap();
         assert_eq!(cli.data_dir, PathBuf::from("/tmp/tapio-env-dir"));
         unsafe { std::env::remove_var("TAPIO_DATA_DIR") };
+    }
+
+    fn ulid_like_test_id() -> String {
+        format!(
+            "{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )
     }
 }
