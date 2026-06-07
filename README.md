@@ -59,7 +59,7 @@ Tapio is organized around four observers, each watching a specific slice of kern
 
 | Observer | Kernel sources | Anomalies |
 |----------|----------------|-----------|
-| Network | `inet_sock_set_state`, `tcp_receive_reset`, `tcp_retransmit_skb` | `kernel.network.connection_refused`, `kernel.network.connection_timeout`, `kernel.network.retransmit_spike`, `kernel.network.rtt_degradation`, `kernel.network.rst_storm` |
+| Network | `inet_sock_set_state`, `tcp_receive_reset`, `tcp_retransmit_skb` | `kernel.network.connection_refused`, `kernel.network.connection_timeout`, `kernel.network.retransmit_spike`, `kernel.network.rtt_degradation` |
 | Container | `sched_process_exit`, `oom/mark_victim` | `kernel.container.oom_kill`, `kernel.container.abnormal_exit` |
 | Storage | `block_rq_issue`, `block_rq_complete` | `kernel.storage.io_error`, `kernel.storage.latency_spike` |
 | Node PMC | `perf_event` counters: cycles, instructions, stalls | `kernel.node.cpu_stall`, `kernel.node.memory_pressure`, `kernel.node.ipc_degradation` |
@@ -117,7 +117,7 @@ Tapio filters at two levels, choosing the cheapest place to drop noise.
 |----------|------------------|----------|
 | Storage | BPF | Only I/O errors and latency spikes cross into userspace. |
 | Container | BPF | Only abnormal exits cross: non-zero exit code, terminating signal, or OOM kill. |
-| Network | Rust | BPF emits state transitions and network signals; Rust classifies retransmit spikes, RTT degradation, reset storms, connection failures, and timeouts. |
+| Network | Rust | BPF emits state transitions and network signals; Rust classifies retransmit spikes, RTT degradation, connection failures, and timeouts. |
 | Node PMC | Rust | BPF samples performance counters; Rust detects IPC degradation, CPU stalls, and memory pressure. |
 
 Thresholds for the Rust-side and BPF-side detectors (RTT spike ratio, I/O latency, PMC stall percentages, IPC) are tunable via the TOML config file — see [Agent](#agent).
