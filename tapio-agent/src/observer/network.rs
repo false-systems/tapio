@@ -469,6 +469,41 @@ mod tests {
     }
 
     #[test]
+    fn simulated_kernel_event_parses_to_occurrence_and_file_sink() {
+        use crate::sink::file::FileSink;
+        use tapio_common::occurrence::Occurrence;
+        use tapio_common::sink::Sink;
+
+        let event = make_retransmit_event(7, 12);
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                &event as *const NetworkEvent as *const u8,
+                std::mem::size_of::<NetworkEvent>(),
+            )
+        };
+        let parsed = unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const NetworkEvent) };
+        let anomaly = classify(&parsed).expect("network anomaly");
+        let occurrence = build_occurrence(&parsed, &anomaly);
+        assert!(occurrence.validate().is_ok());
+
+        let dir = std::env::temp_dir().join(format!("tapio-e2e-{}", occurrence.id));
+        let sink = FileSink::new(&dir);
+        sink.send(&occurrence).expect("file sink write");
+
+        let path = dir.join(format!("{}.json", occurrence.id));
+        let stored: Occurrence =
+            serde_json::from_slice(&std::fs::read(&path).expect("stored occurrence")).unwrap();
+        assert_eq!(stored.occurrence_type, NETWORK_RETRANSMIT_SPIKE);
+        assert_eq!(
+            stored.error.as_ref().map(|e| e.code.as_str()),
+            Some("RETRANSMIT")
+        );
+        assert_eq!(stored.data.as_ref().unwrap()["total_retrans"], 7);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn tcp_state_names() {
         assert_eq!(tcp_state_name(TCP_ESTABLISHED), "ESTABLISHED");
         assert_eq!(tcp_state_name(TCP_CLOSE), "CLOSE");

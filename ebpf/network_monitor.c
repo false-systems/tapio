@@ -162,9 +162,7 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 	}
 
 	// RTT tracking for ESTABLISHED connections with valid RTT
-	metric_inc(METRIC_NETWORK_EVENTS_TOTAL);
 	if (args->newstate == TCP_ESTABLISHED && rtt_us > 0) {
-		metric_inc(METRIC_NETWORK_RTT_SAMPLES_TOTAL);
 		struct rtt_baseline *baseline = bpf_map_lookup_elem(&baseline_rtt, &key);
 
 		if (!baseline) {
@@ -189,7 +187,6 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 						baseline->sample_count = 0;
 						baseline->baseline_us = 0;
 						baseline->state = RTT_STATE_LEARNING;
-						metric_inc(METRIC_NETWORK_BASELINE_REJECTED);
 					} else {
 						baseline->state = RTT_STATE_STABLE;
 					}
@@ -237,7 +234,6 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 						evt->rtt_current_ms = current_ms > 65535 ? 65535 : (__u16)current_ms;
 
 						bpf_ringbuf_submit(evt, 0);
-						metric_inc(METRIC_NETWORK_RTT_SPIKES_TOTAL);
 					}
 				}
 			}
@@ -357,7 +353,6 @@ int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
 
 submit_rst:
 	bpf_ringbuf_submit(evt, 0);
-	metric_inc(METRIC_NETWORK_RST_TOTAL);
 
 	return 0;
 }
@@ -460,7 +455,6 @@ int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 	evt->total_retrans = total_retrans > 65535 ? 65535 : (__u16)total_retrans;
 	evt->snd_cwnd = snd_cwnd > 65535 ? 65535 : (__u16)snd_cwnd;
 	bpf_ringbuf_submit(evt, 0);
-	metric_inc(METRIC_NETWORK_RETRANSMITS_TOTAL);
 
 	return 0;
 }
