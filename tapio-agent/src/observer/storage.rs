@@ -90,11 +90,11 @@ pub async fn run(
     metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    use aya::{Ebpf, maps::RingBuf, programs::TracePoint};
+    use aya::{maps::RingBuf, programs::TracePoint};
     use std::time::Duration;
 
     tracing::info!(path = ebpf_path, "loading storage eBPF program");
-    let mut ebpf = Ebpf::load_file(ebpf_path)?;
+    let mut ebpf = super::load_ebpf(ebpf_path, "storage")?;
 
     // Write thresholds to eBPF config map (indices match storage_monitor.c)
     if let Some(config_map) = ebpf.map_mut("config") {
@@ -116,8 +116,11 @@ pub async fn run(
             .program_mut(name)
             .ok_or_else(|| anyhow::anyhow!("program not found: {name}"))?
             .try_into()?;
-        prog.load()?;
-        prog.attach(category, tp)?;
+        prog.load()
+            .map_err(|e| anyhow::anyhow!("failed to load storage program {name}: {e}"))?;
+        prog.attach(category, tp).map_err(|e| {
+            anyhow::anyhow!("failed to attach storage program {name} to {category}/{tp}: {e}")
+        })?;
         tracing::info!(tracepoint = %format!("{category}/{tp}"), "attached");
     }
 
@@ -134,6 +137,7 @@ pub async fn run(
     let mut anomaly_count: u64 = 0;
     let mut tick_count: u64 = 0;
     let mut prev_lost: u64 = 0;
+    let mut prev_ambiguous: u64 = 0;
     let mut malformed_count: u64 = 0;
     let mut enrich_total: u64 = 0;
     let mut enrich_miss: u64 = 0;
@@ -160,6 +164,20 @@ pub async fn run(
                                 "ring buffer events lost"
                             );
                             prev_lost = lost;
+                        }
+                        let ambiguous = super::read_percpu_sum(fd, super::METRIC_STORAGE_AMBIGUOUS_IO, nr_cpus);
+                        if ambiguous > prev_ambiguous {
+                            let delta = ambiguous - prev_ambiguous;
+                            metrics.correlation_drops_total
+                                .with_label_values(&["storage", "ambiguous_inflight_io"])
+                                .inc_by(delta);
+                            tracing::warn!(
+                                observer = "storage",
+                                ambiguous_total = ambiguous,
+                                ambiguous_delta = delta,
+                                "dropped ambiguous storage I/O correlation"
+                            );
+                            prev_ambiguous = ambiguous;
                         }
                     }
                     if enrich_total > 0 {

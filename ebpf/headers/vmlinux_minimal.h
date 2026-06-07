@@ -184,20 +184,22 @@ struct trace_event_raw_block_rq {
 	sector_t sector;          // Starting sector
 	unsigned int nr_sector;   // Number of sectors
 	unsigned int bytes;       // (unused - compute from nr_sector*512)
-	char rwbs[8];             // R=read, W=write, D=discard, etc.
+	unsigned short ioprio;    // I/O priority
+	char rwbs[10];            // R=read, W=write, D=discard, etc.
 	char comm[TASK_COMM_LEN]; // (unused - use bpf_get_current_comm)
+	__u32 cmd;                // __data_loc char[] cmd
 } __attribute__((preserve_access_index));
 
 // Block request completion tracepoint (block_rq_complete)
-// comm field included for struct layout but we use bpf_get_current_comm()
 struct trace_event_raw_block_rq_completion {
 	__u64 __unused;           // Common trace fields (skipped)
 	dev_t dev;                // Device ID
 	sector_t sector;          // Starting sector
 	unsigned int nr_sector;   // Number of sectors
 	int error;                // Error code (0 = success)
-	char rwbs[8];             // R=read, W=write, D=discard, etc.
-	char comm[TASK_COMM_LEN]; // (unused - use bpf_get_current_comm)
+	unsigned short ioprio;    // I/O priority
+	char rwbs[10];            // R=read, W=write, D=discard, etc.
+	__u32 cmd;                // __data_loc char[] cmd
 } __attribute__((preserve_access_index));
 
 #pragma clang diagnostic pop

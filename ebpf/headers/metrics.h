@@ -20,6 +20,7 @@ struct {
 
 // Cross-observer metrics (shared index space)
 #define METRIC_LOST_EVENTS                0  // Ring buffer reserve failures (events dropped)
+#define METRIC_STORAGE_AMBIGUOUS_IO       1  // Storage completions dropped due ambiguous inflight key
 
 // ============================================================================
 // Helper Functions

@@ -11,6 +11,10 @@ const LOST_EVENTS_CHECK_INTERVAL: u64 = 1000;
 #[cfg(target_os = "linux")]
 const METRIC_LOST_EVENTS: u32 = 0;
 
+/// Metric index for ambiguous storage I/O — must match metrics.h.
+#[cfg(target_os = "linux")]
+const METRIC_STORAGE_AMBIGUOUS_IO: u32 = 1;
+
 /// Read a per-CPU u64 metric from a BPF PERCPU_ARRAY map by raw fd.
 /// Returns the sum across all CPUs, or 0 on error.
 #[cfg(target_os = "linux")]
@@ -77,6 +81,16 @@ pub fn metrics_map_fd(ebpf: &aya::Ebpf) -> Option<std::os::fd::RawFd> {
         | aya::maps::Map::XskMap(d) => d,
     };
     Some(data.fd().as_fd().as_raw_fd())
+}
+
+#[cfg(target_os = "linux")]
+pub fn load_ebpf(path: &str, observer: &str) -> anyhow::Result<aya::Ebpf> {
+    use aya::{EbpfLoader, VerifierLogLevel};
+
+    EbpfLoader::new()
+        .verifier_log_level(VerifierLogLevel::VERBOSE | VerifierLogLevel::STATS)
+        .load_file(path)
+        .map_err(|e| anyhow::anyhow!("failed to load {observer} eBPF object {path}: {e}"))
 }
 
 #[cfg(target_os = "linux")]

@@ -97,10 +97,12 @@ Exposes kernel context to AI agents via stdio JSON-RPC 2.0 transport (`tapio mcp
 - **`#[repr(C)]` structs must match C layouts exactly** — a mismatch silently corrupts data. Every struct in `ebpf.rs` has a `size_of` assertion test. Use `std::ptr::read_unaligned` for packed structs to avoid UB
 - **eBPF event structs must zero padding before filling** — `__builtin_memset(evt, 0, sizeof(*evt))` immediately after `bpf_ringbuf_reserve()`. Padding bytes between fields otherwise contain raw kernel-stack contents (an info-leak / CVE-class bug). See `storage_monitor.c:174` for the canonical pattern
 - **Tapio provides context, not reasoning** — facts in events; never fill `possible_causes`, `suggested_fix`, or the reasoning block
+- **Missing beats wrong** — if kernel tracepoints cannot uniquely correlate an event, drop and count it instead of emitting misleading evidence. Storage ambiguous inflight I/O uses `tapio_correlation_drops_total{observer="storage",reason="ambiguous_inflight_io"}`.
 - **Opinionated, not generic** — Tapio emits named anomalies, not arbitrary kernel events; keep the observer/anomaly model selective
 - **aya is Linux-only** — use `cfg(target_os = "linux")` for eBPF code and K8s enricher, keep tapio-common and tapio-cli platform-independent
 - **Lean** — every dependency must justify its existence. Target: <8MB release binary, <10MB RSS
-- **Lean gate** — run `scripts/verify-lean.sh` before release-worthy changes. It checks fmt, clippy, tests, release binary budgets, dependency tree output, and eBPF compilation when clang/libbpf headers are available. Override budgets with `AGENT_MAX_BYTES` and `CLI_MAX_BYTES` only when the size increase is intentional and documented.
+- **Lean gate** — run `scripts/verify-lean.sh` before release-worthy changes. It checks fmt, clippy, tests, release binary budgets, dependency tree output, eBPF object budgets, eBPF map budgets, and eBPF compilation when clang/libbpf headers are available. Override budgets with `AGENT_MAX_BYTES` and `CLI_MAX_BYTES` only when the size increase is intentional and documented; eBPF budget increases must be explicit in `scripts/verify-lean.sh`.
+- **Runtime smoke** — run `scripts/smoke-ebpf-network.sh` on Linux/Lima for kernel behavior changes. It loads the real network observer, triggers a closed-port TCP connect, and checks that userspace emits a network occurrence with the exact destination port.
 
 ## Testing patterns
 

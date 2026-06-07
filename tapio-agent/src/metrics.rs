@@ -15,6 +15,7 @@ pub struct TapioMetrics {
     pub anomalies_total: IntCounterVec,
     pub lost_events_total: IntCounterVec,
     pub malformed_events_total: IntCounterVec,
+    pub correlation_drops_total: IntCounterVec,
     pub drain_cap_total: IntCounterVec,
     pub enrichment_miss_total: IntCounterVec,
 
@@ -67,6 +68,15 @@ impl TapioMetrics {
         )?;
         registry.register(Box::new(malformed_events_total.clone()))?;
 
+        let correlation_drops_total = IntCounterVec::new(
+            Opts::new(
+                "tapio_correlation_drops_total",
+                "Events intentionally dropped because kernel correlation was ambiguous",
+            ),
+            &["observer", "reason"],
+        )?;
+        registry.register(Box::new(correlation_drops_total.clone()))?;
+
         let drain_cap_total = IntCounterVec::new(
             Opts::new(
                 "tapio_drain_cap_total",
@@ -112,6 +122,7 @@ impl TapioMetrics {
             anomalies_total,
             lost_events_total,
             malformed_events_total,
+            correlation_drops_total,
             drain_cap_total,
             enrichment_miss_total,
             sink_writes_total,
@@ -183,6 +194,9 @@ mod tests {
         m.malformed_events_total
             .with_label_values(&["network"])
             .inc();
+        m.correlation_drops_total
+            .with_label_values(&["storage", "ambiguous_inflight_io"])
+            .inc();
         m.k8s_cache_size.set(42);
         m.k8s_reflector_up.set(1);
 
@@ -195,6 +209,7 @@ mod tests {
         assert!(buf.contains("tapio_events_total"));
         assert!(buf.contains("tapio_anomalies_total"));
         assert!(buf.contains("tapio_malformed_events_total"));
+        assert!(buf.contains("tapio_correlation_drops_total"));
         assert!(buf.contains("tapio_k8s_cache_size 42"));
     }
 
@@ -207,6 +222,9 @@ mod tests {
         m.malformed_events_total
             .with_label_values(&["network"])
             .inc_by(2);
+        m.correlation_drops_total
+            .with_label_values(&["storage", "ambiguous_inflight_io"])
+            .inc_by(1);
 
         let encoder = TextEncoder::new();
         let families = m.registry.gather();
@@ -217,5 +235,8 @@ mod tests {
 
         assert!(buf.contains("tapio_lost_events_total{observer=\"network\"} 3"));
         assert!(buf.contains("tapio_malformed_events_total{observer=\"network\"} 2"));
+        assert!(buf.contains(
+            "tapio_correlation_drops_total{observer=\"storage\",reason=\"ambiguous_inflight_io\"} 1"
+        ));
     }
 }

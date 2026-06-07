@@ -164,11 +164,11 @@ pub async fn run(
     metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    use aya::{Ebpf, maps::RingBuf, programs::TracePoint};
+    use aya::{maps::RingBuf, programs::TracePoint};
     use std::time::Duration;
 
     tracing::info!(path = ebpf_path, "loading network eBPF program");
-    let mut ebpf = Ebpf::load_file(ebpf_path)?;
+    let mut ebpf = super::load_ebpf(ebpf_path, "network")?;
 
     // Write thresholds to eBPF config map (indices match network_monitor.c)
     if let Some(config_map) = ebpf.map_mut("config") {
@@ -191,8 +191,11 @@ pub async fn run(
             .program_mut(name)
             .ok_or_else(|| anyhow::anyhow!("program not found: {name}"))?
             .try_into()?;
-        prog.load()?;
-        prog.attach(category, tp)?;
+        prog.load()
+            .map_err(|e| anyhow::anyhow!("failed to load network program {name}: {e}"))?;
+        prog.attach(category, tp).map_err(|e| {
+            anyhow::anyhow!("failed to attach network program {name} to {category}/{tp}: {e}")
+        })?;
         tracing::info!(tracepoint = %format!("{category}/{tp}"), "attached");
     }
 

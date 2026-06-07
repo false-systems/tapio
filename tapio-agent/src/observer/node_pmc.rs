@@ -241,14 +241,13 @@ pub async fn run(
     metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    use aya::Ebpf;
     use aya::maps::RingBuf;
     use aya::programs::perf_event::{PerfEvent, PerfEventScope, PerfTypeId, SamplePolicy};
     use std::os::fd::OwnedFd;
     use std::time::Duration;
 
     tracing::info!(path = ebpf_path, "loading PMC eBPF program");
-    let mut ebpf = Ebpf::load_file(ebpf_path)?;
+    let mut ebpf = super::load_ebpf(ebpf_path, "pmc")?;
 
     let num_cpus = aya::util::nr_cpus().map_err(|(msg, e)| anyhow::anyhow!("{msg}: {e}"))? as u32;
     tracing::info!(num_cpus, "detected CPUs for PMC");
@@ -299,7 +298,8 @@ pub async fn run(
         .program_mut("sample_pmc")
         .ok_or_else(|| anyhow::anyhow!("program not found: sample_pmc"))?
         .try_into()?;
-    prog.load()?;
+    prog.load()
+        .map_err(|e| anyhow::anyhow!("failed to load PMC program sample_pmc: {e}"))?;
 
     for cpu in 0..num_cpus {
         prog.attach(
@@ -308,7 +308,10 @@ pub async fn run(
             PerfEventScope::AllProcessesOneCpu { cpu },
             SamplePolicy::Frequency(10),
             false,
-        )?;
+        )
+        .map_err(|e| {
+            anyhow::anyhow!("failed to attach PMC program sample_pmc to cpu {cpu}: {e}")
+        })?;
     }
 
     let metrics_fd = super::metrics_map_fd(&ebpf);
