@@ -196,8 +196,11 @@ impl Occurrence {
         }
         if self.occurrence_type.is_empty() {
             errors.push("type is required".into());
-        } else if !self.occurrence_type.contains('.') {
-            errors.push("type must have at least 2 dot-separated segments".into());
+        } else {
+            let segments: Vec<&str> = self.occurrence_type.split('.').collect();
+            if segments.len() != 3 || segments.iter().any(|segment| segment.is_empty()) {
+                errors.push("type must have exactly 3 non-empty dot-separated segments".into());
+            }
         }
         if self.protocol_version.is_empty() {
             errors.push("protocol_version is required".into());
@@ -259,12 +262,12 @@ mod tests {
     #[test]
     fn type_field_serializes_as_type_not_occurrence_type() {
         let occ = Occurrence::new(
-            "kernel.network.rst_storm",
+            "kernel.network.connection_refused",
             Severity::Error,
             Outcome::Failure,
         );
         let json = serde_json::to_string(&occ).unwrap();
-        assert!(json.contains("\"type\":\"kernel.network.rst_storm\""));
+        assert!(json.contains("\"type\":\"kernel.network.connection_refused\""));
         assert!(!json.contains("occurrence_type"));
     }
 
@@ -295,6 +298,18 @@ mod tests {
     #[test]
     fn validate_catches_bad_type_format() {
         let occ = Occurrence::new("kernel", Severity::Info, Outcome::Success);
+        assert!(occ.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_two_segment_type() {
+        let occ = Occurrence::new("kernel.network", Severity::Info, Outcome::Success);
+        assert!(occ.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_empty_type_segment() {
+        let occ = Occurrence::new("kernel..network", Severity::Info, Outcome::Success);
         assert!(occ.validate().is_err());
     }
 
