@@ -636,6 +636,8 @@ fn read_occurrence_file(path: &Path) -> anyhow::Result<Occurrence> {
         .map_err(|e| anyhow::anyhow!("failed to read occurrence file: {e}"))?;
     let occ = serde_json::from_str::<Occurrence>(&data)
         .map_err(|e| anyhow::anyhow!("failed to parse occurrence JSON: {e}"))?;
+    occ.validate()
+        .map_err(|errors| anyhow::anyhow!("invalid occurrence: {}", errors.join("; ")))?;
     Ok(occ)
 }
 
@@ -838,6 +840,32 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("failed to parse occurrence JSON")
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn load_occurrences_skips_invalid_occurrence_with_warning_path() {
+        use tapio_common::occurrence::Outcome;
+
+        let mut occ = Occurrence::new(
+            "kernel.network.connection_refused",
+            Severity::Warning,
+            Outcome::Failure,
+        );
+        occ.occurrence_type = "kernel.network".into();
+        let dir = std::env::temp_dir().join(format!("tapio-cli-invalid-{}", ulid_like_test_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("invalid.json"), serde_json::to_vec(&occ).unwrap()).unwrap();
+
+        let loaded = load_occurrences(&dir).unwrap();
+        assert!(loaded.is_empty());
+        assert!(
+            read_occurrence_file(&dir.join("invalid.json"))
+                .unwrap_err()
+                .to_string()
+                .contains("invalid occurrence")
         );
 
         std::fs::remove_dir_all(&dir).ok();
