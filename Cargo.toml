@@ -16,10 +16,9 @@ repository = "https://github.com/yairfalse/tapio"
 [workspace.dependencies]
 # eBPF
 aya = "0.13"
-aya-log = "0.2"
 
 # Async
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
 
 # K8s enrichment
 kube = { version = "0.98", features = ["runtime", "client"] }
@@ -34,12 +33,11 @@ serde_json = "1"
 
 # Observability
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 prometheus = { version = "0.13", default-features = false }
 
 # HTTP (metrics + health only)
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
-tokio-util = "0.7"
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
@@ -64,7 +62,6 @@ chrono = { version = "0.4", default-features = false, features = ["serde", "cloc
 ulid = "1"
 thiserror = "2"
 anyhow = "1"
-bytes = "1"
 
 # Workspace crates
 tapio-common = { path = "tapio-common" }
