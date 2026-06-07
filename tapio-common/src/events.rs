@@ -11,7 +11,6 @@ pub const NETWORK_CONNECTION_REFUSED: &str = "kernel.network.connection_refused"
 pub const NETWORK_CONNECTION_TIMEOUT: &str = "kernel.network.connection_timeout";
 pub const NETWORK_RETRANSMIT_SPIKE: &str = "kernel.network.retransmit_spike";
 pub const NETWORK_RTT_DEGRADATION: &str = "kernel.network.rtt_degradation";
-pub const NETWORK_RST_STORM: &str = "kernel.network.rst_storm";
 
 // Container anomalies
 pub const CONTAINER_OOM_KILL: &str = "kernel.container.oom_kill";
