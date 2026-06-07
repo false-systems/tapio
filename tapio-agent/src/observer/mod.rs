@@ -79,6 +79,11 @@ pub fn metrics_map_fd(ebpf: &aya::Ebpf) -> Option<std::os::fd::RawFd> {
     Some(data.fd().as_fd().as_raw_fd())
 }
 
+#[cfg(target_os = "linux")]
+pub fn should_warn_malformed_event(count: u64) -> bool {
+    count <= 10 || count.is_power_of_two()
+}
+
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub mod container;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
