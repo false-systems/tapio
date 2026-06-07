@@ -104,6 +104,8 @@ perf_event counters ──┘
 
 The BPF/Rust boundary is defined by packed C structs mirrored in `tapio-common/src/ebpf.rs`. Size assertions enforce layout agreement at compile time. CO-RE (`preserve_access_index` + `bpf_core_read`) handles kernel struct field access across versions; tracepoint argument structs use stable kernel ABI layouts.
 
+Storage latency correlation uses the request facts exposed by `block_rq_issue` and `block_rq_complete`: device, sector, sector count, and operation. These tracepoints do not expose a stable request pointer on current kernels. If two identical keys are inflight at the same time, Tapio marks the key ambiguous, drops the completion, and increments `tapio_correlation_drops_total{observer="storage",reason="ambiguous_inflight_io"}` instead of emitting misleading latency evidence.
+
 ---
 
 ## Filtering model
@@ -273,11 +275,14 @@ cargo build --release -p tapio-cli      # runs anywhere (no eBPF dependency)
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 scripts/verify-lean.sh                  # fmt + clippy + tests + release size + eBPF compile when headers exist
+scripts/smoke-ebpf-network.sh           # Linux/Lima: load eBPF, trigger closed-port TCP, assert occurrence
 ```
 
 Rust edition 2024, MSRV 1.85. The agent requires Linux with kernel 5.8+ and BTF. The CLI runs on any platform — only the agent depends on eBPF.
 
-`scripts/verify-lean.sh` enforces the current binary budgets (`tapio-agent` <= 1.5 MB, `tapio` <= 900 KB by default), saves a cargo tree snapshot under `/tmp/tapio-lean`, and compiles all four eBPF programs when `clang` and libbpf headers are available. Override with `AGENT_MAX_BYTES`, `CLI_MAX_BYTES`, `OUT_DIR`, or `EBPF_ARCH`.
+`scripts/verify-lean.sh` enforces the current binary budgets (`tapio-agent` <= 1.5 MB, `tapio` <= 900 KB by default), saves a cargo tree snapshot under `/tmp/tapio-lean`, compiles all four eBPF programs when `clang` and libbpf headers are available, and fails if eBPF object or map budgets are exceeded. Override with `AGENT_MAX_BYTES`, `CLI_MAX_BYTES`, `OUT_DIR`, or `EBPF_ARCH`; budget increases should be committed with a short reason.
+
+`scripts/smoke-ebpf-network.sh` must run on Linux, or from this repo inside the Lima Ubuntu VM. It starts the real agent, loads the network eBPF program, triggers a TCP connection attempt to a closed localhost port, and asserts that the file sink records a `kernel.network.*` occurrence with the expected destination port.
 
 ---
 

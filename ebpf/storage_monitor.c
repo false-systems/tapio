@@ -46,6 +46,9 @@ struct io_key {
 	__u32 dev_major;
 	__u32 dev_minor;
 	__u64 sector;
+	__u32 nr_sector;
+	__u8  opcode;
+	__u8  padding[3];
 };
 
 // Value for inflight I/O operations
@@ -55,7 +58,8 @@ struct io_value {
 	__u32 bytes;          // I/O size
 	__u32 issuer_pid;     // PID that issued the I/O
 	__u8  opcode;         // READ or WRITE
-	__u8  padding[7];     // Alignment
+	__u8  ambiguous;      // Same key observed concurrently; do not emit latency
+	__u8  padding[6];     // Alignment
 };
 
 // Runtime-configurable thresholds — populated by userspace at load time
@@ -97,11 +101,12 @@ int trace_block_rq_issue(struct trace_event_raw_block_rq *ctx) {
 	key.dev_major = BPF_CORE_READ(ctx, dev) >> 20;
 	key.dev_minor = BPF_CORE_READ(ctx, dev) & ((1U << 20) - 1);
 	key.sector = BPF_CORE_READ(ctx, sector);
+	key.nr_sector = BPF_CORE_READ(ctx, nr_sector);
 
 	// Capture issue time and context
 	val.issue_ns = bpf_ktime_get_ns();
 	val.cgroup_id = bpf_get_current_cgroup_id();
-	val.bytes = BPF_CORE_READ(ctx, nr_sector) * 512;  // sectors → bytes
+	val.bytes = key.nr_sector * 512;  // sectors → bytes
 	val.issuer_pid = bpf_get_current_pid_tgid() >> 32;
 
 	// Determine operation type from rwbs field (CO-RE safe)
@@ -115,9 +120,18 @@ int trace_block_rq_issue(struct trace_event_raw_block_rq *ctx) {
 	} else {
 		return 0;  // Skip discards, flushes, etc.
 	}
+	key.opcode = val.opcode;
 
-	// Store in inflight map
-	bpf_map_update_elem(&inflight_io, &key, &val, BPF_ANY);
+	/* The block tracepoints do not expose a request pointer. If the same
+	 * device/sector/size/op is issued concurrently, correlation is ambiguous.
+	 * Mark the key and drop on completion rather than emitting wrong latency.
+	 */
+	if (bpf_map_update_elem(&inflight_io, &key, &val, BPF_NOEXIST) != 0) {
+		struct io_value *existing = bpf_map_lookup_elem(&inflight_io, &key);
+		if (existing) {
+			existing->ambiguous = 1;
+		}
+	}
 
 	return 0;
 }
@@ -137,11 +151,28 @@ int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
 	key.dev_major = BPF_CORE_READ(ctx, dev) >> 20;
 	key.dev_minor = BPF_CORE_READ(ctx, dev) & ((1U << 20) - 1);
 	key.sector = BPF_CORE_READ(ctx, sector);
+	key.nr_sector = BPF_CORE_READ(ctx, nr_sector);
+
+	char rwbs[8] = {};
+	bpf_core_read_str(rwbs, sizeof(rwbs), &ctx->rwbs);
+	if (rwbs[0] == 'R') {
+		key.opcode = OP_READ;
+	} else if (rwbs[0] == 'W') {
+		key.opcode = OP_WRITE;
+	} else {
+		return 0;
+	}
 
 	// Lookup inflight I/O
 	val = bpf_map_lookup_elem(&inflight_io, &key);
 	if (!val) {
 		return 0;  // No matching issue event (may have been evicted)
+	}
+
+	if (val->ambiguous) {
+		metric_inc(METRIC_STORAGE_AMBIGUOUS_IO);
+		bpf_map_delete_elem(&inflight_io, &key);
+		return 0;
 	}
 
 	// Calculate latency
