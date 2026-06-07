@@ -4,7 +4,7 @@ use std::sync::Arc;
 use prometheus::{IntCounterVec, IntGauge, Opts, Registry, TextEncoder};
 
 /// All TAPIO Prometheus metrics, registered against a non-global Registry.
-/// Fields are registered at startup but not yet wired to observers (audit issue #4).
+/// Every family here is incremented by an observer, sink fan-out, or K8s enrichment path.
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct TapioMetrics {
@@ -196,5 +196,26 @@ mod tests {
         assert!(buf.contains("tapio_anomalies_total"));
         assert!(buf.contains("tapio_malformed_events_total"));
         assert!(buf.contains("tapio_k8s_cache_size 42"));
+    }
+
+    #[test]
+    fn loss_and_malformed_counters_increment() {
+        let m = TapioMetrics::new().expect("metrics registration");
+        m.lost_events_total
+            .with_label_values(&["network"])
+            .inc_by(3);
+        m.malformed_events_total
+            .with_label_values(&["network"])
+            .inc_by(2);
+
+        let encoder = TextEncoder::new();
+        let families = m.registry.gather();
+        let mut buf = String::new();
+        encoder
+            .encode_utf8(&families, &mut buf)
+            .expect("encode metrics");
+
+        assert!(buf.contains("tapio_lost_events_total{observer=\"network\"} 3"));
+        assert!(buf.contains("tapio_malformed_events_total{observer=\"network\"} 2"));
     }
 }

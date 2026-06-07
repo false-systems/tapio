@@ -454,4 +454,31 @@ mod tests {
         assert!(encoded.contains("tapio_sink_writes_total{result=\"err\",sink=\"fail\"} 1"));
         assert!(encoded.contains("tapio_sink_writes_total{result=\"ok\",sink=\"ok\"} 1"));
     }
+
+    #[test]
+    fn multisink_records_real_http_export_failure_as_err() {
+        let metrics = metrics::TapioMetrics::new().unwrap();
+        let registry = metrics.registry.clone();
+        let multi = MultiSink {
+            sinks: vec![Box::new(sink::http::HttpSink::new(
+                "http://127.0.0.1:1",
+                1,
+                std::time::Duration::from_secs(3600),
+            ))],
+            metrics: Some(metrics),
+        };
+        let occ = Occurrence::new(
+            "kernel.network.connection_refused",
+            Severity::Warning,
+            Outcome::Failure,
+        );
+
+        assert!(multi.send(&occ).is_err());
+        let gathered = registry.gather();
+        let mut encoded = String::new();
+        prometheus::TextEncoder::new()
+            .encode_utf8(&gathered, &mut encoded)
+            .unwrap();
+        assert!(encoded.contains("tapio_sink_writes_total{result=\"err\",sink=\"http\"} 1"));
+    }
 }

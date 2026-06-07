@@ -238,6 +238,31 @@ Tapio emits structured anomaly events to local files, stdout, HTTP endpoints, or
 
 Sinks implement the `tapio_common::sink::Sink` trait (sync `send`/`flush`/`name`). The local sinks (`stdout`, `file`) are the default path and need nothing external. The network sinks (`http`, `otlp`) are optional integrations for forwarding evidence to a collector or ingest service of your choice.
 
+Current sink guarantees:
+
+- `OtlpSink` supports plaintext `http://` endpoints only. `https://` endpoints are rejected at configuration time before any TCP connection is opened or `Authorization` header can be written.
+- `HttpSink` and `OtlpSink` return sink errors when a batch export fails after data is dropped. `MultiSink` records those failures in `tapio_sink_writes_total{result="err"}` while still attempting later sinks.
+- `FileSink` writes one validated occurrence JSON document per event. The CLI rejects corrupt or invalid occurrence files instead of silently treating them as evidence.
+
+Network TLS is a deployment concern: put a local OpenTelemetry Collector, sidecar, node-local proxy, or trusted TLS-terminating boundary in front of Tapio if encrypted OTLP transport is required.
+
+---
+
+## Metrics
+
+Prometheus metrics are optional and disabled by default. Enable them in the TOML config with `[metrics] enabled = true`.
+
+The current metric families are all backed by live code paths:
+
+- `tapio_events_total` — userspace records drained from ring buffers.
+- `tapio_anomalies_total` — anomalies emitted by observer and anomaly type.
+- `tapio_lost_events_total` — eBPF ring-buffer reserve failures surfaced from the shared `tapio_metrics` per-CPU map.
+- `tapio_malformed_events_total` — truncated or malformed ring-buffer records dropped by userspace.
+- `tapio_drain_cap_total` — drain loops that hit the per-tick cap.
+- `tapio_enrichment_miss_total` — Kubernetes enrichment lookups with no pod context.
+- `tapio_sink_writes_total` — sink write attempts by sink name and result (`ok` or `err`).
+- `tapio_k8s_cache_size` and `tapio_k8s_reflector_up` — Kubernetes enrichment cache/reflector state.
+
 ---
 
 ## Building
@@ -291,6 +316,7 @@ Tapio is intentionally selective. It does not:
 - store or index events long-term (it is not a datastore),
 - correlate events across nodes or explain them (it is not an intelligence layer),
 - replace Prometheus, Grafana, or OpenTelemetry (it is not a full observability platform),
+- implement HTTPS itself in the minimal OTLP sink (terminate TLS at a collector/proxy),
 - fill reasoning fields — root cause, causal chains, remediation (those belong downstream).
 
 Tapio owns node-level observation. Everything else — storage, correlation, dashboards, explanation — can consume its evidence later.
