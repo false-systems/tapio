@@ -13,7 +13,6 @@
 
 // Connection tracking structs defined in conn_tracking.h (shared):
 //   - conn_key: Connection identifier (saddr, daddr, sport, dport)
-//   - retransmit_stats: Retransmit/RST tracking per connection
 
 // ============================================================================
 // Kernel Socket Structures (Minimal CO-RE Definitions)

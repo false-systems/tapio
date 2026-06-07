@@ -303,8 +303,42 @@ mod tests {
     }
 
     #[test]
+    fn network_event_offsets() {
+        assert_eq!(offset_of!(NetworkEvent, pid), 0);
+        assert_eq!(offset_of!(NetworkEvent, src_ip), 4);
+        assert_eq!(offset_of!(NetworkEvent, dst_ip), 8);
+        assert_eq!(offset_of!(NetworkEvent, src_ipv6), 12);
+        assert_eq!(offset_of!(NetworkEvent, dst_ipv6), 28);
+        assert_eq!(offset_of!(NetworkEvent, src_port), 44);
+        assert_eq!(offset_of!(NetworkEvent, dst_port), 46);
+        assert_eq!(offset_of!(NetworkEvent, family), 48);
+        assert_eq!(offset_of!(NetworkEvent, protocol), 50);
+        assert_eq!(offset_of!(NetworkEvent, event_type), 51);
+        assert_eq!(offset_of!(NetworkEvent, old_state), 52);
+        assert_eq!(offset_of!(NetworkEvent, new_state), 54);
+        assert_eq!(offset_of!(NetworkEvent, rtt_baseline_ms), 56);
+        assert_eq!(offset_of!(NetworkEvent, rtt_current_ms), 58);
+        assert_eq!(offset_of!(NetworkEvent, total_retrans), 60);
+        assert_eq!(offset_of!(NetworkEvent, snd_cwnd), 62);
+        assert_eq!(offset_of!(NetworkEvent, comm), 64);
+    }
+
+    #[test]
     fn container_event_size() {
         assert_eq!(size_of::<ContainerEvent>(), 52);
+    }
+
+    #[test]
+    fn container_event_offsets() {
+        assert_eq!(offset_of!(ContainerEvent, memory_limit), 0);
+        assert_eq!(offset_of!(ContainerEvent, memory_usage), 8);
+        assert_eq!(offset_of!(ContainerEvent, timestamp_ns), 16);
+        assert_eq!(offset_of!(ContainerEvent, cgroup_id), 24);
+        assert_eq!(offset_of!(ContainerEvent, event_type), 32);
+        assert_eq!(offset_of!(ContainerEvent, pid), 36);
+        assert_eq!(offset_of!(ContainerEvent, tid), 40);
+        assert_eq!(offset_of!(ContainerEvent, exit_code), 44);
+        assert_eq!(offset_of!(ContainerEvent, signal), 48);
     }
 
     #[test]
@@ -332,6 +366,15 @@ mod tests {
     #[test]
     fn pmc_event_size() {
         assert_eq!(size_of::<PmcEvent>(), 36);
+    }
+
+    #[test]
+    fn pmc_event_offsets() {
+        assert_eq!(offset_of!(PmcEvent, cpu), 0);
+        assert_eq!(offset_of!(PmcEvent, cycles), 4);
+        assert_eq!(offset_of!(PmcEvent, instructions), 12);
+        assert_eq!(offset_of!(PmcEvent, stall_cycles), 20);
+        assert_eq!(offset_of!(PmcEvent, timestamp), 28);
     }
 
     #[test]

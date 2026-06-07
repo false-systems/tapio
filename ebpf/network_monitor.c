@@ -64,21 +64,9 @@ struct {
 	__uint(max_entries, 10000);
 	__type(key, struct conn_key);
 	__type(value, struct rtt_baseline);
-	__uint(pinning, LIBBPF_PIN_BY_NAME);
 } baseline_rtt SEC(".maps");
 
-// Connection statistics tracking (LRU auto-evicts old connections)
-// Tracks retransmit counts and RST flags per connection
-struct {
-	__uint(type, BPF_MAP_TYPE_LRU_HASH);
-	__uint(max_entries, 10000);
-	__type(key, struct conn_key);
-	__type(value, struct retransmit_stats);
-	__uint(pinning, LIBBPF_PIN_BY_NAME);
-} conn_stats SEC(".maps");
-
 // RTT states
-#define RTT_STATE_NO_BASELINE 0
 #define RTT_STATE_LEARNING    1
 #define RTT_STATE_STABLE      2
 
@@ -325,33 +313,6 @@ int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
 		__builtin_memcpy(evt->dst_ipv6, args->daddr_v6, 16);
 	}
 
-	// Update conn_stats: mark RST received (IPv4 and IPv6)
-	{
-		struct conn_key key = {0};
-		if (args->family == AF_INET) {
-			fill_conn_key_v4(&key, args->saddr, args->daddr,
-			                 args->sport, args->dport);
-		} else if (args->family == AF_INET6) {
-			fill_conn_key_v6(&key, args->saddr_v6, args->daddr_v6,
-			                 args->sport, args->dport);
-		} else {
-			goto submit_rst;
-		}
-
-		struct retransmit_stats *stats = bpf_map_lookup_elem(&conn_stats, &key);
-		if (stats) {
-			stats->rst_received = 1;
-		} else {
-			struct retransmit_stats new_stats = {
-				.retransmits = 0,
-				.last_retransmit_ns = 0,
-				.rst_received = 1,
-			};
-			bpf_map_update_elem(&conn_stats, &key, &new_stats, BPF_NOEXIST);
-		}
-	}
-
-submit_rst:
 	bpf_ringbuf_submit(evt, 0);
 
 	return 0;
@@ -419,36 +380,6 @@ int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 
 			// snd_cwnd renamed to snd_cwnd_ in Linux 6.12 — CO-RE fallback
 			snd_cwnd = read_snd_cwnd(sk);
-		}
-	}
-
-	// Update conn_stats: track retransmits (IPv4 and IPv6)
-	{
-		struct conn_key key = {0};
-		__u8 track_stats = 1;
-		if (args->family == AF_INET) {
-			fill_conn_key_v4(&key, args->saddr, args->daddr,
-			                 args->sport, args->dport);
-		} else if (args->family == AF_INET6) {
-			fill_conn_key_v6(&key, args->saddr_v6, args->daddr_v6,
-			                 args->sport, args->dport);
-		} else {
-			track_stats = 0;
-		}
-
-		if (track_stats) {
-			struct retransmit_stats *stats = bpf_map_lookup_elem(&conn_stats, &key);
-			if (stats) {
-				stats->retransmits++;
-				stats->last_retransmit_ns = bpf_ktime_get_ns();
-			} else {
-				struct retransmit_stats new_stats = {
-					.retransmits = 1,
-					.last_retransmit_ns = bpf_ktime_get_ns(),
-					.rst_received = 0,
-				};
-				bpf_map_update_elem(&conn_stats, &key, &new_stats, BPF_NOEXIST);
-			}
 		}
 	}
 
