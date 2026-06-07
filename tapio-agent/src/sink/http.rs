@@ -81,7 +81,7 @@ impl Sink for HttpSink {
         }; // lock released here — before any I/O
 
         if let Some(batch) = batch {
-            self.post_batch(batch);
+            self.post_batch(batch)?;
         }
 
         Ok(())
@@ -101,8 +101,7 @@ impl Sink for HttpSink {
             batch
         }; // lock released here
 
-        self.post_batch(batch);
-        Ok(())
+        self.post_batch(batch)
     }
 
     fn name(&self) -> &str {
@@ -112,16 +111,16 @@ impl Sink for HttpSink {
 
 impl HttpSink {
     /// POST batch to endpoint. On failure, batch is lost (logged + backoff updated).
-    fn post_batch(&self, batch: Vec<Occurrence>) {
+    fn post_batch(&self, batch: Vec<Occurrence>) -> Result<(), SinkError> {
         if batch.is_empty() {
-            return;
+            return Ok(());
         }
 
         let payload = match serde_json::to_vec(&batch) {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!(error = %e, "http sink: failed to serialize batch");
-                return;
+                return Err(SinkError::Serialization(e.to_string()));
             }
         };
 
@@ -131,6 +130,7 @@ impl HttpSink {
                 if let Ok(mut inner) = self.inner.lock() {
                     inner.backoff = INITIAL_BACKOFF;
                 }
+                Ok(())
             }
             Err(e) => {
                 if let Ok(mut inner) = self.inner.lock() {
@@ -143,6 +143,10 @@ impl HttpSink {
                     dropped = batch.len(),
                     "http sink: send failed, batch dropped"
                 );
+                Err(SinkError::Send(format!(
+                    "http sink: send failed, dropped {} events: {e}",
+                    batch.len()
+                )))
             }
         }
     }
@@ -227,7 +231,7 @@ mod tests {
         let sink = HttpSink::new("http://127.0.0.1:1", 1, Duration::from_secs(3600));
         let occ = occurrence();
 
-        assert!(sink.send(&occ).is_ok());
+        assert!(sink.send(&occ).is_err());
 
         let inner = sink.inner.lock().unwrap();
         assert_eq!(inner.buffer.len(), 0);
@@ -240,7 +244,7 @@ mod tests {
         let sink = HttpSink::new("http://127.0.0.1:1", 1, Duration::from_secs(3600));
         let occ = occurrence();
 
-        assert!(sink.send(&occ).is_ok());
+        assert!(sink.send(&occ).is_err());
         assert!(sink.send(&occ).is_ok());
 
         let inner = sink.inner.lock().unwrap();
@@ -253,7 +257,7 @@ mod tests {
         let sink = HttpSink::new("http://127.0.0.1:1", 1, Duration::from_secs(3600));
         let occ = occurrence();
 
-        assert!(sink.send(&occ).is_ok());
+        assert!(sink.send(&occ).is_err());
         for _ in 0..12 {
             assert!(sink.send(&occ).is_ok());
         }

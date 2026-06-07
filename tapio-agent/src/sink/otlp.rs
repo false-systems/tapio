@@ -383,6 +383,7 @@ impl Sink for OtlpSink {
             && let Err(e) = self.export_batch(batch)
         {
             tracing::warn!(error = %e, "otlp sink: batch export failed, data dropped");
+            return Err(e);
         }
 
         Ok(())
@@ -404,6 +405,7 @@ impl Sink for OtlpSink {
 
         if let Err(e) = self.export_batch(batch) {
             tracing::warn!(error = %e, "otlp sink: flush export failed, data dropped");
+            return Err(e);
         }
         Ok(())
     }
