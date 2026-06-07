@@ -76,7 +76,7 @@ fn create_sinks(
                 cfg.otlp.auth_header.clone(),
                 cfg.otlp.batch_size,
                 std::time::Duration::from_secs(cfg.otlp.flush_interval_secs),
-            ))),
+            )?)),
             other => anyhow::bail!("unknown sink: {other}"),
         }
     }
@@ -89,6 +89,7 @@ fn create_sinks(
 /// Fan-out sink that sends to all inner sinks. Failure in one doesn't block others.
 struct MultiSink {
     sinks: Vec<Box<dyn tapio_common::sink::Sink>>,
+    metrics: Option<metrics::TapioMetrics>,
 }
 
 impl tapio_common::sink::Sink for MultiSink {
@@ -98,9 +99,25 @@ impl tapio_common::sink::Sink for MultiSink {
     ) -> Result<(), tapio_common::sink::SinkError> {
         let mut last_err = None;
         for s in &self.sinks {
-            if let Err(e) = s.send(occurrence) {
-                tracing::warn!(sink = s.name(), error = %e, "sink error");
-                last_err = Some(e);
+            match s.send(occurrence) {
+                Ok(()) => {
+                    if let Some(metrics) = &self.metrics {
+                        metrics
+                            .sink_writes_total
+                            .with_label_values(&[s.name(), "ok"])
+                            .inc();
+                    }
+                }
+                Err(e) => {
+                    if let Some(metrics) = &self.metrics {
+                        metrics
+                            .sink_writes_total
+                            .with_label_values(&[s.name(), "err"])
+                            .inc();
+                    }
+                    tracing::warn!(sink = s.name(), error = %e, "sink error");
+                    last_err = Some(e);
+                }
             }
         }
         match last_err {
@@ -152,11 +169,15 @@ async fn main() -> anyhow::Result<()> {
     let cfg = config::load(std::path::Path::new(&args.config))?;
     info!("tapio v4 — kernel eyes");
 
+    let tapio_metrics = metrics::TapioMetrics::new()?;
     let sinks = create_sinks(&args, &cfg)?;
     let sink_names: Vec<&str> = sinks.iter().map(|s| s.name()).collect();
     info!(sinks = ?sink_names, "sinks configured");
 
-    let multi_sink: std::sync::Arc<MultiSink> = std::sync::Arc::new(MultiSink { sinks });
+    let multi_sink: std::sync::Arc<MultiSink> = std::sync::Arc::new(MultiSink {
+        sinks,
+        metrics: Some(tapio_metrics.clone()),
+    });
 
     #[cfg(target_os = "linux")]
     {
@@ -192,7 +213,6 @@ async fn main() -> anyhow::Result<()> {
             }
         };
 
-        let tapio_metrics = metrics::TapioMetrics::new()?;
         if enricher.is_some() {
             tapio_metrics.k8s_reflector_up.set(1);
         }
@@ -331,7 +351,107 @@ async fn main() -> anyhow::Result<()> {
 
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (args, multi_sink);
+        let _ = (args, multi_sink, tapio_metrics);
         anyhow::bail!("eBPF requires Linux — tapio-agent cannot run on this platform");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tapio_common::occurrence::{Occurrence, Outcome, Severity};
+    use tapio_common::sink::{Sink, SinkError};
+
+    struct CountingSink {
+        name: &'static str,
+        sends: Arc<AtomicUsize>,
+        fail: bool,
+    }
+
+    impl Sink for CountingSink {
+        fn send(&self, _occurrence: &Occurrence) -> Result<(), SinkError> {
+            self.sends.fetch_add(1, Ordering::Relaxed);
+            if self.fail {
+                Err(SinkError::Send("test failure".into()))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn flush(&self) -> Result<(), SinkError> {
+            Ok(())
+        }
+
+        fn name(&self) -> &str {
+            self.name
+        }
+    }
+
+    #[test]
+    fn multisink_continues_after_one_sink_fails() {
+        let failed_sends = Arc::new(AtomicUsize::new(0));
+        let ok_sends = Arc::new(AtomicUsize::new(0));
+        let metrics = metrics::TapioMetrics::new().unwrap();
+        let multi = MultiSink {
+            sinks: vec![
+                Box::new(CountingSink {
+                    name: "fail",
+                    sends: failed_sends.clone(),
+                    fail: true,
+                }),
+                Box::new(CountingSink {
+                    name: "ok",
+                    sends: ok_sends.clone(),
+                    fail: false,
+                }),
+            ],
+            metrics: Some(metrics),
+        };
+        let occ = Occurrence::new(
+            "kernel.network.connection_refused",
+            Severity::Warning,
+            Outcome::Failure,
+        );
+
+        assert!(multi.send(&occ).is_err());
+        assert_eq!(failed_sends.load(Ordering::Relaxed), 1);
+        assert_eq!(ok_sends.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn multisink_records_partial_failure_metrics() {
+        let metrics = metrics::TapioMetrics::new().unwrap();
+        let registry = metrics.registry.clone();
+        let multi = MultiSink {
+            sinks: vec![
+                Box::new(CountingSink {
+                    name: "fail",
+                    sends: Arc::new(AtomicUsize::new(0)),
+                    fail: true,
+                }),
+                Box::new(CountingSink {
+                    name: "ok",
+                    sends: Arc::new(AtomicUsize::new(0)),
+                    fail: false,
+                }),
+            ],
+            metrics: Some(metrics),
+        };
+        let occ = Occurrence::new(
+            "kernel.network.connection_refused",
+            Severity::Warning,
+            Outcome::Failure,
+        );
+
+        assert!(multi.send(&occ).is_err());
+        let gathered = registry.gather();
+        let mut encoded = String::new();
+        prometheus::TextEncoder::new()
+            .encode_utf8(&gathered, &mut encoded)
+            .unwrap();
+        assert!(encoded.contains("tapio_sink_writes_total{result=\"err\",sink=\"fail\"} 1"));
+        assert!(encoded.contains("tapio_sink_writes_total{result=\"ok\",sink=\"ok\"} 1"));
     }
 }

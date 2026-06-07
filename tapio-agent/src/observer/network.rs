@@ -209,6 +209,7 @@ pub async fn run(
     let mut anomaly_count: u64 = 0;
     let mut tick_count: u64 = 0;
     let mut prev_lost: u64 = 0;
+    let mut malformed_count: u64 = 0;
     let mut enrich_total: u64 = 0;
     let mut enrich_miss: u64 = 0;
 
@@ -224,6 +225,9 @@ pub async fn run(
                     if let Some(fd) = metrics_fd {
                         let lost = super::read_percpu_sum(fd, super::METRIC_LOST_EVENTS, nr_cpus);
                         if lost > prev_lost {
+                            metrics.lost_events_total
+                                .with_label_values(&["network"])
+                                .inc_by(lost - prev_lost);
                             tracing::warn!(
                                 observer = "network",
                                 lost_total = lost,
@@ -250,7 +254,20 @@ pub async fn run(
                     let mut count = 0usize;
                     while let Some(item) = ring_buf.next() {
                         let data: &[u8] = item.as_ref();
-                        if data.len() < std::mem::size_of::<NetworkEvent>() {
+                        let expected_len = std::mem::size_of::<NetworkEvent>();
+                        if data.len() < expected_len {
+                            malformed_count += 1;
+                            metrics.malformed_events_total.with_label_values(&["network"]).inc();
+                            if super::should_warn_malformed_event(malformed_count) {
+                                tracing::warn!(
+                                    observer = "network",
+                                    source = "ring_buffer",
+                                    len = data.len(),
+                                    expected_len,
+                                    malformed_total = malformed_count,
+                                    "dropped malformed eBPF record"
+                                );
+                            }
                             count += 1;
                             if count >= super::MAX_DRAIN_PER_TICK { break; }
                             continue;

@@ -98,6 +98,10 @@ impl K8sEnricher {
         self.context_for_uid(&pod_uid)
     }
 
+    pub fn cache_size(&self) -> usize {
+        self.cgroup_cache.len()
+    }
+
     /// Resolve cgroup_id to pod UID by statting cgroup directories for all known pods.
     fn resolve_cgroup_id(&self, target_id: u64) -> Option<String> {
         use std::os::unix::fs::MetadataExt;
