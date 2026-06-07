@@ -372,97 +372,105 @@ async fn cmd_mcp(data_dir: &Path) -> anyhow::Result<()> {
             continue;
         }
 
-        let request: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(_) => {
-                mcp_write_error(None, -32700, "Parse error")?;
-                continue;
-            }
-        };
-
-        // JSON-RPC 2.0: missing "id" field = notification (no response).
-        // Present "id" field (even if null) = request (must respond).
-        let has_id = request.get("id").is_some();
-        let id = request.get("id").cloned();
-        let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
-        let params = request
-            .get("params")
-            .cloned()
-            .unwrap_or(serde_json::json!({}));
-
-        if !has_id {
-            continue; // notification — no response
-        }
-
-        match method {
-            "initialize" => {
-                let result = serde_json::json!({
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": { "tools": {} },
-                    "serverInfo": {
-                        "name": "tapio",
-                        "version": env!("CARGO_PKG_VERSION"),
-                    }
-                });
-                mcp_write_result(id, result)?;
-            }
-            "tools/list" => {
-                let tools = serde_json::json!({
-                    "tools": [
-                        {
-                            "name": "tapio_recent_anomalies",
-                            "description": "Get recent kernel anomalies from the last N minutes",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "minutes": { "type": "number", "default": 5, "description": "Time window in minutes" },
-                                    "observer": { "type": "string", "enum": ["network", "container", "storage", "node", "all"], "default": "all" },
-                                    "severity": { "type": "string", "enum": ["warning", "error", "critical", "all"], "default": "all" }
-                                }
-                            }
-                        },
-                        {
-                            "name": "tapio_node_health",
-                            "description": "Get current node health summary across all observers",
-                            "inputSchema": { "type": "object", "properties": {} }
-                        },
-                        {
-                            "name": "tapio_watch_stream",
-                            "description": "Get the most recent anomalies (snapshot, not streaming)",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "observer": { "type": "string", "description": "Filter by observer" },
-                                    "max_events": { "type": "number", "default": 50, "description": "Maximum events to return" }
-                                }
-                            }
-                        }
-                    ]
-                });
-                mcp_write_result(id, tools)?;
-            }
-            "tools/call" => {
-                let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                let args = params
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or(serde_json::json!({}));
-                match mcp_call_tool(data_dir, tool_name, &args) {
-                    Ok(result) => mcp_write_result(id, result)?,
-                    Err(err) => mcp_write_error(
-                        id,
-                        -32603,
-                        &format!("Tool call failed for '{tool_name}': {err}"),
-                    )?,
-                }
-            }
-            _ => {
-                mcp_write_error(id, -32601, &format!("Method not found: {method}"))?;
-            }
+        if let Some(response) = mcp_handle_line(data_dir, trimmed) {
+            mcp_write_response(response)?;
         }
     }
 
     Ok(())
+}
+
+fn mcp_handle_line(data_dir: &Path, line: &str) -> Option<serde_json::Value> {
+    let request = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(_) => return Some(mcp_error_response(None, -32700, "Parse error")),
+    };
+    mcp_handle_request(data_dir, request)
+}
+
+fn mcp_handle_request(data_dir: &Path, request: serde_json::Value) -> Option<serde_json::Value> {
+    // JSON-RPC 2.0: missing "id" field = notification (no response).
+    // Present "id" field (even if null) = request (must respond).
+    let has_id = request.get("id").is_some();
+    let id = request.get("id").cloned();
+    let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
+    let params = request
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
+
+    if !has_id {
+        return None;
+    }
+
+    match method {
+        "initialize" => {
+            let result = serde_json::json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": { "tools": {} },
+                "serverInfo": {
+                    "name": "tapio",
+                    "version": env!("CARGO_PKG_VERSION"),
+                }
+            });
+            Some(mcp_result_response(id, result))
+        }
+        "tools/list" => {
+            let tools = serde_json::json!({
+                "tools": [
+                    {
+                        "name": "tapio_recent_anomalies",
+                        "description": "Get recent kernel anomalies from the last N minutes",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "minutes": { "type": "number", "default": 5, "description": "Time window in minutes" },
+                                "observer": { "type": "string", "enum": ["network", "container", "storage", "node", "all"], "default": "all" },
+                                "severity": { "type": "string", "enum": ["warning", "error", "critical", "all"], "default": "all" }
+                            }
+                        }
+                    },
+                    {
+                        "name": "tapio_node_health",
+                        "description": "Get current node health summary across all observers",
+                        "inputSchema": { "type": "object", "properties": {} }
+                    },
+                    {
+                        "name": "tapio_watch_stream",
+                        "description": "Get the most recent anomalies (snapshot, not streaming)",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "observer": { "type": "string", "description": "Filter by observer" },
+                                "max_events": { "type": "number", "default": 50, "description": "Maximum events to return" }
+                            }
+                        }
+                    }
+                ]
+            });
+            Some(mcp_result_response(id, tools))
+        }
+        "tools/call" => {
+            let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            let args = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
+            match mcp_call_tool(data_dir, tool_name, &args) {
+                Ok(result) => Some(mcp_result_response(id, result)),
+                Err(err) => Some(mcp_error_response(
+                    id,
+                    -32603,
+                    &format!("Tool call failed for '{tool_name}': {err}"),
+                )),
+            }
+        }
+        _ => Some(mcp_error_response(
+            id,
+            -32601,
+            &format!("Method not found: {method}"),
+        )),
+    }
 }
 
 fn mcp_call_tool(
@@ -569,24 +577,30 @@ fn mcp_call_tool(
     }
 }
 
-fn mcp_write_result(id: Option<serde_json::Value>, result: serde_json::Value) -> io::Result<()> {
-    let response = serde_json::json!({
+fn mcp_result_response(
+    id: Option<serde_json::Value>,
+    result: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
         "jsonrpc": "2.0",
         "id": id,
         "result": result,
-    });
-    let mut out = io::stdout().lock();
-    serde_json::to_writer(&mut out, &response).map_err(io::Error::other)?;
-    writeln!(out)?;
-    out.flush()
+    })
 }
 
-fn mcp_write_error(id: Option<serde_json::Value>, code: i32, message: &str) -> io::Result<()> {
-    let response = serde_json::json!({
+fn mcp_error_response(
+    id: Option<serde_json::Value>,
+    code: i32,
+    message: &str,
+) -> serde_json::Value {
+    serde_json::json!({
         "jsonrpc": "2.0",
         "id": id,
         "error": { "code": code, "message": message },
-    });
+    })
+}
+
+fn mcp_write_response(response: serde_json::Value) -> io::Result<()> {
     let mut out = io::stdout().lock();
     serde_json::to_writer(&mut out, &response).map_err(io::Error::other)?;
     writeln!(out)?;
@@ -872,6 +886,144 @@ mod tests {
     }
 
     #[test]
+    fn mcp_initialize_returns_result() {
+        let dir = std::env::temp_dir().join(format!("tapio-cli-mcp-init-{}", ulid_like_test_id()));
+        let response = mcp_handle_request(
+            &dir,
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize"
+            }),
+        )
+        .expect("response");
+
+        assert_eq!(response["jsonrpc"], "2.0");
+        assert_eq!(response["id"], 1);
+        assert_eq!(response["result"]["serverInfo"]["name"], "tapio");
+    }
+
+    #[test]
+    fn mcp_notification_returns_no_response() {
+        let dir = std::env::temp_dir().join(format!(
+            "tapio-cli-mcp-notification-{}",
+            ulid_like_test_id()
+        ));
+        let response = mcp_handle_request(
+            &dir,
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "tools/list"
+            }),
+        );
+
+        assert!(response.is_none());
+    }
+
+    #[test]
+    fn mcp_unknown_method_returns_method_not_found() {
+        let dir =
+            std::env::temp_dir().join(format!("tapio-cli-mcp-unknown-{}", ulid_like_test_id()));
+        let response = mcp_handle_request(
+            &dir,
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": "abc",
+                "method": "missing/method"
+            }),
+        )
+        .expect("response");
+
+        assert_eq!(response["id"], "abc");
+        assert_eq!(response["error"]["code"], -32601);
+    }
+
+    #[test]
+    fn mcp_parse_error_returns_parse_error() {
+        let dir = std::env::temp_dir().join(format!("tapio-cli-mcp-parse-{}", ulid_like_test_id()));
+        let response = mcp_handle_line(&dir, "{not-json").expect("response");
+
+        assert_eq!(response["id"], serde_json::Value::Null);
+        assert_eq!(response["error"]["code"], -32700);
+    }
+
+    #[test]
+    fn mcp_tool_failure_returns_internal_error() {
+        let path = std::env::temp_dir().join(format!("tapio-cli-mcp-file-{}", ulid_like_test_id()));
+        std::fs::write(&path, b"not a directory").unwrap();
+
+        let response = mcp_handle_request(
+            &path,
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "tapio_node_health",
+                    "arguments": {}
+                }
+            }),
+        )
+        .expect("response");
+
+        assert_eq!(response["id"], 2);
+        assert_eq!(response["error"]["code"], -32603);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn mcp_recent_anomalies_filters_by_observer_and_severity() {
+        use tapio_common::occurrence::Outcome;
+
+        let dir =
+            std::env::temp_dir().join(format!("tapio-cli-mcp-filter-{}", ulid_like_test_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let network = Occurrence::new(
+            "kernel.network.connection_refused",
+            Severity::Warning,
+            Outcome::Failure,
+        );
+        let storage = Occurrence::new(
+            "kernel.storage.io_error",
+            Severity::Critical,
+            Outcome::Failure,
+        );
+        write_test_occurrence(&dir, &network);
+        write_test_occurrence(&dir, &storage);
+
+        let response = mcp_handle_request(
+            &dir,
+            serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "tapio_recent_anomalies",
+                    "arguments": {
+                        "minutes": 60,
+                        "observer": "network",
+                        "severity": "warning"
+                    }
+                }
+            }),
+        )
+        .expect("response");
+
+        let text = response["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text content");
+        let filtered: Vec<Occurrence> = serde_json::from_str(text).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(
+            filtered[0].occurrence_type,
+            "kernel.network.connection_refused"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn read_occurrence_file_reports_missing_file() {
         let path =
             std::env::temp_dir().join(format!("tapio-cli-missing-{}.json", ulid_like_test_id()));
@@ -903,5 +1055,13 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         )
+    }
+
+    fn write_test_occurrence(dir: &Path, occ: &Occurrence) {
+        std::fs::write(
+            dir.join(format!("{}.json", occ.id)),
+            serde_json::to_vec(occ).unwrap(),
+        )
+        .unwrap();
     }
 }
