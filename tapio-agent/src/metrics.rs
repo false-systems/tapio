@@ -14,6 +14,7 @@ pub struct TapioMetrics {
     pub events_total: IntCounterVec,
     pub anomalies_total: IntCounterVec,
     pub lost_events_total: IntCounterVec,
+    pub malformed_events_total: IntCounterVec,
     pub drain_cap_total: IntCounterVec,
     pub enrichment_miss_total: IntCounterVec,
 
@@ -56,6 +57,15 @@ impl TapioMetrics {
             &["observer"],
         )?;
         registry.register(Box::new(lost_events_total.clone()))?;
+
+        let malformed_events_total = IntCounterVec::new(
+            Opts::new(
+                "tapio_malformed_events_total",
+                "Malformed or truncated eBPF records dropped by userspace",
+            ),
+            &["observer"],
+        )?;
+        registry.register(Box::new(malformed_events_total.clone()))?;
 
         let drain_cap_total = IntCounterVec::new(
             Opts::new(
@@ -101,6 +111,7 @@ impl TapioMetrics {
             events_total,
             anomalies_total,
             lost_events_total,
+            malformed_events_total,
             drain_cap_total,
             enrichment_miss_total,
             sink_writes_total,
@@ -164,10 +175,13 @@ mod tests {
         let m = TapioMetrics::new().expect("metrics registration");
         m.events_total.with_label_values(&["network"]).inc();
         m.anomalies_total
-            .with_label_values(&["network", "kernel.network.rst_storm"])
+            .with_label_values(&["network", "kernel.network.connection_refused"])
             .inc();
         m.sink_writes_total
             .with_label_values(&["stdout", "ok"])
+            .inc();
+        m.malformed_events_total
+            .with_label_values(&["network"])
             .inc();
         m.k8s_cache_size.set(42);
         m.k8s_reflector_up.set(1);
@@ -180,6 +194,7 @@ mod tests {
             .expect("encode metrics");
         assert!(buf.contains("tapio_events_total"));
         assert!(buf.contains("tapio_anomalies_total"));
+        assert!(buf.contains("tapio_malformed_events_total"));
         assert!(buf.contains("tapio_k8s_cache_size 42"));
     }
 }

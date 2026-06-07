@@ -81,7 +81,7 @@ impl Sink for HttpSink {
         }; // lock released here — before any I/O
 
         if let Some(batch) = batch {
-            self.post_batch(batch);
+            self.post_batch(batch)?;
         }
 
         Ok(())
@@ -101,8 +101,7 @@ impl Sink for HttpSink {
             batch
         }; // lock released here
 
-        self.post_batch(batch);
-        Ok(())
+        self.post_batch(batch)
     }
 
     fn name(&self) -> &str {
@@ -112,16 +111,16 @@ impl Sink for HttpSink {
 
 impl HttpSink {
     /// POST batch to endpoint. On failure, batch is lost (logged + backoff updated).
-    fn post_batch(&self, batch: Vec<Occurrence>) {
+    fn post_batch(&self, batch: Vec<Occurrence>) -> Result<(), SinkError> {
         if batch.is_empty() {
-            return;
+            return Ok(());
         }
 
         let payload = match serde_json::to_vec(&batch) {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!(error = %e, "http sink: failed to serialize batch");
-                return;
+                return Err(SinkError::Serialization(e.to_string()));
             }
         };
 
@@ -131,6 +130,7 @@ impl HttpSink {
                 if let Ok(mut inner) = self.inner.lock() {
                     inner.backoff = INITIAL_BACKOFF;
                 }
+                Ok(())
             }
             Err(e) => {
                 if let Ok(mut inner) = self.inner.lock() {
@@ -143,6 +143,10 @@ impl HttpSink {
                     dropped = batch.len(),
                     "http sink: send failed, batch dropped"
                 );
+                Err(SinkError::Send(format!(
+                    "http sink: send failed, dropped {} events: {e}",
+                    batch.len()
+                )))
             }
         }
     }
@@ -198,6 +202,15 @@ fn post_json(endpoint: &str, body: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tapio_common::occurrence::{Outcome, Severity};
+
+    fn occurrence() -> Occurrence {
+        Occurrence::new(
+            "kernel.network.connection_refused",
+            Severity::Warning,
+            Outcome::Failure,
+        )
+    }
 
     #[test]
     fn name_is_stable() {
@@ -208,12 +221,77 @@ mod tests {
     #[test]
     fn buffers_below_batch_size_without_sending() {
         let sink = HttpSink::new("http://127.0.0.1:1", 100, Duration::from_secs(3600));
-        let occ = Occurrence::new(
-            "kernel.network.rst_storm",
-            tapio_common::occurrence::Severity::Error,
-            tapio_common::occurrence::Outcome::Failure,
-        );
+        let occ = occurrence();
         // Below batch size and inside flush interval — should buffer, never attempt I/O.
         assert!(sink.send(&occ).is_ok());
+    }
+
+    #[test]
+    fn failed_send_sets_backoff_and_drops_batch() {
+        let sink = HttpSink::new("http://127.0.0.1:1", 1, Duration::from_secs(3600));
+        let occ = occurrence();
+
+        assert!(sink.send(&occ).is_err());
+
+        let inner = sink.inner.lock().unwrap();
+        assert_eq!(inner.buffer.len(), 0);
+        assert!(inner.next_retry > Instant::now());
+        assert_eq!(inner.backoff, INITIAL_BACKOFF * 2);
+    }
+
+    #[test]
+    fn backoff_prevents_immediate_retry_and_keeps_buffered_events() {
+        let sink = HttpSink::new("http://127.0.0.1:1", 1, Duration::from_secs(3600));
+        let occ = occurrence();
+
+        assert!(sink.send(&occ).is_err());
+        assert!(sink.send(&occ).is_ok());
+
+        let inner = sink.inner.lock().unwrap();
+        assert_eq!(inner.buffer.len(), 1);
+        assert!(inner.next_retry > Instant::now());
+    }
+
+    #[test]
+    fn buffer_overflow_drops_oldest_while_in_backoff() {
+        let sink = HttpSink::new("http://127.0.0.1:1", 1, Duration::from_secs(3600));
+        let occ = occurrence();
+
+        assert!(sink.send(&occ).is_err());
+        for _ in 0..12 {
+            assert!(sink.send(&occ).is_ok());
+        }
+
+        let inner = sink.inner.lock().unwrap();
+        assert!(inner.buffer.len() <= inner.max_buffer);
+        assert!(inner.buffer.len() < 12);
+    }
+
+    #[test]
+    fn post_json_accepts_http_endpoint() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 512];
+            let n = stream.read(&mut buf).unwrap();
+            let request = String::from_utf8_lossy(&buf[..n]);
+            assert!(request.starts_with("POST /v1/occurrences HTTP/1.1"));
+            stream
+                .write_all(b"HTTP/1.1 204 No Content\r\n\r\n")
+                .unwrap();
+        });
+
+        post_json(&format!("http://{addr}"), b"[]").unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn post_json_rejects_https_endpoint() {
+        let err = post_json("https://127.0.0.1:4318", b"[]").unwrap_err();
+        assert!(err.contains("http://"));
     }
 }

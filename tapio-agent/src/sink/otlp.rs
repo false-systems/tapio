@@ -138,6 +138,10 @@ fn occurrence_to_log_record(occ: &Occurrence) -> LogRecord {
 
 /// Exports anomaly events as OTLP/HTTP logs (protobuf + gzip) to any
 /// OTLP-compatible collector. Batches and retries with backoff.
+///
+/// This minimal sink supports plaintext HTTP only. Configure TLS at a local
+/// OpenTelemetry Collector, sidecar, node-local proxy, or trusted network
+/// boundary rather than sending an HTTPS URL through this TCP-only client.
 pub struct OtlpSink {
     endpoint: String,
     auth_header: Option<String>,
@@ -158,9 +162,10 @@ impl OtlpSink {
         auth_header: Option<String>,
         batch_size: usize,
         flush_interval: Duration,
-    ) -> Self {
-        Self {
-            endpoint: endpoint.trim_end_matches('/').to_string(),
+    ) -> Result<Self, SinkError> {
+        let endpoint = normalize_http_endpoint(endpoint)?;
+        Ok(Self {
+            endpoint,
             auth_header,
             batch_size,
             flush_interval,
@@ -169,7 +174,7 @@ impl OtlpSink {
                 buffer: Vec::with_capacity(batch_size),
                 last_flush: Instant::now(),
             }),
-        }
+        })
     }
 
     fn export_batch(&self, batch: Vec<Occurrence>) -> Result<(), SinkError> {
@@ -241,12 +246,11 @@ impl OtlpSink {
         use std::io::{BufRead, BufReader};
         use std::net::TcpStream;
 
-        let url_parsed: Vec<&str> = url
-            .strip_prefix("http://")
-            .or_else(|| url.strip_prefix("https://"))
-            .unwrap_or(url)
-            .splitn(2, '/')
-            .collect();
+        let url = url.strip_prefix("http://").ok_or_else(|| {
+            SinkError::Connection(format!("OTLP endpoint must use http://: {url}"))
+        })?;
+
+        let url_parsed: Vec<&str> = url.splitn(2, '/').collect();
 
         let host = url_parsed[0];
         let path = if url_parsed.len() > 1 {
@@ -311,6 +315,34 @@ impl OtlpSink {
     }
 }
 
+fn normalize_http_endpoint(endpoint: &str) -> Result<String, SinkError> {
+    let trimmed = endpoint.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(SinkError::Connection("OTLP endpoint is empty".into()));
+    }
+    if trimmed.starts_with("https://") {
+        return Err(SinkError::Connection(
+            "OTLP sink supports plaintext http:// only; use a local collector or TLS-terminating proxy for HTTPS"
+                .into(),
+        ));
+    }
+    if !trimmed.starts_with("http://") {
+        return Err(SinkError::Connection(format!(
+            "OTLP endpoint must start with http://: {trimmed}"
+        )));
+    }
+
+    let rest = &trimmed["http://".len()..];
+    let host_port = rest.split('/').next().unwrap_or_default();
+    if host_port.is_empty() {
+        return Err(SinkError::Connection(format!(
+            "OTLP endpoint missing host: {trimmed}"
+        )));
+    }
+
+    Ok(trimmed.to_string())
+}
+
 /// Max buffer entries before oldest are dropped (10x batch_size).
 const MAX_BUFFER_MULTIPLIER: usize = 10;
 
@@ -351,6 +383,7 @@ impl Sink for OtlpSink {
             && let Err(e) = self.export_batch(batch)
         {
             tracing::warn!(error = %e, "otlp sink: batch export failed, data dropped");
+            return Err(e);
         }
 
         Ok(())
@@ -372,6 +405,7 @@ impl Sink for OtlpSink {
 
         if let Err(e) = self.export_batch(batch) {
             tracing::warn!(error = %e, "otlp sink: flush export failed, data dropped");
+            return Err(e);
         }
         Ok(())
     }
@@ -456,5 +490,38 @@ mod tests {
         let compressed = encoder.finish().unwrap();
 
         assert!(compressed.len() < proto_bytes.len());
+    }
+
+    #[test]
+    fn rejects_https_endpoint_before_auth_can_be_sent() {
+        let err = match OtlpSink::new(
+            "https://collector.example:4318",
+            Some("Bearer secret".into()),
+            10,
+            Duration::from_secs(1),
+        ) {
+            Ok(_) => panic!("https endpoint should be rejected"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("http:// only"));
+    }
+
+    #[test]
+    fn accepts_http_endpoint() {
+        let sink = OtlpSink::new("http://127.0.0.1:4318/", None, 10, Duration::from_secs(1))
+            .expect("http endpoint");
+        assert_eq!(sink.endpoint, "http://127.0.0.1:4318");
+    }
+
+    #[test]
+    fn rejects_malformed_endpoint() {
+        for endpoint in ["", "collector.example:4318", "ftp://collector.example"] {
+            let err = match OtlpSink::new(endpoint, None, 10, Duration::from_secs(1)) {
+                Ok(_) => panic!("malformed endpoint should be rejected"),
+                Err(err) => err,
+            };
+            assert!(err.to_string().contains("OTLP endpoint"));
+        }
     }
 }
