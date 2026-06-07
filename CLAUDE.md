@@ -100,6 +100,7 @@ Exposes kernel context to AI agents via stdio JSON-RPC 2.0 transport (`tapio mcp
 - **Opinionated, not generic** — Tapio emits named anomalies, not arbitrary kernel events; keep the observer/anomaly model selective
 - **aya is Linux-only** — use `cfg(target_os = "linux")` for eBPF code and K8s enricher, keep tapio-common and tapio-cli platform-independent
 - **Lean** — every dependency must justify its existence. Target: <8MB release binary, <10MB RSS
+- **Lean gate** — run `scripts/verify-lean.sh` before release-worthy changes. It checks fmt, clippy, tests, release binary budgets, dependency tree output, and eBPF compilation when clang/libbpf headers are available. Override budgets with `AGENT_MAX_BYTES` and `CLI_MAX_BYTES` only when the size increase is intentional and documented.
 
 ## Testing patterns
 

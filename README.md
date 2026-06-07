@@ -272,9 +272,12 @@ cargo build --release -p tapio-agent    # ~8MB, LTO + strip + opt-level=z + pani
 cargo build --release -p tapio-cli      # runs anywhere (no eBPF dependency)
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
+scripts/verify-lean.sh                  # fmt + clippy + tests + release size + eBPF compile when headers exist
 ```
 
 Rust edition 2024, MSRV 1.85. The agent requires Linux with kernel 5.8+ and BTF. The CLI runs on any platform — only the agent depends on eBPF.
+
+`scripts/verify-lean.sh` enforces the current binary budgets (`tapio-agent` <= 1.5 MB, `tapio` <= 900 KB by default), saves a cargo tree snapshot under `/tmp/tapio-lean`, and compiles all four eBPF programs when `clang` and libbpf headers are available. Override with `AGENT_MAX_BYTES`, `CLI_MAX_BYTES`, `OUT_DIR`, or `EBPF_ARCH`.
 
 ---
 
