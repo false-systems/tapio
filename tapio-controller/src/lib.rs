@@ -68,7 +68,6 @@ impl ControllerState {
     pub fn register_agent(&self, hello: HelloRequest) -> Result<HelloResponse, WireError> {
         hello.validate()?;
         let mut inner = self.inner.lock().expect("controller state lock poisoned");
-        let config_version = inner.config.version.clone();
         tracing::info!(
             agent_id = %hello.agent_id,
             node_name = %hello.node_name,
@@ -82,7 +81,9 @@ impl ControllerState {
                 registered_at: SystemTime::now(),
             },
         );
-        Ok(HelloResponse::accepted(CONTROLLER_ID, config_version))
+        // Derive the response from the active config so the batching limits we
+        // advertise here match what /v1/events enforces.
+        Ok(HelloResponse::from_config(CONTROLLER_ID, &inner.config))
     }
 
     pub fn config_for(&self, agent_id: &str, node_name: &str) -> Result<ConfigResponse, WireError> {
@@ -351,6 +352,34 @@ mod tests {
         let response = state.register_agent(hello_req()).unwrap();
         assert!(response.accepted);
         assert_eq!(state.agent_count(), 1);
+    }
+
+    #[test]
+    fn hello_response_reflects_controller_config() {
+        // A controller built with a non-default config must advertise that
+        // config's batching limits at hello, not the wire defaults — otherwise
+        // /v1/events would reject batches the agent was told were acceptable.
+        let mut config = ConfigResponse::default_v1();
+        config.version = "7".into();
+        config.batching.send_interval_ms = 500;
+        config.batching.max_batch_events = 2;
+        let state = ControllerState::new(config);
+
+        let response = state.register_agent(hello_req()).unwrap();
+        assert!(response.accepted);
+        assert_eq!(response.config_version, "7");
+        assert_eq!(response.send_interval_ms, 500);
+        assert_eq!(response.max_batch_events, 2);
+
+        // The advertised limit is the enforced limit: a batch within it is
+        // accepted, and one over it is rejected.
+        assert!(state.record_event_batch(event_batch_req()).is_ok());
+        let mut oversized = event_batch_req();
+        let extra = oversized.events[0].clone();
+        oversized.events.push(extra.clone());
+        oversized.events.push(extra);
+        assert_eq!(oversized.events.len() as u64, response.max_batch_events + 1);
+        assert!(state.record_event_batch(oversized).is_err());
     }
 
     #[test]

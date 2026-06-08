@@ -170,14 +170,20 @@ impl HelloRequest {
 }
 
 impl HelloResponse {
-    pub fn accepted(controller_id: impl Into<String>, config_version: impl Into<String>) -> Self {
+    /// Build the accepted hello response from the controller's active config.
+    ///
+    /// The batching limits and config version are taken from `config` so the
+    /// agent is told exactly the limits that `/v1/events` later enforces.
+    /// Hard-coding them here would let an agent be promised one `max_batch_events`
+    /// at hello and have same-sized batches rejected afterwards.
+    pub fn from_config(controller_id: impl Into<String>, config: &ConfigResponse) -> Self {
         Self {
             wire_version: WIRE_VERSION.into(),
             accepted: true,
             controller_id: controller_id.into(),
-            config_version: config_version.into(),
-            send_interval_ms: 1000,
-            max_batch_events: 256,
+            config_version: config.version.clone(),
+            send_interval_ms: config.batching.send_interval_ms,
+            max_batch_events: config.batching.max_batch_events,
         }
     }
 
