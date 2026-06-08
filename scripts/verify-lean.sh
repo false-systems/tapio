@@ -3,15 +3,17 @@
 # Lean verification gate for Tapio.
 #
 # Budgets (two-level for the node agent):
-#   AGENT_MAX_BYTES     hard budget   default 1750000  fail if exceeded
-#   AGENT_TARGET_BYTES  target budget default 1500000  warn if exceeded
+#   AGENT_MAX_BYTES     hard budget   default 1500000  fail if exceeded
+#   AGENT_TARGET_BYTES  target budget default 1250000  warn if exceeded
 #   CLI_MAX_BYTES       hard budget   default  900000  fail if exceeded
 #
-#   The hard budget prevents regression; the target budget guides slimming.
-#   To ratchet down: once the agent stays under a lower size, lower
-#   AGENT_TARGET_BYTES first, then AGENT_MAX_BYTES once it holds in CI.
+#   The hard budget is the line CI protects; the target budget is the next
+#   ratchet point that guides further slimming. To ratchet down: once the
+#   agent stays under a lower size, lower AGENT_TARGET_BYTES first, then lower
+#   AGENT_MAX_BYTES once the target holds consistently in CI.
 #   Override intentionally and document the reason, e.g.:
-#       AGENT_MAX_BYTES=1800000 scripts/verify-lean.sh
+#       AGENT_MAX_BYTES=1600000 scripts/verify-lean.sh
+#   Overrides must not be used to hide a real regression.
 #
 # Reliability knobs:
 #   TAPIO_LEAN_ALLOW_DEGRADED  if set, a required test skipped due to a host
@@ -28,8 +30,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-/tmp/tapio-lean}"
 EBPF_ARCH="${EBPF_ARCH:-}"
-AGENT_MAX_BYTES="${AGENT_MAX_BYTES:-1750000}"
-AGENT_TARGET_BYTES="${AGENT_TARGET_BYTES:-1500000}"
+AGENT_MAX_BYTES="${AGENT_MAX_BYTES:-1500000}"
+AGENT_TARGET_BYTES="${AGENT_TARGET_BYTES:-1250000}"
 CLI_MAX_BYTES="${CLI_MAX_BYTES:-900000}"
 
 DEGRADED=0

@@ -286,7 +286,7 @@ scripts/smoke-ebpf-network.sh           # Linux/Lima: load eBPF, trigger closed-
 
 Rust edition 2024, MSRV 1.85. The agent requires Linux with kernel 5.8+ and BTF. The CLI runs on any platform — only the agent depends on eBPF.
 
-`scripts/verify-lean.sh` enforces the current binary budgets (`tapio-agent` <= 1.5 MB, `tapio` <= 900 KB by default), saves a cargo tree snapshot under `/tmp/tapio-lean`, compiles all four eBPF programs when `clang` and libbpf headers are available, and fails if eBPF object or map budgets are exceeded. Override with `AGENT_MAX_BYTES`, `CLI_MAX_BYTES`, `OUT_DIR`, or `EBPF_ARCH`; budget increases should be committed with a short reason.
+`scripts/verify-lean.sh` enforces a two-level binary budget for the node agent (`tapio-agent` hard limit 1.5 MB / target 1.25 MB; `tapio` hard limit 900 KB by default): it fails above the hard limit and warns above the target. It also saves a cargo tree snapshot under `/tmp/tapio-lean`, compiles all four eBPF programs when `clang` and libbpf headers are available, and fails if eBPF object or map budgets are exceeded. Override with `AGENT_MAX_BYTES`, `AGENT_TARGET_BYTES`, `CLI_MAX_BYTES`, `OUT_DIR`, or `EBPF_ARCH`; ratchet the target down before the hard limit, and commit any budget change with a short reason (never to hide a regression).
 
 `scripts/smoke-ebpf-network.sh` must run on Linux, or from this repo inside the Lima Ubuntu VM. It starts the real agent, loads the network eBPF program, triggers a TCP connection attempt to a closed localhost port, and asserts that the file sink records a `kernel.network.*` occurrence with the expected destination port.
 
