@@ -1,178 +1,225 @@
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use prometheus::{IntCounterVec, IntGauge, Opts, Registry, TextEncoder};
-
-/// All TAPIO Prometheus metrics, registered against a non-global Registry.
-/// Every family here is incremented by an observer, sink fan-out, or K8s enrichment path.
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct TapioMetrics {
-    pub registry: Arc<Registry>,
+    pub events_total: CounterVec,
+    pub anomalies_total: CounterVec,
+    pub lost_events_total: CounterVec,
+    pub malformed_events_total: CounterVec,
+    pub correlation_drops_total: CounterVec,
+    pub drain_cap_total: CounterVec,
+    pub sink_writes_total: CounterVec,
+}
 
-    // Observer health
-    pub events_total: IntCounterVec,
-    pub anomalies_total: IntCounterVec,
-    pub lost_events_total: IntCounterVec,
-    pub malformed_events_total: IntCounterVec,
-    pub correlation_drops_total: IntCounterVec,
-    pub drain_cap_total: IntCounterVec,
-    pub enrichment_miss_total: IntCounterVec,
+#[derive(Clone)]
+pub struct CounterVec {
+    name: &'static str,
+    help: &'static str,
+    labels: &'static [&'static str],
+    values: Arc<Mutex<BTreeMap<Vec<String>, u64>>>,
+}
 
-    // Sink health
-    pub sink_writes_total: IntCounterVec,
-
-    // K8s enrichment
-    pub k8s_cache_size: IntGauge,
-    pub k8s_reflector_up: IntGauge,
+pub struct Counter {
+    values: Arc<Mutex<BTreeMap<Vec<String>, u64>>>,
+    label_values: Vec<String>,
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 impl TapioMetrics {
     pub fn new() -> anyhow::Result<Self> {
-        let registry = Registry::new();
-
-        let events_total = IntCounterVec::new(
-            Opts::new(
+        Ok(Self {
+            events_total: CounterVec::new(
                 "tapio_events_total",
                 "Total events drained from ring buffer",
+                &["observer"],
             ),
-            &["observer"],
-        )?;
-        registry.register(Box::new(events_total.clone()))?;
-
-        let anomalies_total = IntCounterVec::new(
-            Opts::new(
+            anomalies_total: CounterVec::new(
                 "tapio_anomalies_total",
                 "Total anomalies detected and emitted",
+                &["observer", "anomaly_type"],
             ),
-            &["observer", "anomaly_type"],
-        )?;
-        registry.register(Box::new(anomalies_total.clone()))?;
-
-        let lost_events_total = IntCounterVec::new(
-            Opts::new(
+            lost_events_total: CounterVec::new(
                 "tapio_lost_events_total",
                 "Ring buffer reserve failures in eBPF (events dropped)",
+                &["observer"],
             ),
-            &["observer"],
-        )?;
-        registry.register(Box::new(lost_events_total.clone()))?;
-
-        let malformed_events_total = IntCounterVec::new(
-            Opts::new(
+            malformed_events_total: CounterVec::new(
                 "tapio_malformed_events_total",
                 "Malformed or truncated eBPF records dropped by userspace",
+                &["observer"],
             ),
-            &["observer"],
-        )?;
-        registry.register(Box::new(malformed_events_total.clone()))?;
-
-        let correlation_drops_total = IntCounterVec::new(
-            Opts::new(
+            correlation_drops_total: CounterVec::new(
                 "tapio_correlation_drops_total",
                 "Events intentionally dropped because kernel correlation was ambiguous",
+                &["observer", "reason"],
             ),
-            &["observer", "reason"],
-        )?;
-        registry.register(Box::new(correlation_drops_total.clone()))?;
-
-        let drain_cap_total = IntCounterVec::new(
-            Opts::new(
+            drain_cap_total: CounterVec::new(
                 "tapio_drain_cap_total",
                 "Times ring buffer drain hit the per-tick cap",
+                &["observer"],
             ),
-            &["observer"],
-        )?;
-        registry.register(Box::new(drain_cap_total.clone()))?;
-
-        let enrichment_miss_total = IntCounterVec::new(
-            Opts::new(
-                "tapio_enrichment_miss_total",
-                "Enrichment lookups that returned no pod context",
-            ),
-            &["observer"],
-        )?;
-        registry.register(Box::new(enrichment_miss_total.clone()))?;
-
-        let sink_writes_total = IntCounterVec::new(
-            Opts::new(
+            sink_writes_total: CounterVec::new(
                 "tapio_sink_writes_total",
                 "Total sink write attempts by result",
+                &["sink", "result"],
             ),
-            &["sink", "result"],
-        )?;
-        registry.register(Box::new(sink_writes_total.clone()))?;
-
-        let k8s_cache_size = IntGauge::new(
-            "tapio_k8s_cache_size",
-            "Current cgroup_id to pod map entries",
-        )?;
-        registry.register(Box::new(k8s_cache_size.clone()))?;
-
-        let k8s_reflector_up = IntGauge::new(
-            "tapio_k8s_reflector_up",
-            "1 if K8s reflector is connected, 0 if not",
-        )?;
-        registry.register(Box::new(k8s_reflector_up.clone()))?;
-
-        Ok(Self {
-            registry: Arc::new(registry),
-            events_total,
-            anomalies_total,
-            lost_events_total,
-            malformed_events_total,
-            correlation_drops_total,
-            drain_cap_total,
-            enrichment_miss_total,
-            sink_writes_total,
-            k8s_cache_size,
-            k8s_reflector_up,
         })
+    }
+
+    pub fn encode(&self) -> String {
+        let mut out = String::new();
+        for counter in [
+            &self.events_total,
+            &self.anomalies_total,
+            &self.lost_events_total,
+            &self.malformed_events_total,
+            &self.correlation_drops_total,
+            &self.drain_cap_total,
+            &self.sink_writes_total,
+        ] {
+            counter.encode(&mut out);
+        }
+        out
+    }
+}
+
+impl CounterVec {
+    fn new(name: &'static str, help: &'static str, labels: &'static [&'static str]) -> Self {
+        Self {
+            name,
+            help,
+            labels,
+            values: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
+    pub fn with_label_values(&self, label_values: &[&str]) -> Counter {
+        debug_assert_eq!(label_values.len(), self.labels.len());
+        Counter {
+            values: self.values.clone(),
+            label_values: label_values
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+        }
+    }
+
+    fn encode(&self, out: &mut String) {
+        out.push_str("# HELP ");
+        out.push_str(self.name);
+        out.push(' ');
+        out.push_str(self.help);
+        out.push('\n');
+        out.push_str("# TYPE ");
+        out.push_str(self.name);
+        out.push_str(" counter\n");
+
+        let values = self.values.lock().expect("metrics lock poisoned");
+        for (label_values, value) in values.iter() {
+            out.push_str(self.name);
+            if !self.labels.is_empty() {
+                out.push('{');
+                for (idx, (label, label_value)) in
+                    self.labels.iter().zip(label_values.iter()).enumerate()
+                {
+                    if idx > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(label);
+                    out.push_str("=\"");
+                    push_escaped_label(out, label_value);
+                    out.push('"');
+                }
+                out.push('}');
+            }
+            out.push(' ');
+            out.push_str(&value.to_string());
+            out.push('\n');
+        }
+    }
+}
+
+impl Counter {
+    pub fn inc(&self) {
+        self.inc_by(1);
+    }
+
+    pub fn inc_by(&self, value: u64) {
+        let mut values = self.values.lock().expect("metrics lock poisoned");
+        *values.entry(self.label_values.clone()).or_insert(0) += value;
+    }
+}
+
+fn push_escaped_label(out: &mut String, value: &str) {
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            other => out.push(other),
+        }
     }
 }
 
 /// Serve /metrics on the given address. Runs until the shutdown signal is received.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub async fn serve(
-    registry: Arc<Registry>,
+    metrics: TapioMetrics,
     addr: SocketAddr,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
-    use axum::{Router, http::header, routing::get};
+    tokio::task::spawn_blocking(move || serve_blocking(metrics, addr, shutdown)).await?
+}
 
-    let app = Router::new().route(
-        "/metrics",
-        get(move || {
-            let registry = registry.clone();
-            async move {
-                let encoder = TextEncoder::new();
-                let metric_families = registry.gather();
-                let mut buffer = String::new();
-                if let Err(e) = encoder.encode_utf8(&metric_families, &mut buffer) {
-                    return (
-                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                        [(header::CONTENT_TYPE, "text/plain")],
-                        format!("encoding error: {e}"),
-                    );
+fn serve_blocking(
+    metrics: TapioMetrics,
+    addr: SocketAddr,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) -> anyhow::Result<()> {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::Duration;
+
+    tracing::info!(%addr, "metrics endpoint starting");
+
+    let listener = TcpListener::bind(addr)?;
+    listener.set_nonblocking(true)?;
+
+    while !*shutdown.borrow() {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let mut request = [0u8; 1024];
+                stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
+                let n = stream.read(&mut request)?;
+                let first_line = std::str::from_utf8(&request[..n])
+                    .unwrap_or_default()
+                    .lines()
+                    .next()
+                    .unwrap_or_default();
+
+                if !first_line.starts_with("GET /metrics ") {
+                    stream.write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot found",
+                    )?;
+                    continue;
                 }
-                (
-                    axum::http::StatusCode::OK,
-                    [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
-                    buffer,
-                )
+
+                let body = metrics.encode();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(response.as_bytes())?;
             }
-        }),
-    );
-
-    tracing::info!(%addr, "prometheus metrics endpoint starting");
-
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            let _ = shutdown.changed().await;
-        })
-        .await?;
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
 
     Ok(())
 }
@@ -197,20 +244,12 @@ mod tests {
         m.correlation_drops_total
             .with_label_values(&["storage", "ambiguous_inflight_io"])
             .inc();
-        m.k8s_cache_size.set(42);
-        m.k8s_reflector_up.set(1);
 
-        let encoder = TextEncoder::new();
-        let families = m.registry.gather();
-        let mut buf = String::new();
-        encoder
-            .encode_utf8(&families, &mut buf)
-            .expect("encode metrics");
+        let buf = m.encode();
         assert!(buf.contains("tapio_events_total"));
         assert!(buf.contains("tapio_anomalies_total"));
         assert!(buf.contains("tapio_malformed_events_total"));
         assert!(buf.contains("tapio_correlation_drops_total"));
-        assert!(buf.contains("tapio_k8s_cache_size 42"));
     }
 
     #[test]
@@ -226,17 +265,22 @@ mod tests {
             .with_label_values(&["storage", "ambiguous_inflight_io"])
             .inc_by(1);
 
-        let encoder = TextEncoder::new();
-        let families = m.registry.gather();
-        let mut buf = String::new();
-        encoder
-            .encode_utf8(&families, &mut buf)
-            .expect("encode metrics");
-
+        let buf = m.encode();
         assert!(buf.contains("tapio_lost_events_total{observer=\"network\"} 3"));
         assert!(buf.contains("tapio_malformed_events_total{observer=\"network\"} 2"));
         assert!(buf.contains(
             "tapio_correlation_drops_total{observer=\"storage\",reason=\"ambiguous_inflight_io\"} 1"
         ));
+    }
+
+    #[test]
+    fn label_values_are_escaped() {
+        let m = TapioMetrics::new().expect("metrics registration");
+        m.sink_writes_total
+            .with_label_values(&["quote\"slash\\newline\n", "ok"])
+            .inc();
+
+        let buf = m.encode();
+        assert!(buf.contains("quote\\\"slash\\\\newline\\n"));
     }
 }

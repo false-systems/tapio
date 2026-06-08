@@ -2,7 +2,9 @@
 resolver = "2"
 members = [
     "tapio-common",
+    "tapio-wire",
     "tapio-agent",
+    "tapio-controller",
     "tapio-cli",
 ]
 
@@ -19,10 +21,6 @@ aya = "0.13"
 
 # Async
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
-
-# K8s enrichment
-kube = { version = "0.98", features = ["runtime", "client"] }
-k8s-openapi = { version = "0.24", features = ["v1_32"] }
 
 # Protobuf (OTLP export)
 prost = "0.13"
@@ -48,12 +46,6 @@ flate2 = "1"
 # System
 libc = "0.2"
 
-# Concurrent data structures
-dashmap = "6"
-
-# Async streams (kube reflector)
-futures = "0.3"
-
 # Config
 toml = "0.8"
 
@@ -65,6 +57,7 @@ anyhow = "1"
 
 # Workspace crates
 tapio-common = { path = "tapio-common" }
+tapio-wire = { path = "tapio-wire" }
 
 [profile.release]
 lto = true
