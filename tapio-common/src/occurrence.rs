@@ -3,8 +3,8 @@
 /// In JSON output this is a FALSE Protocol-compatible occurrence document.
 /// Tapio fills factual fields only (type, severity, outcome, error, context, data).
 /// Reasoning and remediation are left empty — those belong to downstream systems.
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Occurrence {
@@ -123,7 +123,7 @@ impl Occurrence {
     pub fn new(occurrence_type: &str, severity: Severity, outcome: Outcome) -> Self {
         Self {
             id: ulid::Ulid::new().to_string(),
-            timestamp: Utc::now().to_rfc3339(),
+            timestamp: now_rfc3339(),
             source: "tapio".into(),
             occurrence_type: occurrence_type.into(),
             severity,
@@ -145,14 +145,9 @@ impl Occurrence {
         outcome: Outcome,
         wall_ns: u64,
     ) -> Self {
-        let secs = (wall_ns / 1_000_000_000) as i64;
-        let nsecs = (wall_ns % 1_000_000_000) as u32;
-        let ts = chrono::DateTime::from_timestamp(secs, nsecs)
-            .unwrap_or_else(Utc::now)
-            .to_rfc3339();
         Self {
             id: ulid::Ulid::new().to_string(),
-            timestamp: ts,
+            timestamp: unix_nanos_to_rfc3339(wall_ns),
             source: "tapio".into(),
             occurrence_type: occurrence_type.into(),
             severity,
@@ -212,6 +207,54 @@ impl Occurrence {
             Err(errors)
         }
     }
+}
+
+fn now_rfc3339() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| {
+            duration
+                .as_secs()
+                .saturating_mul(1_000_000_000)
+                .saturating_add(u64::from(duration.subsec_nanos()))
+        })
+        .unwrap_or(0);
+    unix_nanos_to_rfc3339(nanos)
+}
+
+fn unix_nanos_to_rfc3339(nanos: u64) -> String {
+    let secs = nanos / 1_000_000_000;
+    let subsec_nanos = (nanos % 1_000_000_000) as u32;
+    let days = (secs / 86_400) as i64;
+    let seconds_of_day = secs % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+
+    if subsec_nanos == 0 {
+        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}+00:00")
+    } else {
+        format!(
+            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{subsec_nanos:09}+00:00"
+        )
+    }
+}
+
+fn civil_from_days(days_since_unix_epoch: i64) -> (i64, i64, i64) {
+    let z = days_since_unix_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    if month <= 2 {
+        year += 1;
+    }
+    (year, month, day)
 }
 
 #[cfg(test)]
@@ -346,5 +389,14 @@ mod tests {
         );
         assert!(occ.timestamp.starts_with("2024-01-15"));
         assert!(occ.validate().is_ok());
+    }
+
+    #[test]
+    fn unix_nanos_to_rfc3339_matches_utc_shape() {
+        assert_eq!(unix_nanos_to_rfc3339(0), "1970-01-01T00:00:00+00:00");
+        assert_eq!(
+            unix_nanos_to_rfc3339(1_705_314_600_123_456_789),
+            "2024-01-15T10:30:00.123456789+00:00"
+        );
     }
 }
