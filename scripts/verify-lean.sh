@@ -121,6 +121,7 @@ cargo tree --workspace > "$OUT_DIR/cargo-tree.txt"
 printf 'saved %s\n' "$OUT_DIR/cargo-tree.txt"
 printf 'direct tapio-agent dependencies:\n'
 cargo tree -p tapio-agent --depth 1
+scripts/check-agent-deps.sh
 
 section "eBPF compile"
 if ! command -v clang >/dev/null 2>&1; then

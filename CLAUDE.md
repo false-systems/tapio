@@ -36,7 +36,8 @@ Rust edition 2024, MSRV 1.85. tapio-agent only compiles on Linux (aya dependency
 ### Workspace crates
 
 - **tapio-common**: Shared types. `#[repr(C)]` eBPF event structs mirroring the C programs, `kernel.*` event type hierarchy, FALSE Protocol `Occurrence` builder, `Sink` trait.
-- **tapio-agent**: DaemonSet binary. Loads eBPF C programs via aya, reads ring buffers, parses events, filters anomalies, enriches with K8s context (kube-rs), emits events to sinks. Linux-only (aya requires kernel). Internal modules: `observer/` (four observer submodules), `sink/` (`StdoutSink`, `FileSink`, `HttpSink`, `OtlpSink`), `enricher.rs` (K8s pod enrichment, also `cfg(target_os = "linux")`), `config.rs` (TOML loader — handles tunable knobs only: `thresholds`, `metrics`, `otlp`. Operational paths like sinks/ebpf-dir/data-dir are CLI-only — disjoint scopes, not overlapping), `metrics.rs` (Prometheus registry, non-global — passed via `Arc` to observers and sinks).
+- **tapio-agent**: DaemonSet binary. Loads eBPF C programs via aya, reads ring buffers, parses events, filters anomalies, and emits events to sinks. Linux-only (aya requires kernel). Internal modules: `observer/` (four observer submodules), `sink/` (`StdoutSink`, `FileSink`, `HttpSink`, optional `OtlpSink` behind `--features otlp`), `config.rs` (TOML loader — handles tunable knobs only: `thresholds`, `metrics`, `otlp`. Operational paths like sinks/ebpf-dir/data-dir are CLI-only — disjoint scopes, not overlapping), `metrics.rs` (Prometheus registry, non-global — passed via `Arc` to observers and sinks).
+- **tapio-controller**: Cluster coordination binary. Owns the HTTP server side of `tapio-wire/v1`, in-memory agent registry, heartbeat state, and future Kubernetes-aware coordination.
 - **tapio-cli**: User/AI interface. Single-file crate (`main.rs`). CLI commands (`tapio status`, `tapio watch`, `tapio health`, `tapio recent`). Reads from `.tapio/occurrences/*.json` — decoupled from the agent process. MCP server (`tapio mcp`) exposes `tapio_recent_anomalies`, `tapio_node_health`, `tapio_watch_stream` tools via stdio JSON-RPC 2.0.
 
 ### eBPF programs (C, in `ebpf/`)
@@ -69,12 +70,12 @@ Requires kernel 5.8+ (with BTF) and capabilities: `CAP_BPF`, `CAP_PERFMON`, `CAP
 ### Event flow
 
 ```
-eBPF (C) → ring buffer → parse (#[repr(C)] structs) → filter (anomaly?) → enrich (K8s pod context) → Occurrence → Sink
+eBPF (C) → ring buffer → parse (#[repr(C)] structs) → filter (anomaly?) → Occurrence → Sink
 ```
 
 ### Sinks (pluggable output)
 
-Implement the `Sink` trait from `tapio-common/src/sink.rs` (synchronous — async wrappers belong in the agent). Current: `StdoutSink` (JSON lines), `FileSink` (one `.json` per event in `.tapio/`), `HttpSink` (batched JSON POST with exponential backoff), `OtlpSink` (OTLP/HTTP logs with gzip, maps events to LogRecords) in `tapio-agent/src/sink/`, plus `MultiSink` (fan-out, logs errors, doesn't short-circuit) defined in `tapio-agent/src/main.rs`. `stdout`/`file` are the standalone default; `http`/`otlp` are optional integrations for forwarding to a collector.
+Implement the `Sink` trait from `tapio-common/src/sink.rs` (synchronous — async wrappers belong in the agent). Current: `StdoutSink` (JSON lines), `FileSink` (one `.json` per event in `.tapio/`), `HttpSink` (batched JSON POST with exponential backoff), optional `OtlpSink` behind `--features otlp` (OTLP/HTTP logs with gzip, maps events to LogRecords) in `tapio-agent/src/sink/`, plus `MultiSink` (fan-out, logs errors, doesn't short-circuit) defined in `tapio-agent/src/main.rs`. `stdout`/`file` are the standalone default; `http`/`otlp` are optional integrations for forwarding to a collector.
 
 Network sink guarantees and non-goals:
 - `OtlpSink` is plaintext `http://` only. `https://` endpoints are rejected before any connection opens or `Authorization` header can be written. Terminate TLS at a collector, sidecar, node-local proxy, or trusted boundary.
@@ -99,7 +100,8 @@ Exposes kernel context to AI agents via stdio JSON-RPC 2.0 transport (`tapio mcp
 - **Tapio provides context, not reasoning** — facts in events; never fill `possible_causes`, `suggested_fix`, or the reasoning block
 - **Missing beats wrong** — if kernel tracepoints cannot uniquely correlate an event, drop and count it instead of emitting misleading evidence. Storage ambiguous inflight I/O uses `tapio_correlation_drops_total{observer="storage",reason="ambiguous_inflight_io"}`.
 - **Opinionated, not generic** — Tapio emits named anomalies, not arbitrary kernel events; keep the observer/anomaly model selective
-- **aya is Linux-only** — use `cfg(target_os = "linux")` for eBPF code and K8s enricher, keep tapio-common and tapio-cli platform-independent
+- **aya is Linux-only** — use `cfg(target_os = "linux")` for eBPF code, keep tapio-common and tapio-cli platform-independent
+- **Agent/controller dependency boundary** — tapio-controller dependencies must never enter tapio-agent through workspace defaults. `tapio-agent` must not depend on `kube`, `k8s-openapi`, `axum`, `hyper`, `tonic`, or `reqwest`; `scripts/check-agent-deps.sh` enforces this.
 - **Lean** — every dependency must justify its existence. Target: <8MB release binary, <10MB RSS
 - **Lean gate** — run `scripts/verify-lean.sh` before release-worthy changes. It checks fmt, clippy, tests, release binary budgets, dependency tree output, eBPF object budgets, eBPF map budgets, and eBPF compilation when clang/libbpf headers are available. Override budgets with `AGENT_MAX_BYTES` and `CLI_MAX_BYTES` only when the size increase is intentional and documented; eBPF budget increases must be explicit in `scripts/verify-lean.sh`.
 - **Runtime smoke** — run `scripts/smoke-ebpf-network.sh` on Linux/Lima for kernel behavior changes. It loads the real network observer, triggers a closed-port TCP connect, and checks that userspace emits a network occurrence with the exact destination port.
@@ -112,20 +114,19 @@ Each observer module (`network.rs`, `container.rs`, `storage.rs`, `node_pmc.rs`)
 
 The `tapio-agent` binary accepts:
 - `--config <path>` — TOML config file (default: `/etc/tapio/tapio.toml`)
-- `--sink <name>` — output sink (`stdout`, `file`, `http`, `otlp`), repeatable for multi-sink
+- `--sink <name>` — output sink (`stdout`, `file`, `http`; `otlp` when built with `--features otlp`), repeatable for multi-sink
 - `--ebpf-dir <path>` — directory with compiled `.o` files (default: `/opt/tapio/ebpf`)
 - `--data-dir <path>` — directory for file sink output (default: `.tapio/occurrences`)
 - `--http-endpoint <url>` — endpoint for the `http` sink (default: `http://localhost:8765`)
 
 ## Environment variables
 
-- **`NODE_NAME`**: Required for K8s enrichment. Set to the Kubernetes node name. If unset, enrichment is disabled (occurrences emitted without pod context). Typically set via the Downward API in the DaemonSet spec.
 - **`RUST_LOG`**: Controls log verbosity (e.g. `RUST_LOG=info` or `RUST_LOG=tapio_agent=debug`).
 - **`TAPIO_DATA_DIR`**: Override the CLI's default data directory (default: `.tapio/occurrences`).
 
 ## Observability
 
 - **Logging**: `tracing` crate, env-filtered via `RUST_LOG`
-- **Metrics**: `prometheus` crate on configurable port (default `:9090`) via axum. Enable with `[metrics] enabled = true` in config. **Binds to `127.0.0.1` by default** — set `bind_address = "0.0.0.0"` to expose to the node network (e.g. for cluster Prometheus scrape). Families: `tapio_events_total`, `tapio_anomalies_total`, `tapio_lost_events_total`, `tapio_malformed_events_total`, `tapio_drain_cap_total`, `tapio_enrichment_miss_total`, `tapio_sink_writes_total`, `tapio_k8s_cache_size`, `tapio_k8s_reflector_up`
+- **Metrics**: `prometheus` crate on configurable port (default `:9090`) via a tiny local HTTP handler. Enable with `[metrics] enabled = true` in config. **Binds to `127.0.0.1` by default** — set `bind_address = "0.0.0.0"` to expose to the node network (e.g. for cluster Prometheus scrape). Families: `tapio_events_total`, `tapio_anomalies_total`, `tapio_lost_events_total`, `tapio_malformed_events_total`, `tapio_drain_cap_total`, `tapio_sink_writes_total`
 - **Metric prefix**: `tapio_`
 - **eBPF-side metrics**: the shared per-CPU `tapio_metrics` map currently exports only `METRIC_LOST_EVENTS` to userspace. Do not add counters to `metrics.h` unless userspace reads and exposes them or the counter is otherwise consumed.

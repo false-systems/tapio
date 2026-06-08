@@ -17,19 +17,15 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
-clap = { workspace = true }
 anyhow = { workspace = true }
-prometheus = { workspace = true }
-axum = { workspace = true }
-prost = { workspace = true }
-flate2 = { workspace = true }
+prost = { workspace = true, optional = true }
+flate2 = { workspace = true, optional = true }
 chrono = { workspace = true }
+
+[features]
+default = []
+otlp = ["dep:prost", "dep:flate2"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 aya = { workspace = true }
 libc = { workspace = true }
-kube = { workspace = true }
-k8s-openapi = { workspace = true }
-# Concurrent cache for K8s enrichment without blocking observers
-dashmap = { workspace = true }
-futures = { workspace = true }
