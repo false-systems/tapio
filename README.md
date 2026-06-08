@@ -81,8 +81,6 @@ Rust userspace parser
   ↓
 Edge anomaly filtering
   ↓
-Kubernetes enrichment
-  ↓
 Sinks
 ```
 
@@ -91,8 +89,8 @@ Kernel signals                  Rust userspace                    Outputs
 ──────────────                  ──────────────                    ───────
 inet_sock_set_state ──┐
 tcp_receive_reset  ───┤
-tcp_retransmit_skb ───┼──► ring buffer ──► parse ──► filter ──► enrich ──► stdout
-                      │                              anomaly?   kube-rs     file (.tapio/)
+tcp_retransmit_skb ───┼──► ring buffer ──► parse ──► filter ──► stdout
+                      │                              anomaly?     file (.tapio/)
 sched_process_exit ───┤                                                    HTTP
 oom/mark_victim    ───┤                                                    OTLP
                       │
@@ -166,7 +164,7 @@ Tapio fills factual fields only: timestamp, source, observer/type, severity, out
 }
 ```
 
-`memory_limit_bytes` may be `0` for OOM kills because the BPF tracepoint does not expose the cgroup limit. `context` is populated when Kubernetes enrichment is enabled and `NODE_NAME` is set (see [Kubernetes](#kubernetes)).
+`memory_limit_bytes` may be `0` for OOM kills because the BPF tracepoint does not expose the cgroup limit. Cluster context belongs in the controller or downstream systems, not in the node hot path.
 
 ---
 
@@ -205,7 +203,7 @@ tapio-agent --ebpf-dir /opt/tapio/ebpf     # compiled .o location
 Flags:
 
 - `--config <path>` — TOML config file (default `/etc/tapio/tapio.toml`); tunes thresholds, metrics, and the OTLP sink.
-- `--sink <name>` — output sink (`stdout`, `file`, `http`, `otlp`), repeatable.
+- `--sink <name>` — output sink (`stdout`, `file`, `http`; `otlp` when built with `--features otlp`), repeatable.
 - `--ebpf-dir <path>` — directory of compiled `.o` files (default `/opt/tapio/ebpf`).
 - `--data-dir <path>` — directory for the file sink (default `.tapio/occurrences`).
 - `--http-endpoint <url>` — endpoint for the `http` sink.
@@ -220,9 +218,19 @@ Tapio runs without any external service: `--sink=stdout` and `--sink=file` work 
 
 Tapio runs as a privileged DaemonSet, one agent per node.
 
-Kubernetes context is populated when enrichment is enabled and `NODE_NAME` is set, usually through the Kubernetes Downward API. If `NODE_NAME` is unset or the API is unreachable, enrichment is skipped and events are emitted without pod context — local mode keeps working.
+Kubernetes is optional for the node agent. Tapio observes the Linux kernel and emits node-local evidence without watching the Kubernetes API. Cluster-aware pod, namespace, and workload context belongs in `tapio-controller` or downstream systems.
 
-Kubernetes is optional. Tapio observes the Linux kernel; the Kubernetes layer only adds pod, namespace, and workload context to the evidence it already has.
+## Agent/controller split
+
+Tapio keeps intelligence out of the kernel and bloat out of the node agent.
+
+The agent observes. The controller coordinates. Downstream systems explain.
+
+The v0 agent/controller boundary is `tapio-wire/v1`: agent-initiated HTTP/1.1 plus JSON for hello, config pull, heartbeat, and event batch delivery. The controller is the HTTP server; the agent does not expose an inbound controller API and does not use gRPC for this path.
+
+Kernel facts still move from eBPF to userspace through ring buffers. Tiny runtime config still moves from the agent to eBPF through BPF config maps. Controller context stays out of the node hot path.
+
+See [docs/agent-controller.md](docs/agent-controller.md) for the runtime model, protocol endpoints, security assumptions, failure behavior, and non-goals.
 
 ---
 
@@ -238,11 +246,11 @@ Tapio emits structured anomaly events to local files, stdout, HTTP endpoints, or
 | `OtlpSink` | OTLP/HTTP logs export (protobuf + gzip) to any OTLP-compatible collector |
 | `MultiSink` | fan-out wrapper; sends to all configured sinks, logs errors without short-circuiting |
 
-Sinks implement the `tapio_common::sink::Sink` trait (sync `send`/`flush`/`name`). The local sinks (`stdout`, `file`) are the default path and need nothing external. The network sinks (`http`, `otlp`) are optional integrations for forwarding evidence to a collector or ingest service of your choice.
+Sinks implement the `tapio_common::sink::Sink` trait (sync `send`/`flush`/`name`). The local sinks (`stdout`, `file`) are the default path and need nothing external. The `http` sink is a tiny built-in JSON forwarder. The `otlp` sink is available only when building `tapio-agent` with `--features otlp`.
 
 Current sink guarantees:
 
-- `OtlpSink` supports plaintext `http://` endpoints only. `https://` endpoints are rejected at configuration time before any TCP connection is opened or `Authorization` header can be written.
+- `OtlpSink` supports plaintext `http://` endpoints only when the `otlp` feature is enabled. `https://` endpoints are rejected at configuration time before any TCP connection is opened or `Authorization` header can be written.
 - `HttpSink` and `OtlpSink` return sink errors when a batch export fails after data is dropped. `MultiSink` records those failures in `tapio_sink_writes_total{result="err"}` while still attempting later sinks.
 - `FileSink` writes one validated occurrence JSON document per event. The CLI rejects corrupt or invalid occurrence files instead of silently treating them as evidence.
 
@@ -261,9 +269,7 @@ The current metric families are all backed by live code paths:
 - `tapio_lost_events_total` — eBPF ring-buffer reserve failures surfaced from the shared `tapio_metrics` per-CPU map.
 - `tapio_malformed_events_total` — truncated or malformed ring-buffer records dropped by userspace.
 - `tapio_drain_cap_total` — drain loops that hit the per-tick cap.
-- `tapio_enrichment_miss_total` — Kubernetes enrichment lookups with no pod context.
 - `tapio_sink_writes_total` — sink write attempts by sink name and result (`ok` or `err`).
-- `tapio_k8s_cache_size` and `tapio_k8s_reflector_up` — Kubernetes enrichment cache/reflector state.
 
 ---
 
@@ -305,13 +311,15 @@ Use `-D__TARGET_ARCH_arm64` instead of `-D__TARGET_ARCH_x86` for arm64 nodes.
 
 ```
 tapio-common/     #[repr(C)] event structs, kernel.* anomaly types, occurrence schema, Sink trait
-tapio-agent/      DaemonSet — eBPF load → ring buffer → parse → filter → enrich → emit
+tapio-agent/      DaemonSet — eBPF load → ring buffer → parse → filter → emit
+tapio-controller/ Cluster coordination and tapio-wire/v1 HTTP endpoint contracts
 tapio-cli/        CLI commands + MCP server, reads .tapio/occurrences/
 ebpf/             4 C programs + shared headers
 ```
 
 - **tapio-common** is platform-independent: the shared `#[repr(C)]` event structs, the `kernel.*` anomaly type constants, the occurrence schema, and the `Sink` trait.
-- **tapio-agent** is Linux-only (aya requires the kernel). It owns the observers, the K8s enricher, the sinks, and metrics.
+- **tapio-agent** is Linux-only (aya requires the kernel). It owns the observers, sinks, and local metrics. It does not own Kubernetes watches or controller HTTP server dependencies.
+- **tapio-controller** owns cluster-aware coordination and the HTTP server side of `tapio-wire/v1`.
 - **tapio-cli** is platform-independent and reads the local event store; it never talks to the agent directly.
 
 ---

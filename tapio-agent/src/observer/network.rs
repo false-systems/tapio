@@ -158,7 +158,6 @@ pub struct NetworkThresholds {
 pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
-    enricher: Option<&crate::enricher::K8sEnricher>,
     _boot_offset_ns: u64,
     thresholds: NetworkThresholds,
     metrics: &crate::metrics::TapioMetrics,
@@ -213,8 +212,6 @@ pub async fn run(
     let mut tick_count: u64 = 0;
     let mut prev_lost: u64 = 0;
     let mut malformed_count: u64 = 0;
-    let mut enrich_total: u64 = 0;
-    let mut enrich_miss: u64 = 0;
 
     loop {
         tokio::select! {
@@ -224,8 +221,8 @@ pub async fn run(
             }
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
                 tick_count += 1;
-                if tick_count.is_multiple_of(super::LOST_EVENTS_CHECK_INTERVAL) {
-                    if let Some(fd) = metrics_fd {
+                if tick_count.is_multiple_of(super::LOST_EVENTS_CHECK_INTERVAL)
+                    && let Some(fd) = metrics_fd {
                         let lost = super::read_percpu_sum(fd, super::METRIC_LOST_EVENTS, nr_cpus);
                         if lost > prev_lost {
                             metrics.lost_events_total
@@ -239,19 +236,6 @@ pub async fn run(
                             );
                             prev_lost = lost;
                         }
-                    }
-                    if enrich_total > 0 {
-                        let miss_pct = (enrich_miss as f64 / enrich_total as f64) * 100.0;
-                        if miss_pct > 10.0 {
-                            tracing::warn!(
-                                observer = "network",
-                                miss_pct = format!("{miss_pct:.1}"),
-                                enrich_miss,
-                                enrich_total,
-                                "enrichment miss rate exceeds 10%"
-                            );
-                        }
-                    }
                 }
                 let drained = tokio::task::block_in_place(|| {
                     let mut count = 0usize;
@@ -281,17 +265,7 @@ pub async fn run(
                         event_count += 1;
                         metrics.events_total.with_label_values(&["network"]).inc();
                         if let Some(anomaly) = classify(&event) {
-                            let mut occ = build_occurrence(&event, &anomaly);
-                            if let Some(enricher) = enricher {
-                                let pid = event.pid;
-                                enrich_total += 1;
-                                if let Some(ctx) = enricher.enrich_by_pid(pid) {
-                                    occ.context = Some(ctx);
-                                } else {
-                                    enrich_miss += 1;
-                                    metrics.enrichment_miss_total.with_label_values(&["network"]).inc();
-                                }
-                            }
+                            let occ = build_occurrence(&event, &anomaly);
                             anomaly_count += 1;
                             metrics.anomalies_total.with_label_values(&["network", anomaly.event_type]).inc();
                             if let Err(e) = sink.send(&occ) {

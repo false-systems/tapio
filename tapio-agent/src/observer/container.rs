@@ -217,7 +217,6 @@ fn read_limit_file(path: &str) -> Option<u64> {
 pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
-    enricher: Option<&crate::enricher::K8sEnricher>,
     boot_offset_ns: u64,
     metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -258,8 +257,6 @@ pub async fn run(
     let mut tick_count: u64 = 0;
     let mut prev_lost: u64 = 0;
     let mut malformed_count: u64 = 0;
-    let mut enrich_total: u64 = 0;
-    let mut enrich_miss: u64 = 0;
 
     loop {
         tokio::select! {
@@ -269,8 +266,8 @@ pub async fn run(
             }
             _ = tokio::time::sleep(Duration::from_millis(10)) => {
                 tick_count += 1;
-                if tick_count.is_multiple_of(super::LOST_EVENTS_CHECK_INTERVAL) {
-                    if let Some(fd) = metrics_fd {
+                if tick_count.is_multiple_of(super::LOST_EVENTS_CHECK_INTERVAL)
+                    && let Some(fd) = metrics_fd {
                         let lost = super::read_percpu_sum(fd, super::METRIC_LOST_EVENTS, nr_cpus);
                         if lost > prev_lost {
                             metrics.lost_events_total
@@ -284,19 +281,6 @@ pub async fn run(
                             );
                             prev_lost = lost;
                         }
-                    }
-                    if enrich_total > 0 {
-                        let miss_pct = (enrich_miss as f64 / enrich_total as f64) * 100.0;
-                        if miss_pct > 10.0 {
-                            tracing::warn!(
-                                observer = "container",
-                                miss_pct = format!("{miss_pct:.1}"),
-                                enrich_miss,
-                                enrich_total,
-                                "enrichment miss rate exceeds 10%"
-                            );
-                        }
-                    }
                 }
                 let drained = tokio::task::block_in_place(|| {
                     let mut count = 0usize;
@@ -326,28 +310,7 @@ pub async fn run(
                         event_count += 1;
                         metrics.events_total.with_label_values(&["container"]).inc();
                         if let Some(anomaly) = classify(&event) {
-                            let mut occ = build_occurrence(&event, &anomaly, boot_offset_ns);
-                            if let Some(enricher) = enricher {
-                                let cgroup_id = event.cgroup_id;
-                                let pid = event.pid;
-                                enrich_total += 1;
-                                let ctx = if cgroup_id != 0 {
-                                    // Normal path: enrich by cgroup_id (exit events)
-                                    enricher.enrich(cgroup_id)
-                                } else {
-                                    // OOM path: cgroup_id is 0 (BPF can't get victim's cgroup),
-                                    // enrich via /proc/<victim_pid>/cgroup instead
-                                    enricher.enrich_by_pid(pid)
-                                };
-                                if let Some(ctx) = ctx {
-                                    occ.context = Some(ctx);
-                                    metrics.k8s_cache_size.set(enricher.cache_size() as i64);
-                                } else {
-                                    enrich_miss += 1;
-                                    metrics.k8s_cache_size.set(enricher.cache_size() as i64);
-                                    metrics.enrichment_miss_total.with_label_values(&["container"]).inc();
-                                }
-                            }
+                            let occ = build_occurrence(&event, &anomaly, boot_offset_ns);
                             anomaly_count += 1;
                             metrics.anomalies_total.with_label_values(&["container", anomaly.event_type]).inc();
                             if let Err(e) = sink.send(&occ) {
