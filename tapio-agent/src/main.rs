@@ -1,11 +1,8 @@
 mod config;
-#[cfg(target_os = "linux")]
-mod enricher;
 mod metrics;
 mod observer;
 mod sink;
 
-use clap::Parser;
 use std::io::{self, Write};
 use tracing::info;
 
@@ -29,38 +26,120 @@ impl Write for BrokenPipeGuard {
     }
 }
 
-#[derive(Parser)]
-#[command(
-    name = "tapio-agent",
-    version,
-    about = "Opinionated eBPF observer for Linux and Kubernetes — emits structured kernel anomaly events"
-)]
 struct Args {
-    /// Path to TOML config file
-    #[arg(long, default_value = "/etc/tapio/tapio.toml")]
     config: String,
-
-    /// Output sinks (stdout, file, http, otlp). Can be specified multiple times.
-    #[arg(long = "sink", default_values_t = vec!["stdout".to_string()])]
     sinks: Vec<String>,
-
-    /// Directory containing compiled eBPF .o files
-    #[arg(long, default_value = "/opt/tapio/ebpf")]
     ebpf_dir: String,
-
-    /// Directory for file sink output
-    #[arg(long, default_value = ".tapio/occurrences")]
     data_dir: String,
-
-    /// Endpoint for the http sink — JSON POST ingest (e.g. http://localhost:8765)
-    #[arg(long, default_value = "http://localhost:8765")]
     http_endpoint: String,
+}
+
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            config: "/etc/tapio/tapio.toml".into(),
+            sinks: vec!["stdout".into()],
+            ebpf_dir: "/opt/tapio/ebpf".into(),
+            data_dir: ".tapio/occurrences".into(),
+            http_endpoint: "http://localhost:8765".into(),
+        }
+    }
+}
+
+impl Args {
+    fn parse() -> anyhow::Result<Self> {
+        let mut args = Self::default();
+        let mut explicit_sinks = Vec::new();
+        let mut iter = std::env::args().skip(1).peekable();
+
+        while let Some(arg) = iter.next() {
+            let (flag, inline_value) = match arg.split_once('=') {
+                Some((flag, value)) => (flag, Some(value.to_string())),
+                None => (arg.as_str(), None),
+            };
+
+            match flag {
+                "--help" | "-h" => {
+                    print_help()?;
+                    std::process::exit(0);
+                }
+                "--version" | "-V" => {
+                    print_version()?;
+                    std::process::exit(0);
+                }
+                "--config" => args.config = next_arg(flag, inline_value, &mut iter)?,
+                "--sink" => explicit_sinks.push(next_arg(flag, inline_value, &mut iter)?),
+                "--ebpf-dir" => args.ebpf_dir = next_arg(flag, inline_value, &mut iter)?,
+                "--data-dir" => args.data_dir = next_arg(flag, inline_value, &mut iter)?,
+                "--http-endpoint" => args.http_endpoint = next_arg(flag, inline_value, &mut iter)?,
+                other => anyhow::bail!("unknown argument: {other}"),
+            }
+        }
+
+        if !explicit_sinks.is_empty() {
+            args.sinks = explicit_sinks;
+        }
+
+        Ok(args)
+    }
+}
+
+fn next_arg<I>(
+    flag: &str,
+    inline_value: Option<String>,
+    iter: &mut std::iter::Peekable<I>,
+) -> anyhow::Result<String>
+where
+    I: Iterator<Item = String>,
+{
+    if let Some(value) = inline_value {
+        if value.is_empty() {
+            anyhow::bail!("{flag} requires a non-empty value");
+        }
+        return Ok(value);
+    }
+
+    match iter.next() {
+        Some(value) if !value.starts_with('-') => Ok(value),
+        Some(value) => anyhow::bail!("{flag} requires a value, got {value}"),
+        None => anyhow::bail!("{flag} requires a value"),
+    }
+}
+
+fn print_version() -> anyhow::Result<()> {
+    writeln!(io::stdout(), "tapio-agent {}", env!("CARGO_PKG_VERSION"))?;
+    Ok(())
+}
+
+fn print_help() -> anyhow::Result<()> {
+    write!(
+        io::stdout(),
+        "\
+tapio-agent {}
+Opinionated eBPF observer for Linux and Kubernetes
+
+Usage: tapio-agent [OPTIONS]
+
+Options:
+  --config <path>          TOML config file [default: /etc/tapio/tapio.toml]
+  --sink <name>            Output sink: stdout, file, http; otlp with --features otlp [default: stdout]
+  --ebpf-dir <path>        Directory containing compiled eBPF .o files [default: /opt/tapio/ebpf]
+  --data-dir <path>        Directory for file sink output [default: .tapio/occurrences]
+  --http-endpoint <url>    Endpoint for the http sink [default: http://localhost:8765]
+  -h, --help               Print help
+  -V, --version            Print version",
+        env!("CARGO_PKG_VERSION")
+    )?;
+    Ok(())
 }
 
 fn create_sinks(
     args: &Args,
     cfg: &config::Config,
 ) -> anyhow::Result<Vec<Box<dyn tapio_common::sink::Sink>>> {
+    #[cfg(not(feature = "otlp"))]
+    let _ = cfg;
+
     let mut sinks: Vec<Box<dyn tapio_common::sink::Sink>> = Vec::new();
     for name in &args.sinks {
         match name.as_str() {
@@ -71,12 +150,21 @@ fn create_sinks(
                 100,
                 std::time::Duration::from_secs(1),
             ))),
-            "otlp" => sinks.push(Box::new(sink::otlp::OtlpSink::new(
-                &cfg.otlp.endpoint,
-                cfg.otlp.auth_header.clone(),
-                cfg.otlp.batch_size,
-                std::time::Duration::from_secs(cfg.otlp.flush_interval_secs),
-            )?)),
+            "otlp" => {
+                #[cfg(feature = "otlp")]
+                {
+                    sinks.push(Box::new(sink::otlp::OtlpSink::new(
+                        &cfg.otlp.endpoint,
+                        cfg.otlp.auth_header.clone(),
+                        cfg.otlp.batch_size,
+                        std::time::Duration::from_secs(cfg.otlp.flush_interval_secs),
+                    )?));
+                }
+                #[cfg(not(feature = "otlp"))]
+                {
+                    anyhow::bail!("otlp sink requires building tapio-agent with --features otlp");
+                }
+            }
             other => anyhow::bail!("unknown sink: {other}"),
         }
     }
@@ -164,7 +252,7 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(|| BrokenPipeGuard)
         .init();
 
-    let args = Args::parse();
+    let args = Args::parse()?;
     #[allow(unused_variables)]
     let cfg = config::load(std::path::Path::new(&args.config))?;
     info!("tapio v4 — kernel eyes");
@@ -201,27 +289,11 @@ async fn main() -> anyhow::Result<()> {
         };
         info!(boot_offset_ns, "clock offset calculated");
 
-        // Try to set up K8s enrichment (optional — agent runs without it)
-        let enricher = match enricher::K8sEnricher::new().await {
-            Ok(e) => {
-                info!("K8s enrichment enabled");
-                Some(Arc::new(e))
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "K8s enrichment disabled");
-                None
-            }
-        };
-
-        if enricher.is_some() {
-            tapio_metrics.k8s_reflector_up.set(1);
-        }
-
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
-        // Start Prometheus metrics server if enabled
+        // Start metrics server if enabled
         if cfg.metrics.enabled {
-            let registry = tapio_metrics.registry.clone();
+            let metrics_state = tapio_metrics.clone();
             let metrics_ip: std::net::IpAddr = cfg
                 .metrics
                 .bind_address
@@ -230,7 +302,9 @@ async fn main() -> anyhow::Result<()> {
             let metrics_addr = std::net::SocketAddr::new(metrics_ip, cfg.metrics.port);
             let metrics_shutdown_rx = shutdown_rx.clone();
             tokio::spawn(async move {
-                if let Err(e) = metrics::serve(registry, metrics_addr, metrics_shutdown_rx).await {
+                if let Err(e) =
+                    metrics::serve(metrics_state, metrics_addr, metrics_shutdown_rx).await
+                {
                     tracing::error!(error = %e, "metrics server failed");
                 }
             });
@@ -254,7 +328,6 @@ async fn main() -> anyhow::Result<()> {
         };
 
         let sink1: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
-        let enricher1 = enricher.clone();
         let metrics1 = tapio_metrics.clone();
         let rx1 = shutdown_rx.clone();
         let dir1 = ebpf_dir.clone();
@@ -263,7 +336,6 @@ async fn main() -> anyhow::Result<()> {
             if let Err(e) = observer::network::run(
                 &path,
                 sink1.as_ref(),
-                enricher1.as_deref(),
                 boot_offset_ns,
                 net_thresholds,
                 &metrics1,
@@ -276,28 +348,20 @@ async fn main() -> anyhow::Result<()> {
         });
 
         let sink2: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
-        let enricher2 = enricher.clone();
         let metrics2 = tapio_metrics.clone();
         let rx2 = shutdown_rx.clone();
         let dir2 = ebpf_dir.clone();
         let ctr = tokio::spawn(async move {
             let path = format!("{dir2}/container_monitor.o");
-            if let Err(e) = observer::container::run(
-                &path,
-                sink2.as_ref(),
-                enricher2.as_deref(),
-                boot_offset_ns,
-                &metrics2,
-                rx2,
-            )
-            .await
+            if let Err(e) =
+                observer::container::run(&path, sink2.as_ref(), boot_offset_ns, &metrics2, rx2)
+                    .await
             {
                 tracing::error!(error = %e, "container observer failed");
             }
         });
 
         let sink3: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
-        let enricher3 = enricher.clone();
         let metrics3 = tapio_metrics.clone();
         let rx3 = shutdown_rx.clone();
         let dir3 = ebpf_dir.clone();
@@ -306,7 +370,6 @@ async fn main() -> anyhow::Result<()> {
             if let Err(e) = observer::storage::run(
                 &path,
                 sink3.as_ref(),
-                enricher3.as_deref(),
                 boot_offset_ns,
                 stg_thresholds,
                 &metrics3,
@@ -407,7 +470,7 @@ mod tests {
                     fail: false,
                 }),
             ],
-            metrics: Some(metrics),
+            metrics: Some(metrics.clone()),
         };
         let occ = Occurrence::new(
             "kernel.network.connection_refused",
@@ -423,7 +486,6 @@ mod tests {
     #[test]
     fn multisink_records_partial_failure_metrics() {
         let metrics = metrics::TapioMetrics::new().unwrap();
-        let registry = metrics.registry.clone();
         let multi = MultiSink {
             sinks: vec![
                 Box::new(CountingSink {
@@ -437,7 +499,7 @@ mod tests {
                     fail: false,
                 }),
             ],
-            metrics: Some(metrics),
+            metrics: Some(metrics.clone()),
         };
         let occ = Occurrence::new(
             "kernel.network.connection_refused",
@@ -446,26 +508,21 @@ mod tests {
         );
 
         assert!(multi.send(&occ).is_err());
-        let gathered = registry.gather();
-        let mut encoded = String::new();
-        prometheus::TextEncoder::new()
-            .encode_utf8(&gathered, &mut encoded)
-            .unwrap();
-        assert!(encoded.contains("tapio_sink_writes_total{result=\"err\",sink=\"fail\"} 1"));
-        assert!(encoded.contains("tapio_sink_writes_total{result=\"ok\",sink=\"ok\"} 1"));
+        let encoded = metrics.encode();
+        assert!(encoded.contains("tapio_sink_writes_total{sink=\"fail\",result=\"err\"} 1"));
+        assert!(encoded.contains("tapio_sink_writes_total{sink=\"ok\",result=\"ok\"} 1"));
     }
 
     #[test]
     fn multisink_records_real_http_export_failure_as_err() {
         let metrics = metrics::TapioMetrics::new().unwrap();
-        let registry = metrics.registry.clone();
         let multi = MultiSink {
             sinks: vec![Box::new(sink::http::HttpSink::new(
                 "http://127.0.0.1:1",
                 1,
                 std::time::Duration::from_secs(3600),
             ))],
-            metrics: Some(metrics),
+            metrics: Some(metrics.clone()),
         };
         let occ = Occurrence::new(
             "kernel.network.connection_refused",
@@ -474,11 +531,7 @@ mod tests {
         );
 
         assert!(multi.send(&occ).is_err());
-        let gathered = registry.gather();
-        let mut encoded = String::new();
-        prometheus::TextEncoder::new()
-            .encode_utf8(&gathered, &mut encoded)
-            .unwrap();
-        assert!(encoded.contains("tapio_sink_writes_total{result=\"err\",sink=\"http\"} 1"));
+        let encoded = metrics.encode();
+        assert!(encoded.contains("tapio_sink_writes_total{sink=\"http\",result=\"err\"} 1"));
     }
 }
