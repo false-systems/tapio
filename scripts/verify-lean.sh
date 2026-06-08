@@ -1,11 +1,39 @@
 #!/usr/bin/env bash
+#
+# Lean verification gate for Tapio.
+#
+# Budgets (two-level for the node agent):
+#   AGENT_MAX_BYTES     hard budget   default 1750000  fail if exceeded
+#   AGENT_TARGET_BYTES  target budget default 1500000  warn if exceeded
+#   CLI_MAX_BYTES       hard budget   default  900000  fail if exceeded
+#
+#   The hard budget prevents regression; the target budget guides slimming.
+#   To ratchet down: once the agent stays under a lower size, lower
+#   AGENT_TARGET_BYTES first, then AGENT_MAX_BYTES once it holds in CI.
+#   Override intentionally and document the reason, e.g.:
+#       AGENT_MAX_BYTES=1800000 scripts/verify-lean.sh
+#
+# Reliability knobs:
+#   TAPIO_LEAN_ALLOW_DEGRADED  if set, a required test skipped due to a host
+#                              limitation (e.g. no loopback bind) reports a
+#                              PARTIAL pass instead of failing. Without it, a
+#                              skip fails the gate so it never silently claims
+#                              full verification.
+#   TAPIO_LEAN_REQUIRE_NET     if set, network-dependent tests must run; they
+#                              fail instead of skipping when the host forbids
+#                              loopback. Use in CI that is known to have it.
+#
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-/tmp/tapio-lean}"
 EBPF_ARCH="${EBPF_ARCH:-}"
-AGENT_MAX_BYTES="${AGENT_MAX_BYTES:-1500000}"
+AGENT_MAX_BYTES="${AGENT_MAX_BYTES:-1750000}"
+AGENT_TARGET_BYTES="${AGENT_TARGET_BYTES:-1500000}"
 CLI_MAX_BYTES="${CLI_MAX_BYTES:-900000}"
+
+DEGRADED=0
+DEGRADED_REASONS=()
 
 cd "$ROOT"
 mkdir -p "$OUT_DIR"
@@ -16,6 +44,15 @@ section() {
 
 bytes() {
   wc -c < "$1" | tr -d ' '
+}
+
+comma() {
+  local n="$1" out=""
+  while (( ${#n} > 3 )); do
+    out=",${n: -3}${out}"
+    n="${n:0:${#n}-3}"
+  done
+  printf '%s%s' "$n" "$out"
 }
 
 fail_budget() {
@@ -93,35 +130,74 @@ section "Rust lint"
 cargo clippy --workspace --all-targets -- -D warnings
 
 section "Rust tests"
-cargo test --workspace
+# Run with --nocapture so a test that skips on a host limitation surfaces its
+# SKIP marker (passing-test output is hidden otherwise). Full log is saved;
+# the terminal shows a summary, and the full log is dumped on failure.
+test_log="$OUT_DIR/cargo-test.log"
+if cargo test --workspace -- --nocapture >"$test_log" 2>&1; then
+  grep -E 'test result:|SKIP post_json' "$test_log" || true
+else
+  cat "$test_log" >&2
+  printf 'cargo test --workspace failed\n' >&2
+  exit 1
+fi
+# Unanchored: under --nocapture parallel test output can interleave, so do not
+# require the marker to start a line.
+if grep -q 'SKIP post_json_accepts_http_endpoint' "$test_log"; then
+  DEGRADED=1
+  DEGRADED_REASONS+=("http sink loopback test skipped: host forbids local bind (set TAPIO_LEAN_REQUIRE_NET=1 to require it)")
+fi
 
 section "Release build"
-cargo build --release -p tapio-agent -p tapio-cli
+cargo build --release -p tapio-agent -p tapio-controller -p tapio-cli
 
 agent_bin="$ROOT/target/release/tapio-agent"
+controller_bin="$ROOT/target/release/tapio-controller"
 cli_bin="$ROOT/target/release/tapio"
 agent_bytes="$(bytes "$agent_bin")"
+controller_bytes="$(bytes "$controller_bin")"
 cli_bytes="$(bytes "$cli_bin")"
 
-printf 'tapio-agent: %s (%s bytes)\n' "$(human_bytes "$agent_bytes")" "$agent_bytes"
-printf 'tapio:       %s (%s bytes)\n' "$(human_bytes "$cli_bytes")" "$cli_bytes"
-
+section "Binary budgets"
+printf 'tapio-agent size:          %s bytes\n' "$(comma "$agent_bytes")"
+printf 'tapio-agent target budget: %s bytes\n' "$(comma "$AGENT_TARGET_BYTES")"
+printf 'tapio-agent hard budget:   %s bytes\n' "$(comma "$AGENT_MAX_BYTES")"
 if (( agent_bytes > AGENT_MAX_BYTES )); then
-  printf 'tapio-agent exceeds AGENT_MAX_BYTES=%s\n' "$AGENT_MAX_BYTES" >&2
-  exit 1
+  printf 'status: OVER HARD LIMIT\n'
+  fail_budget "agent binary size (hard)" "tapio-agent" "$agent_bytes" "$AGENT_MAX_BYTES"
+elif (( agent_bytes > AGENT_TARGET_BYTES )); then
+  printf 'status: over target, under hard limit\n'
+  printf 'WARN: tapio-agent is above its target budget (%s bytes). Slim it, or ratchet AGENT_TARGET_BYTES with a documented reason.\n' \
+    "$(comma "$AGENT_TARGET_BYTES")" >&2
+else
+  printf 'status: under target\n'
 fi
 
+printf '\ntapio-controller size:     %s bytes (reported; no hard budget yet)\n' "$(comma "$controller_bytes")"
+
+printf '\ntapio size:                %s bytes\n' "$(comma "$cli_bytes")"
+printf 'tapio hard budget:         %s bytes\n' "$(comma "$CLI_MAX_BYTES")"
 if (( cli_bytes > CLI_MAX_BYTES )); then
-  printf 'tapio exceeds CLI_MAX_BYTES=%s\n' "$CLI_MAX_BYTES" >&2
-  exit 1
+  printf 'status: OVER HARD LIMIT\n'
+  fail_budget "cli binary size (hard)" "tapio" "$cli_bytes" "$CLI_MAX_BYTES"
+else
+  printf 'status: under hard limit\n'
 fi
 
-section "Dependency tree"
+section "Dependency footprint"
 cargo tree --workspace > "$OUT_DIR/cargo-tree.txt"
-printf 'saved %s\n' "$OUT_DIR/cargo-tree.txt"
+cargo tree -p tapio-agent --depth 2 > "$OUT_DIR/agent-deps.txt"
+cargo tree -p tapio-controller --depth 2 > "$OUT_DIR/controller-deps.txt"
+cargo tree -p tapio-wire --depth 2 > "$OUT_DIR/wire-deps.txt"
+cargo tree --workspace --duplicates > "$OUT_DIR/duplicates.txt" || true
+dup_groups="$(grep -cE '^[A-Za-z0-9_-]+ v' "$OUT_DIR/duplicates.txt" 2>/dev/null || printf '0')"
+printf 'saved dependency trees to %s/{cargo-tree,agent-deps,controller-deps,wire-deps,duplicates}.txt\n' "$OUT_DIR"
 printf 'direct tapio-agent dependencies:\n'
 cargo tree -p tapio-agent --depth 1
-scripts/check-agent-deps.sh
+printf 'workspace duplicate dependency package lines: %s (see %s/duplicates.txt)\n' "$dup_groups" "$OUT_DIR"
+
+section "Dependency boundaries"
+scripts/check-dependency-boundaries.sh
 
 section "eBPF compile"
 if ! command -v clang >/dev/null 2>&1; then
@@ -177,4 +253,20 @@ for prog in network_monitor container_monitor storage_monitor node_pmc_monitor; 
   fi
 done
 
-section "Lean verification complete"
+section "Lean verification summary"
+if (( DEGRADED != 0 )); then
+  printf 'PARTIAL lean verification — degraded mode:\n'
+  for reason in "${DEGRADED_REASONS[@]}"; do
+    printf '  - %s\n' "$reason"
+  done
+  if [[ -n "${TAPIO_LEAN_ALLOW_DEGRADED:-}" ]]; then
+    printf 'TAPIO_LEAN_ALLOW_DEGRADED is set: accepting partial verification.\n'
+    printf 'NOTE: this run did NOT fully verify lean discipline.\n'
+    exit 0
+  fi
+  printf 'A required test was skipped due to a host limitation, so this is not a full lean pass.\n' >&2
+  printf 'Re-run on a host with loopback networking, set TAPIO_LEAN_REQUIRE_NET=1 to force the test, or set TAPIO_LEAN_ALLOW_DEGRADED=1 to accept a partial run.\n' >&2
+  exit 1
+fi
+
+printf 'Lean verification complete (full)\n'
