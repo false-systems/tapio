@@ -248,7 +248,7 @@ async fn main() -> anyhow::Result<()> {
     // Use a non-panicking writer for tracing — default stderr writer panics
     // on broken pipe, which with panic=abort kills the process.
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_max_level(log_level_from_env())
         .with_writer(|| BrokenPipeGuard)
         .init();
 
@@ -419,6 +419,32 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
+fn log_level_from_env() -> tracing::level_filters::LevelFilter {
+    log_level_from_rust_log(std::env::var("RUST_LOG").ok().as_deref())
+}
+
+fn log_level_from_rust_log(value: Option<&str>) -> tracing::level_filters::LevelFilter {
+    let Some(value) = value else {
+        return tracing::level_filters::LevelFilter::ERROR;
+    };
+    let directive = value
+        .split(',')
+        .next()
+        .map(|part| part.rsplit_once('=').map_or(part, |(_, level)| level))
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    match directive.as_str() {
+        "trace" => tracing::level_filters::LevelFilter::TRACE,
+        "debug" => tracing::level_filters::LevelFilter::DEBUG,
+        "info" => tracing::level_filters::LevelFilter::INFO,
+        "warn" => tracing::level_filters::LevelFilter::WARN,
+        "error" => tracing::level_filters::LevelFilter::ERROR,
+        "off" => tracing::level_filters::LevelFilter::OFF,
+        _ => tracing::level_filters::LevelFilter::ERROR,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,5 +559,33 @@ mod tests {
         assert!(multi.send(&occ).is_err());
         let encoded = metrics.encode();
         assert!(encoded.contains("tapio_sink_writes_total{sink=\"http\",result=\"err\"} 1"));
+    }
+
+    #[test]
+    fn rust_log_level_parser_accepts_plain_and_targeted_levels() {
+        assert_eq!(
+            log_level_from_rust_log(Some("debug")),
+            tracing::level_filters::LevelFilter::DEBUG
+        );
+        assert_eq!(
+            log_level_from_rust_log(Some("tapio_agent=info")),
+            tracing::level_filters::LevelFilter::INFO
+        );
+        assert_eq!(
+            log_level_from_rust_log(Some("off")),
+            tracing::level_filters::LevelFilter::OFF
+        );
+    }
+
+    #[test]
+    fn rust_log_level_parser_defaults_to_error_for_absent_or_unknown() {
+        assert_eq!(
+            log_level_from_rust_log(None),
+            tracing::level_filters::LevelFilter::ERROR
+        );
+        assert_eq!(
+            log_level_from_rust_log(Some("verbose")),
+            tracing::level_filters::LevelFilter::ERROR
+        );
     }
 }
