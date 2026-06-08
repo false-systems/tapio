@@ -4,6 +4,8 @@ Tapio keeps intelligence out of the kernel and bloat out of the node agent.
 
 The agent observes. The controller coordinates. Downstream systems explain.
 
+See [architecture.md](architecture.md) for the source-of-truth architecture law, dependency boundaries, failure model, and migration roadmap.
+
 ## Runtime Split
 
 `tapio-agent` is the tiny node-local eBPF observer. It loads eBPF programs, reads ring buffers, writes tiny BPF config maps, exposes local counters and health, batches kernel evidence, and sends evidence to local sinks or a controller. In Kubernetes it runs as a DaemonSet.
