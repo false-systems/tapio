@@ -92,6 +92,7 @@ pub fn classify(event: &NetworkEvent) -> Option<ClassifiedAnomaly> {
 /// Build a FALSE Protocol Occurrence from a classified anomaly.
 /// Encodes event-type-specific fields correctly (old_state/new_state semantics differ per event type).
 pub fn build_occurrence(event: &NetworkEvent, anomaly: &ClassifiedAnomaly) -> Occurrence {
+    let config_generation = event.config_generation;
     let pid = event.pid;
     let comm = event.comm_str().to_string();
     let src_ip = event.src_ip_str();
@@ -102,6 +103,7 @@ pub fn build_occurrence(event: &NetworkEvent, anomaly: &ClassifiedAnomaly) -> Oc
 
     let mut data = serde_json::json!({
         "pid": pid,
+        "config_generation": config_generation,
         "comm": comm,
         "src_ip": src_ip,
         "dst_ip": dst_ip,
@@ -148,18 +150,13 @@ pub fn build_occurrence(event: &NetworkEvent, anomaly: &ClassifiedAnomaly) -> Oc
     .with_data(data)
 }
 
-pub struct NetworkThresholds {
-    pub rtt_spike_ratio: u64,
-    pub rtt_spike_abs_us: u64,
-}
-
 /// Load eBPF program and start the observation loop.
 #[cfg(target_os = "linux")]
 pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
     _boot_offset_ns: u64,
-    thresholds: NetworkThresholds,
+    tapio_config: tapio_common::ebpf::TapioConfig,
     metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
@@ -168,17 +165,8 @@ pub async fn run(
 
     tracing::info!(path = ebpf_path, "loading network eBPF program");
     let mut ebpf = super::load_ebpf(ebpf_path, "network")?;
-
-    // Write thresholds to eBPF config map (indices match network_monitor.c)
-    if let Some(config_map) = ebpf.map_mut("config") {
-        let mut arr = aya::maps::Array::<_, u64>::try_from(config_map)?;
-        arr.set(0, thresholds.rtt_spike_ratio, 0)?; // CONFIG_RTT_SPIKE_RATIO
-        arr.set(1, thresholds.rtt_spike_abs_us, 0)?; // CONFIG_RTT_SPIKE_ABS_US
-        tracing::info!(
-            rtt_spike_ratio = thresholds.rtt_spike_ratio,
-            rtt_spike_abs_us = thresholds.rtt_spike_abs_us,
-            "network thresholds written to eBPF config map"
-        );
+    if !super::write_tapio_config(&mut ebpf, "network", &tapio_config) {
+        anyhow::bail!("network observer: failed to initialize tapio_config carrier");
     }
 
     for (name, category, tp) in [
@@ -320,6 +308,7 @@ mod tests {
         evt.src_port = 12345;
         evt.dst_port = 80;
         evt.pid = 42;
+        evt.config_generation = 17;
         evt.comm[..5].copy_from_slice(b"nginx");
         evt
     }
@@ -400,6 +389,7 @@ mod tests {
         let occ = build_occurrence(&evt, &a);
         assert!(occ.validate().is_ok());
         let data = occ.data.unwrap();
+        assert_eq!(data["config_generation"], 17);
         assert_eq!(data["old_state"], "SYN_SENT");
         assert_eq!(data["new_state"], "CLOSE");
     }

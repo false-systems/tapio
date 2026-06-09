@@ -9,6 +9,7 @@
 // Shared helpers (Cilium-style layered lib)
 #include "headers/tcp.h"
 #include "headers/metrics.h"
+#include "headers/config.h"
 
 // Limit constant for __u8 sample counter saturation
 #ifndef UINT8_MAX
@@ -21,27 +22,31 @@
 #define EVENT_TYPE_RETRANSMIT    2  // tcp_retransmit_skb
 #define EVENT_TYPE_RTT_SPIKE     3  // RTT spike detection
 
-// Network event structure - MUST match Rust NetworkEvent in tapio-common/src/ebpf.rs (80 bytes packed)
+// Network event structure - MUST match Rust NetworkEvent in tapio-common/src/ebpf.rs (84 bytes packed)
 // Each event type uses its own named fields — no overloading.
 struct network_event {
-	__u32 pid;              // offset 0, size 4
-	__u32 src_ip;           // offset 4, size 4
-	__u32 dst_ip;           // offset 8, size 4
-	__u8  src_ipv6[16];     // offset 12, size 16
-	__u8  dst_ipv6[16];     // offset 28, size 16
-	__u16 src_port;         // offset 44, size 2
-	__u16 dst_port;         // offset 46, size 2
-	__u16 family;           // offset 48, size 2
-	__u8  protocol;         // offset 50, size 1
-	__u8  event_type;       // offset 51, size 1
-	__u16 old_state;        // offset 52, size 2 - TCP state (state change events)
-	__u16 new_state;        // offset 54, size 2 - TCP state (state change events)
-	__u16 rtt_baseline_ms;  // offset 56, size 2 - baseline RTT in ms (RTT spike events)
-	__u16 rtt_current_ms;   // offset 58, size 2 - current RTT in ms (RTT spike events)
-	__u16 total_retrans;    // offset 60, size 2 - total retransmits (retransmit events)
-	__u16 snd_cwnd;         // offset 62, size 2 - congestion window (retransmit events)
-	__u8  comm[16];         // offset 64, size 16
-} __attribute__((packed));  // 80 bytes
+	__u32 config_generation; // offset 0, size 4
+	__u32 pid;               // offset 4, size 4
+	__u32 src_ip;            // offset 8, size 4
+	__u32 dst_ip;            // offset 12, size 4
+	__u8  src_ipv6[16];      // offset 16, size 16
+	__u8  dst_ipv6[16];      // offset 32, size 16
+	__u16 src_port;          // offset 48, size 2
+	__u16 dst_port;          // offset 50, size 2
+	__u16 family;            // offset 52, size 2
+	__u8  protocol;          // offset 54, size 1
+	__u8  event_type;        // offset 55, size 1
+	__u16 old_state;         // offset 56, size 2 - TCP state (state change events)
+	__u16 new_state;         // offset 58, size 2 - TCP state (state change events)
+	__u16 rtt_baseline_ms;   // offset 60, size 2 - baseline RTT in ms (RTT spike events)
+	__u16 rtt_current_ms;    // offset 62, size 2 - current RTT in ms (RTT spike events)
+	__u16 total_retrans;     // offset 64, size 2 - total retransmits (retransmit events)
+	__u16 snd_cwnd;          // offset 66, size 2 - congestion window (retransmit events)
+	__u8  comm[16];          // offset 68, size 16
+} __attribute__((packed));  // 84 bytes
+
+_Static_assert(sizeof(struct network_event) == 84, "network_event size");
+_Static_assert(__builtin_offsetof(struct network_event, config_generation) == 0, "network_event config_generation offset");
 
 // Ring buffer for sending events to userspace
 struct {
@@ -70,29 +75,9 @@ struct {
 #define RTT_STATE_LEARNING    1
 #define RTT_STATE_STABLE      2
 
-// Default thresholds — overridable via config map
+// Default structural thresholds.
 #define LEARNING_SAMPLES 5                     // Collect 5 samples before going STABLE
 #define STALE_THRESHOLD_NS 3600000000000ULL    // 1 hour
-#define RTT_SPIKE_RATIO    2                   // >Nx baseline triggers spike
-#define RTT_SPIKE_ABS_US   500000              // >500ms absolute triggers spike
-
-// Config map indices
-#define CONFIG_RTT_SPIKE_RATIO    0
-#define CONFIG_RTT_SPIKE_ABS_US   1
-#define CONFIG_MAX_ENTRIES        2
-
-// Runtime-configurable thresholds — populated by userspace at load time
-struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__uint(max_entries, CONFIG_MAX_ENTRIES);
-	__type(key, __u32);
-	__type(value, __u64);
-} config SEC(".maps");
-
-static __always_inline __u64 get_config(__u32 idx, __u64 default_val) {
-	__u64 *val = bpf_map_lookup_elem(&config, &idx);
-	return val && *val > 0 ? *val : default_val;
-}
 
 /* Tracepoint argument structs: hardcoded layout is intentional.
  * Tracepoint ABIs are stable across kernel versions (unlike internal structs).
@@ -120,6 +105,11 @@ struct trace_event_raw_inet_sock_set_state {
 SEC("tracepoint/sock/inet_sock_set_state")
 int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 {
+	struct tapio_config cfg = {};
+	if (!tapio_config_snapshot(&cfg) || !(cfg.flags & TAPIO_F_NETWORK)) {
+		return 0;
+	}
+
 	if (args->protocol != IPPROTO_TCP) {
 		return 0;
 	}
@@ -170,7 +160,11 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 					baseline->sample_count++;
 				baseline->baseline_us = (baseline->baseline_us * (baseline->sample_count - 1) + rtt_us) / baseline->sample_count;
 
-				if (baseline->sample_count >= LEARNING_SAMPLES) {
+				__u32 learning_samples = cfg.rtt_min_baseline_samples;
+				if (learning_samples > UINT8_MAX)
+					learning_samples = UINT8_MAX;
+
+				if (learning_samples > 0 && baseline->sample_count >= learning_samples) {
 					if (baseline->baseline_us > 100000) {
 						baseline->sample_count = 0;
 						baseline->baseline_us = 0;
@@ -188,10 +182,12 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 					bpf_map_update_elem(&baseline_rtt, &key, baseline, BPF_EXIST);
 				}
 
-				// Check for RTT spike: >Nx baseline OR absolute threshold
-				__u64 ratio = get_config(CONFIG_RTT_SPIKE_RATIO, RTT_SPIKE_RATIO);
-				__u64 abs_us = get_config(CONFIG_RTT_SPIKE_ABS_US, RTT_SPIKE_ABS_US);
-				if (rtt_us > (baseline->baseline_us * ratio) || rtt_us > abs_us) {
+				// Check for RTT spike: >Nx baseline OR absolute threshold.
+				// Zero multiplier / zero abs threshold are inert.
+				__u32 ratio = cfg.rtt_spike_multiplier;
+				__u32 abs_us = cfg.rtt_spike_abs_us;
+				if ((ratio > 0 && rtt_us > (baseline->baseline_us * ratio)) ||
+				    (abs_us > 0 && rtt_us > abs_us)) {
 					struct network_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
 					if (!evt) {
 						metric_inc(METRIC_LOST_EVENTS);
@@ -199,6 +195,7 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 						__builtin_memset(evt, 0, sizeof(*evt));
 
 						__u64 pid_tgid = bpf_get_current_pid_tgid();
+						evt->config_generation = cfg.generation;
 						evt->pid = pid_tgid >> 32;
 						bpf_get_current_comm(&evt->comm, sizeof(evt->comm));
 
@@ -243,6 +240,7 @@ skip_rtt_tracking:
 		__builtin_memset(evt, 0, sizeof(*evt));
 
 		__u64 pid_tgid = bpf_get_current_pid_tgid();
+		evt->config_generation = cfg.generation;
 		evt->pid = pid_tgid >> 32;
 		bpf_get_current_comm(&evt->comm, sizeof(evt->comm));
 
@@ -286,6 +284,11 @@ struct trace_event_raw_tcp_receive_reset {
 SEC("tracepoint/tcp/tcp_receive_reset")
 int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
 {
+	struct tapio_config cfg = {};
+	if (!tapio_config_snapshot(&cfg) || !(cfg.flags & TAPIO_F_NETWORK)) {
+		return 0;
+	}
+
 	struct network_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
 	if (!evt) {
 		metric_inc(METRIC_LOST_EVENTS);
@@ -297,6 +300,7 @@ int trace_tcp_receive_reset(struct trace_event_raw_tcp_receive_reset *args)
 	evt->event_type = EVENT_TYPE_RST_RECEIVED;
 
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	evt->config_generation = cfg.generation;
 	evt->pid = pid_tgid >> 32;
 	bpf_get_current_comm(&evt->comm, sizeof(evt->comm));
 
@@ -336,6 +340,11 @@ struct trace_event_raw_tcp_retransmit_skb {
 SEC("tracepoint/tcp/tcp_retransmit_skb")
 int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 {
+	struct tapio_config cfg = {};
+	if (!tapio_config_snapshot(&cfg) || !(cfg.flags & TAPIO_F_NETWORK)) {
+		return 0;
+	}
+
 	struct network_event *evt;
 
 	evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
@@ -349,6 +358,7 @@ int trace_tcp_retransmit_skb(struct trace_event_raw_tcp_retransmit_skb *args)
 	evt->event_type = EVENT_TYPE_RETRANSMIT;
 
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
+	evt->config_generation = cfg.generation;
 	evt->pid = pid_tgid >> 32;
 	bpf_get_current_comm(&evt->comm, sizeof(evt->comm));
 

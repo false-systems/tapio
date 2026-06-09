@@ -71,6 +71,11 @@ Tapio preserves kernel evidence. Downstream systems decide what to do with it. L
 
 The controller never calls into the agent. The agent exposes no controller-facing inbound server.
 
+Agent-to-eBPF runtime profile config is a private fixed-layout ABI, not CO-RE.
+See [agent-kernel-config-abi.md](agent-kernel-config-abi.md) for the shared
+`tapio_config` ABI, observer-local carriers, ABI versioning, generation
+stamping, and update semantics.
+
 The v0 controller protocol has four operations:
 
 - `POST /v1/agents/hello`

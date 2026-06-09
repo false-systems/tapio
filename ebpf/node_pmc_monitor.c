@@ -7,6 +7,7 @@
 #include <bpf/bpf_tracing.h>
 #include "headers/node_pmc_monitor.h"
 #include "headers/metrics.h"
+#include "headers/config.h"
 
 char LICENSE[] SEC("license") = "GPL";
 
@@ -59,6 +60,11 @@ static __always_inline __s64 read_pmc(void *map, __u32 cpu) {
 SEC("perf_event")
 int sample_pmc(struct bpf_perf_event_data *ctx)
 {
+	struct tapio_config cfg = {};
+	if (!tapio_config_snapshot(&cfg) || !(cfg.flags & TAPIO_F_NODE_PMC)) {
+		return 0;
+	}
+
 	struct pmc_event *event;
 	__u32 cpu = bpf_get_smp_processor_id();
 	__u64 timestamp = bpf_ktime_get_ns();
@@ -88,6 +94,7 @@ int sample_pmc(struct bpf_perf_event_data *ctx)
 	}
 
 	// Fill event structure
+	event->config_generation = cfg.generation;
 	event->cpu = cpu;
 	event->cycles = (__u64)cycles;
 	event->instructions = (__u64)instructions;

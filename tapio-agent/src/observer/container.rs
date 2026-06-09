@@ -11,6 +11,7 @@ pub struct ClassifiedAnomaly {
 }
 
 struct EventFields {
+    config_generation: u32,
     event_type: u32,
     pid: u32,
     tid: u32,
@@ -25,6 +26,7 @@ struct EventFields {
 impl EventFields {
     fn from(event: &ContainerEvent) -> Self {
         Self {
+            config_generation: event.config_generation,
             event_type: event.event_type,
             pid: event.pid,
             tid: event.tid,
@@ -104,6 +106,7 @@ pub fn build_occurrence(
     .with_error(anomaly.error_code, &anomaly.error_message)
     .with_data(serde_json::json!({
         "pid": f.pid,
+        "config_generation": f.config_generation,
         "tid": f.tid,
         "exit_code": f.exit_code,
         "signal": f.signal,
@@ -218,6 +221,7 @@ pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
     boot_offset_ns: u64,
+    tapio_config: tapio_common::ebpf::TapioConfig,
     metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
@@ -226,6 +230,9 @@ pub async fn run(
 
     tracing::info!(path = ebpf_path, "loading container eBPF program");
     let mut ebpf = super::load_ebpf(ebpf_path, "container")?;
+    if !super::write_tapio_config(&mut ebpf, "container", &tapio_config) {
+        anyhow::bail!("container observer: failed to initialize tapio_config carrier");
+    }
 
     for (name, category, tp) in [
         ("handle_oom", "oom", "mark_victim"),
@@ -342,6 +349,7 @@ mod tests {
 
     fn make_event(event_type: u32, exit_code: i32, signal: i32) -> ContainerEvent {
         let mut evt = unsafe { std::mem::zeroed::<ContainerEvent>() };
+        evt.config_generation = 17;
         evt.event_type = event_type;
         evt.exit_code = exit_code;
         evt.signal = signal;
@@ -392,6 +400,7 @@ mod tests {
         assert!(occ.validate().is_ok());
         assert_eq!(occ.occurrence_type, CONTAINER_OOM_KILL);
         let data = occ.data.unwrap();
+        assert_eq!(data["config_generation"], 17);
         assert_eq!(data["pid"], 1234);
         assert_eq!(data["memory_usage_bytes"], 536_870_912_u64);
     }
