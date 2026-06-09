@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub mod v0;
+
 pub const WIRE_VERSION: &str = "tapio-wire/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
