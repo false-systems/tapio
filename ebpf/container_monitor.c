@@ -9,25 +9,30 @@
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
 #include "headers/metrics.h"
+#include "headers/config.h"
 
 // Event types (MUST match Rust ContainerEvent.event_type in tapio-common/src/ebpf.rs)
 #define EVENT_TYPE_OOM_KILL 0
 #define EVENT_TYPE_EXIT     1
 
 // Container event structure
-// MUST match Rust ContainerEvent in tapio-common/src/ebpf.rs (52 bytes packed)
-// Field order optimized for alignment (u64 first)
+// MUST match Rust ContainerEvent in tapio-common/src/ebpf.rs (56 bytes packed)
+// Field order keeps config generation first for fleet convergence stamping.
 struct container_event {
-	__u64 memory_limit;          // offset 0: Memory limit from cgroup
-	__u64 memory_usage;          // offset 8: Memory usage from cgroup
-	__u64 timestamp_ns;          // offset 16: Event timestamp in nanoseconds
-	__u64 cgroup_id;             // offset 24: Cgroup ID — userspace derives K8s pod context from this ID
-	__u32 type;                  // offset 32: EVENT_TYPE_OOM_KILL or EVENT_TYPE_EXIT
-	__u32 pid;                   // offset 36: Process ID
-	__u32 tid;                   // offset 40: Thread ID
-	__s32 exit_code;             // offset 44: Exit code
-	__s32 signal;                // offset 48: Signal number
+	__u32 config_generation;     // offset 0: config generation that judged this event
+	__u64 memory_limit;          // offset 4: Memory limit from cgroup
+	__u64 memory_usage;          // offset 12: Memory usage from cgroup
+	__u64 timestamp_ns;          // offset 20: Event timestamp in nanoseconds
+	__u64 cgroup_id;             // offset 28: Cgroup ID — userspace derives K8s pod context from this ID
+	__u32 type;                  // offset 36: EVENT_TYPE_OOM_KILL or EVENT_TYPE_EXIT
+	__u32 pid;                   // offset 40: Process ID
+	__u32 tid;                   // offset 44: Thread ID
+	__s32 exit_code;             // offset 48: Exit code
+	__s32 signal;                // offset 52: Signal number
 } __attribute__((packed));
+
+_Static_assert(sizeof(struct container_event) == 56, "container_event size");
+_Static_assert(__builtin_offsetof(struct container_event, config_generation) == 0, "container_event config_generation offset");
 
 // Ring buffer for events (256KB)
 struct {
@@ -65,6 +70,11 @@ struct trace_event_raw_mark_victim {
 
 SEC("tracepoint/oom/mark_victim")
 int handle_oom(struct trace_event_raw_mark_victim *ctx) {
+	struct tapio_config cfg = {};
+	if (!tapio_config_snapshot(&cfg) || !(cfg.flags & TAPIO_F_CONTAINER)) {
+		return 0;
+	}
+
 	// Reserve space in ring buffer
 	struct container_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
 	if (!evt) {
@@ -74,6 +84,7 @@ int handle_oom(struct trace_event_raw_mark_victim *ctx) {
 	__builtin_memset(evt, 0, sizeof(*evt));
 
 	// Capture timestamp and event type
+	evt->config_generation = cfg.generation;
 	evt->timestamp_ns = bpf_ktime_get_ns();
 	evt->type = EVENT_TYPE_OOM_KILL;
 
@@ -123,6 +134,11 @@ struct trace_event_raw_sched_process_exit {
 
 SEC("tracepoint/sched/sched_process_exit")
 int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
+	struct tapio_config cfg = {};
+	if (!tapio_config_snapshot(&cfg) || !(cfg.flags & TAPIO_F_CONTAINER)) {
+		return 0;
+	}
+
 	// Get current task for exit code
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 	if (!task) {
@@ -143,6 +159,16 @@ int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
 		return 0;
 	}
 
+	__u32 ignore_count = tapio_clamp_ignore_exit_count(cfg.ignore_exit_count);
+	for (int i = 0; i < TAPIO_CONFIG_MAX_IGNORE_EXIT_CODES; i++) {
+		if ((__u32)i >= ignore_count) {
+			break;
+		}
+		if (cfg.ignore_exit_codes[i] == code) {
+			return 0;
+		}
+	}
+
 	// Reserve space in ring buffer
 	struct container_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
 	if (!evt) {
@@ -152,6 +178,7 @@ int handle_exit(struct trace_event_raw_sched_process_exit *ctx) {
 	__builtin_memset(evt, 0, sizeof(*evt));
 
 	// Capture timestamp and event type
+	evt->config_generation = cfg.generation;
 	evt->timestamp_ns = bpf_ktime_get_ns();
 	evt->type = EVENT_TYPE_EXIT;
 

@@ -63,6 +63,7 @@ pub fn build_occurrence(
     boot_offset_ns: u64,
 ) -> Occurrence {
     let cpu = event.cpu;
+    let config_generation = event.config_generation;
     let cycles = event.cycles;
     let instructions = event.instructions;
     let stall_cycles = event.stall_cycles;
@@ -80,6 +81,7 @@ pub fn build_occurrence(
     .with_error(anomaly.error_code, &anomaly.error_message)
     .with_data(serde_json::json!({
         "cpu": cpu,
+        "config_generation": config_generation,
         "cycles": cycles,
         "instructions": instructions,
         "stall_cycles": stall_cycles,
@@ -237,6 +239,7 @@ pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
     boot_offset_ns: u64,
+    tapio_config: tapio_common::ebpf::TapioConfig,
     thresholds: PmcThresholds,
     metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -248,6 +251,9 @@ pub async fn run(
 
     tracing::info!(path = ebpf_path, "loading PMC eBPF program");
     let mut ebpf = super::load_ebpf(ebpf_path, "pmc")?;
+    if !super::write_tapio_config(&mut ebpf, "node_pmc", &tapio_config) {
+        anyhow::bail!("node_pmc observer: failed to initialize tapio_config carrier");
+    }
 
     let num_cpus = aya::util::nr_cpus().map_err(|(msg, e)| anyhow::anyhow!("{msg}: {e}"))? as u32;
     tracing::info!(num_cpus, "detected CPUs for PMC");
@@ -423,6 +429,7 @@ mod tests {
 
     fn make_pmc(cycles: u64, instructions: u64, stall_cycles: u64) -> PmcEvent {
         PmcEvent {
+            config_generation: 17,
             cpu: 0,
             cycles,
             instructions,
@@ -475,6 +482,7 @@ mod tests {
         assert!(occ.validate().is_ok());
         assert_eq!(occ.occurrence_type, NODE_CPU_STALL);
         let data = occ.data.unwrap();
+        assert_eq!(data["config_generation"], 17);
         assert_eq!(data["cpu"], 0);
     }
 }
