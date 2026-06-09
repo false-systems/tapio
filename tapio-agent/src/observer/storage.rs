@@ -90,7 +90,9 @@ pub async fn run(
 
     tracing::info!(path = ebpf_path, "loading storage eBPF program");
     let mut ebpf = super::load_ebpf(ebpf_path, "storage")?;
-    let _config_written = super::write_tapio_config(&mut ebpf, "storage", &tapio_config);
+    if !super::write_tapio_config(&mut ebpf, "storage", &tapio_config) {
+        anyhow::bail!("storage observer: failed to initialize tapio_config carrier");
+    }
 
     for (name, category, tp) in [
         ("trace_block_rq_issue", "block", "block_rq_issue"),
