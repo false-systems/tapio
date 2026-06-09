@@ -20,11 +20,11 @@ toml = { workspace = true }
 anyhow = { workspace = true }
 prost = { workspace = true, optional = true }
 flate2 = { workspace = true, optional = true }
-chrono = { workspace = true }
+chrono = { workspace = true, optional = true }
 
 [features]
 default = []
-otlp = ["dep:prost", "dep:flate2"]
+otlp = ["dep:prost", "dep:flate2", "dep:chrono"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 aya = { workspace = true }
