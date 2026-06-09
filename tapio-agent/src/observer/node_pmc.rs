@@ -251,7 +251,9 @@ pub async fn run(
 
     tracing::info!(path = ebpf_path, "loading PMC eBPF program");
     let mut ebpf = super::load_ebpf(ebpf_path, "pmc")?;
-    let _config_written = super::write_tapio_config(&mut ebpf, "node_pmc", &tapio_config);
+    if !super::write_tapio_config(&mut ebpf, "node_pmc", &tapio_config) {
+        anyhow::bail!("node_pmc observer: failed to initialize tapio_config carrier");
+    }
 
     let num_cpus = aya::util::nr_cpus().map_err(|(msg, e)| anyhow::anyhow!("{msg}: {e}"))? as u32;
     tracing::info!(num_cpus, "detected CPUs for PMC");

@@ -165,7 +165,9 @@ pub async fn run(
 
     tracing::info!(path = ebpf_path, "loading network eBPF program");
     let mut ebpf = super::load_ebpf(ebpf_path, "network")?;
-    let _config_written = super::write_tapio_config(&mut ebpf, "network", &tapio_config);
+    if !super::write_tapio_config(&mut ebpf, "network", &tapio_config) {
+        anyhow::bail!("network observer: failed to initialize tapio_config carrier");
+    }
 
     for (name, category, tp) in [
         ("trace_inet_sock_set_state", "sock", "inet_sock_set_state"),

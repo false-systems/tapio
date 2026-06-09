@@ -230,7 +230,9 @@ pub async fn run(
 
     tracing::info!(path = ebpf_path, "loading container eBPF program");
     let mut ebpf = super::load_ebpf(ebpf_path, "container")?;
-    let _config_written = super::write_tapio_config(&mut ebpf, "container", &tapio_config);
+    if !super::write_tapio_config(&mut ebpf, "container", &tapio_config) {
+        anyhow::bail!("container observer: failed to initialize tapio_config carrier");
+    }
 
     for (name, category, tp) in [
         ("handle_oom", "oom", "mark_victim"),
