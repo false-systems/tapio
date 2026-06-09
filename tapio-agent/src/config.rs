@@ -1,5 +1,9 @@
 use serde::Deserialize;
 use std::path::Path;
+use tapio_common::ebpf::{
+    TAPIO_CONFIG_ABI_VERSION, TAPIO_F_CONTAINER, TAPIO_F_NETWORK, TAPIO_F_NODE_PMC,
+    TAPIO_F_STORAGE, TapioConfig,
+};
 
 /// Agent configuration loaded from TOML file.
 /// CLI flags take precedence — fields here are all optional so missing values
@@ -114,6 +118,40 @@ pub fn load(path: &Path) -> anyhow::Result<Config> {
     Ok(config)
 }
 
+impl Config {
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn tapio_config(&self) -> TapioConfig {
+        self.thresholds.tapio_config()
+    }
+}
+
+impl Thresholds {
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub fn tapio_config(&self) -> TapioConfig {
+        let rtt_spike_multiplier = self.rtt_spike_ratio.min(u32::MAX as u64) as u32;
+
+        // The count+array invariant is enforced at construction: all array
+        // entries are populated before ignore_exit_count is set, and count
+        // never exceeds the number of populated entries.
+        let ignore_exit_codes = [0; tapio_common::ebpf::TAPIO_CONFIG_MAX_IGNORE_EXIT_CODES];
+        let ignore_exit_count = 0;
+
+        TapioConfig {
+            abi_version: TAPIO_CONFIG_ABI_VERSION,
+            generation: 1,
+            flags: TAPIO_F_NETWORK | TAPIO_F_STORAGE | TAPIO_F_CONTAINER | TAPIO_F_NODE_PMC,
+            slow_io_threshold_ns: self.io_latency_warning_ns,
+            conn_refused_window_ns: 0,
+            conn_refused_min_count: 0,
+            rtt_spike_multiplier,
+            rtt_min_baseline_samples: 5,
+            ignore_exit_count,
+            ignore_exit_codes,
+            _pad: 0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +256,46 @@ mod tests {
         assert!(ip.is_loopback());
         let addr = std::net::SocketAddr::new(ip, config.metrics.port);
         assert_eq!(addr.to_string(), "[::1]:9090");
+    }
+
+    #[test]
+    fn tapio_config_uses_generation_one_for_nonzero_config() {
+        let config = Config::default().tapio_config();
+        assert_eq!(config.abi_version, TAPIO_CONFIG_ABI_VERSION);
+        assert_eq!(config.generation, 1);
+        assert_eq!(
+            config.flags,
+            TAPIO_F_NETWORK | TAPIO_F_STORAGE | TAPIO_F_CONTAINER | TAPIO_F_NODE_PMC
+        );
+    }
+
+    #[test]
+    fn tapio_config_sets_primitive_thresholds() {
+        let thresholds = Thresholds {
+            rtt_spike_ratio: 3,
+            io_latency_warning_ns: 123,
+            ..Thresholds::default()
+        };
+        let config = thresholds.tapio_config();
+        assert_eq!(config.rtt_spike_multiplier, 3);
+        assert_eq!(config.rtt_min_baseline_samples, 5);
+        assert_eq!(config.slow_io_threshold_ns, 123);
+    }
+
+    #[test]
+    fn tapio_config_clamps_rtt_multiplier_to_u32() {
+        let thresholds = Thresholds {
+            rtt_spike_ratio: u64::MAX,
+            ..Thresholds::default()
+        };
+        let config = thresholds.tapio_config();
+        assert_eq!(config.rtt_spike_multiplier, u32::MAX);
+    }
+
+    #[test]
+    fn tapio_config_ignore_exit_count_never_exceeds_populated_entries() {
+        let config = Config::default().tapio_config();
+        assert_eq!(config.ignore_exit_count, 0);
+        assert!(config.ignore_exit_count as usize <= config.ignore_exit_codes.len());
     }
 }
