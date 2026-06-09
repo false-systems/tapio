@@ -5,6 +5,7 @@
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
 #include "headers/metrics.h"
+#include "headers/config.h"
 
 // Operation types
 #define OP_READ  0
@@ -15,31 +16,27 @@
 #define SEVERITY_WARNING  1
 #define SEVERITY_CRITICAL 2
 
-// Default latency thresholds (nanoseconds) — overridable via config map
-#define LATENCY_WARNING_NS  50000000ULL   // 50ms
-#define LATENCY_CRITICAL_NS 200000000ULL  // 200ms
-
-// Config map indices
-#define CONFIG_LATENCY_WARNING_NS  0
-#define CONFIG_LATENCY_CRITICAL_NS 1
-#define CONFIG_MAX_ENTRIES         2
-
-// Storage event structure - MUST match Rust StorageEvent in tapio-common/src/ebpf.rs (72 bytes)
+// Storage event structure - MUST match Rust StorageEvent in tapio-common/src/ebpf.rs (80 bytes)
 struct storage_event {
-	__u64 timestamp_ns;   // offset 0
-	__u64 latency_ns;     // offset 8
-	__u64 cgroup_id;      // offset 16
-	__u64 sector;         // offset 24
-	__u32 dev_major;      // offset 32
-	__u32 dev_minor;      // offset 36
-	__u32 bytes;          // offset 40
-	__u32 pid;            // offset 44
-	__s32 error_code;     // offset 48
-	__u8  opcode;         // offset 52
-	__u8  severity;       // offset 53
-	__u8  comm[16];       // offset 54
-	__u8  _pad[2];        // offset 70, explicit padding to 72 bytes
+	__u32 config_generation; // offset 0
+	__u32 _pad0;             // offset 4, explicit alignment padding
+	__u64 timestamp_ns;      // offset 8
+	__u64 latency_ns;        // offset 16
+	__u64 cgroup_id;         // offset 24
+	__u64 sector;            // offset 32
+	__u32 dev_major;         // offset 40
+	__u32 dev_minor;         // offset 44
+	__u32 bytes;             // offset 48
+	__u32 pid;               // offset 52
+	__s32 error_code;        // offset 56
+	__u8  opcode;            // offset 60
+	__u8  severity;          // offset 61
+	__u8  comm[16];          // offset 62
+	__u8  _pad[2];           // offset 78, explicit padding to 80 bytes
 };
+
+_Static_assert(sizeof(struct storage_event) == 80, "storage_event size");
+_Static_assert(__builtin_offsetof(struct storage_event, config_generation) == 0, "storage_event config_generation offset");
 
 // Key for tracking inflight I/O operations
 struct io_key {
@@ -62,20 +59,6 @@ struct io_value {
 	__u8  padding[6];     // Alignment
 };
 
-// Runtime-configurable thresholds — populated by userspace at load time
-struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__uint(max_entries, CONFIG_MAX_ENTRIES);
-	__type(key, __u32);
-	__type(value, __u64);
-} config SEC(".maps");
-
-// Read threshold with fallback to compile-time default
-static __always_inline __u64 get_config(__u32 idx, __u64 default_val) {
-	__u64 *val = bpf_map_lookup_elem(&config, &idx);
-	return val && *val > 0 ? *val : default_val;
-}
-
 // Ring buffer for sending events to userspace
 struct {
 	__uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -94,6 +77,11 @@ struct {
 // Store timestamp for latency calculation
 SEC("tracepoint/block/block_rq_issue")
 int trace_block_rq_issue(struct trace_event_raw_block_rq *ctx) {
+	struct tapio_config cfg = {};
+	if (!tapio_config_snapshot(&cfg) || !(cfg.flags & TAPIO_F_STORAGE)) {
+		return 0;
+	}
+
 	struct io_key key = {};
 	struct io_value val = {};
 
@@ -140,6 +128,11 @@ int trace_block_rq_issue(struct trace_event_raw_block_rq *ctx) {
 // Calculate latency and emit event if anomaly detected
 SEC("tracepoint/block/block_rq_complete")
 int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
+	struct tapio_config cfg = {};
+	if (!tapio_config_snapshot(&cfg) || !(cfg.flags & TAPIO_F_STORAGE)) {
+		return 0;
+	}
+
 	struct io_key key = {};
 	struct io_value *val;
 	__u64 now_ns;
@@ -182,13 +175,11 @@ int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
 	// Get error code
 	error_code = BPF_CORE_READ(ctx, error);
 
-	// Determine severity - only emit events for anomalies
-	// Thresholds read from config map, falling back to compile-time defaults
+	// Determine severity - only emit events for anomalies.
+	// Zero slow_io_threshold_ns is inert and does not emit latency events.
 	if (error_code != 0) {
 		severity = SEVERITY_CRITICAL;  // I/O error is always critical
-	} else if (latency_ns >= get_config(CONFIG_LATENCY_CRITICAL_NS, LATENCY_CRITICAL_NS)) {
-		severity = SEVERITY_CRITICAL;
-	} else if (latency_ns >= get_config(CONFIG_LATENCY_WARNING_NS, LATENCY_WARNING_NS)) {
+	} else if (cfg.slow_io_threshold_ns > 0 && latency_ns >= cfg.slow_io_threshold_ns) {
 		severity = SEVERITY_WARNING;
 	} else {
 		// Normal I/O - don't emit event (edge filtering ~1%)
@@ -208,6 +199,7 @@ int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
 	__builtin_memset(evt, 0, sizeof(*evt));
 
 	// Fill event
+	evt->config_generation = cfg.generation;
 	evt->timestamp_ns = now_ns;
 	evt->latency_ns = latency_ns;
 	evt->cgroup_id = val->cgroup_id;
