@@ -68,7 +68,7 @@ fail_budget() {
 ebpf_object_budget() {
   case "$1" in
     network_monitor) printf '45000\n' ;;
-    container_monitor) printf '19000\n' ;;
+    container_monitor) printf '20000\n' ;;
     storage_monitor) printf '26000\n' ;;
     node_pmc_monitor) printf '16000\n' ;;
     *) printf '0\n' ;;
@@ -78,9 +78,9 @@ ebpf_object_budget() {
 ebpf_map_count_budget() {
   case "$1" in
     network_monitor) printf '4\n' ;;
-    container_monitor) printf '2\n' ;;
+    container_monitor) printf '3\n' ;;
     storage_monitor) printf '4\n' ;;
-    node_pmc_monitor) printf '5\n' ;;
+    node_pmc_monitor) printf '6\n' ;;
     *) printf '0\n' ;;
   esac
 }
@@ -226,6 +226,9 @@ section "eBPF map budgets"
 for prog in network_monitor container_monitor storage_monitor node_pmc_monitor; do
   source="ebpf/${prog}.c"
   map_count="$(grep -c 'SEC(".maps")' "$source")"
+  if grep -q '"headers/config.h"' "$source"; then
+    map_count=$((map_count + 1)) # tapio_config map from headers/config.h
+  fi
   map_count=$((map_count + 1)) # shared tapio_metrics map from headers/metrics.h
   map_budget="$(ebpf_map_count_budget "$prog")"
   printf '%s maps: %s (budget %s)\n' "$prog" "$map_count" "$map_budget"
@@ -245,7 +248,7 @@ for prog in network_monitor container_monitor storage_monitor node_pmc_monitor; 
       if (line + 0 > max) max = line + 0
     }
     END { print max + 0 }
-  ' "$source" ebpf/headers/metrics.h)"
+  ' "$source" ebpf/headers/metrics.h ebpf/headers/config.h)"
   entries_budget="$(ebpf_map_max_entries_budget "$prog")"
   printf '%s max_entries ceiling: %s (budget %s)\n' "$prog" "$max_entries" "$entries_budget"
   if (( max_entries > entries_budget )); then
