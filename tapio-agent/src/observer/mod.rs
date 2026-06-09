@@ -55,8 +55,13 @@ pub fn read_percpu_sum(map_fd: std::os::fd::RawFd, key: u32, nr_cpus: usize) -> 
 /// Must be called before taking the ring buffer map (borrow exclusion).
 #[cfg(target_os = "linux")]
 pub fn metrics_map_fd(ebpf: &aya::Ebpf) -> Option<std::os::fd::RawFd> {
-    use std::os::fd::{AsFd, AsRawFd};
     let map = ebpf.map("tapio_metrics")?;
+    Some(map_raw_fd(map))
+}
+
+#[cfg(target_os = "linux")]
+fn map_raw_fd(map: &aya::maps::Map) -> std::os::fd::RawFd {
+    use std::os::fd::{AsFd, AsRawFd};
     let data = match map {
         aya::maps::Map::Array(d)
         | aya::maps::Map::BloomFilter(d)
@@ -80,7 +85,79 @@ pub fn metrics_map_fd(ebpf: &aya::Ebpf) -> Option<std::os::fd::RawFd> {
         | aya::maps::Map::Unsupported(d)
         | aya::maps::Map::XskMap(d) => d,
     };
-    Some(data.fd().as_fd().as_raw_fd())
+    data.fd().as_fd().as_raw_fd()
+}
+
+#[cfg(target_os = "linux")]
+fn bpf_map_update_tapio_config(
+    map_fd: std::os::fd::RawFd,
+    config: &tapio_common::ebpf::TapioConfig,
+) -> std::io::Result<()> {
+    #[repr(C)]
+    struct BpfMapUpdateAttr {
+        map_fd: u32,
+        _pad: u32,
+        key: u64,
+        value: u64,
+        flags: u64,
+    }
+
+    let key = 0_u32;
+    let attr = BpfMapUpdateAttr {
+        map_fd: map_fd as u32,
+        _pad: 0,
+        key: &key as *const u32 as u64,
+        value: config as *const tapio_common::ebpf::TapioConfig as u64,
+        flags: 0, // BPF_ANY
+    };
+
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_bpf,
+            2_i64, // BPF_MAP_UPDATE_ELEM
+            &attr as *const BpfMapUpdateAttr,
+            std::mem::size_of::<BpfMapUpdateAttr>() as u64,
+        )
+    };
+
+    if ret < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn write_tapio_config(
+    ebpf: &mut aya::Ebpf,
+    observer: &'static str,
+    config: &tapio_common::ebpf::TapioConfig,
+) -> bool {
+    let Some(map) = ebpf.map("tapio_config") else {
+        tracing::error!(observer, map = "tapio_config", "config carrier map missing");
+        return false;
+    };
+    let map_fd = map_raw_fd(map);
+    match bpf_map_update_tapio_config(map_fd, config) {
+        Ok(()) => {
+            tracing::info!(
+                observer,
+                generation = config.generation,
+                flags = config.flags,
+                "tapio_config written to eBPF carrier"
+            );
+            true
+        }
+        Err(e) => {
+            tracing::error!(
+                observer,
+                map = "tapio_config",
+                error = %e,
+                "failed to write tapio_config; observer remains at previous or zeroed config"
+            );
+            false
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
