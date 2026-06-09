@@ -128,11 +128,6 @@ int trace_block_rq_issue(struct trace_event_raw_block_rq *ctx) {
 // Calculate latency and emit event if anomaly detected
 SEC("tracepoint/block/block_rq_complete")
 int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
-	struct tapio_config cfg = {};
-	if (!tapio_config_snapshot(&cfg) || !(cfg.flags & TAPIO_F_STORAGE)) {
-		return 0;
-	}
-
 	struct io_key key = {};
 	struct io_value *val;
 	__u64 now_ns;
@@ -162,6 +157,15 @@ int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
 		return 0;  // No matching issue event (may have been evicted)
 	}
 
+	// Config gates emission, not cleanup — completions must clear inflight
+	// state even when storage is disabled mid-flight, or stale entries
+	// accumulate in the LRU and corrupt latency math after re-enable.
+	struct tapio_config cfg = {};
+	if (!tapio_config_snapshot(&cfg) || !(cfg.flags & TAPIO_F_STORAGE)) {
+		bpf_map_delete_elem(&inflight_io, &key);
+		return 0;
+	}
+
 	if (val->ambiguous) {
 		metric_inc(METRIC_STORAGE_AMBIGUOUS_IO);
 		bpf_map_delete_elem(&inflight_io, &key);
@@ -176,9 +180,11 @@ int trace_block_rq_complete(struct trace_event_raw_block_rq_completion *ctx) {
 	error_code = BPF_CORE_READ(ctx, error);
 
 	// Determine severity - only emit events for anomalies.
-	// Zero slow_io_threshold_ns is inert and does not emit latency events.
+	// Zero thresholds are inert and do not emit latency events.
 	if (error_code != 0) {
 		severity = SEVERITY_CRITICAL;  // I/O error is always critical
+	} else if (cfg.io_latency_critical_ns > 0 && latency_ns >= cfg.io_latency_critical_ns) {
+		severity = SEVERITY_CRITICAL;
 	} else if (cfg.slow_io_threshold_ns > 0 && latency_ns >= cfg.slow_io_threshold_ns) {
 		severity = SEVERITY_WARNING;
 	} else {

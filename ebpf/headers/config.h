@@ -8,7 +8,7 @@
  * changes size, field order, field meaning, or interpretation must bump
  * TAPIO_CONFIG_ABI_VERSION and the Rust mirror in tapio-common/src/ebpf.rs.
  */
-#define TAPIO_CONFIG_ABI_VERSION 1
+#define TAPIO_CONFIG_ABI_VERSION 2
 
 #define TAPIO_F_NETWORK   (1ULL << 0)
 #define TAPIO_F_STORAGE   (1ULL << 1)
@@ -21,28 +21,32 @@ struct tapio_config {
 	__u32 abi_version;            /* TAPIO_CONFIG_ABI_VERSION */
 	__u32 generation;             /* profile generation stamped into events */
 	__u64 flags;                  /* TAPIO_F_* enable bits */
-	__u64 slow_io_threshold_ns;
+	__u64 slow_io_threshold_ns;   /* storage latency warning; 0 = inert */
+	__u64 io_latency_critical_ns; /* storage latency critical; 0 = inert */
 	__u64 conn_refused_window_ns;
 	__u32 conn_refused_min_count;
-	__u32 rtt_spike_multiplier;
+	__u32 rtt_spike_multiplier;   /* RTT spike vs baseline ratio; 0 = inert */
+	__u32 rtt_spike_abs_us;       /* RTT spike absolute threshold; 0 = inert */
 	__u32 rtt_min_baseline_samples;
 	__u32 ignore_exit_count;
 	__s32 ignore_exit_codes[TAPIO_CONFIG_MAX_IGNORE_EXIT_CODES];
 	__u32 _pad;
 };
 
-_Static_assert(sizeof(struct tapio_config) == 120, "tapio_config size");
+_Static_assert(sizeof(struct tapio_config) == 128, "tapio_config size");
 _Static_assert(__builtin_offsetof(struct tapio_config, abi_version) == 0, "tapio_config abi_version offset");
 _Static_assert(__builtin_offsetof(struct tapio_config, generation) == 4, "tapio_config generation offset");
 _Static_assert(__builtin_offsetof(struct tapio_config, flags) == 8, "tapio_config flags offset");
 _Static_assert(__builtin_offsetof(struct tapio_config, slow_io_threshold_ns) == 16, "tapio_config slow_io_threshold_ns offset");
-_Static_assert(__builtin_offsetof(struct tapio_config, conn_refused_window_ns) == 24, "tapio_config conn_refused_window_ns offset");
-_Static_assert(__builtin_offsetof(struct tapio_config, conn_refused_min_count) == 32, "tapio_config conn_refused_min_count offset");
-_Static_assert(__builtin_offsetof(struct tapio_config, rtt_spike_multiplier) == 36, "tapio_config rtt_spike_multiplier offset");
-_Static_assert(__builtin_offsetof(struct tapio_config, rtt_min_baseline_samples) == 40, "tapio_config rtt_min_baseline_samples offset");
-_Static_assert(__builtin_offsetof(struct tapio_config, ignore_exit_count) == 44, "tapio_config ignore_exit_count offset");
-_Static_assert(__builtin_offsetof(struct tapio_config, ignore_exit_codes) == 48, "tapio_config ignore_exit_codes offset");
-_Static_assert(__builtin_offsetof(struct tapio_config, _pad) == 112, "tapio_config _pad offset");
+_Static_assert(__builtin_offsetof(struct tapio_config, io_latency_critical_ns) == 24, "tapio_config io_latency_critical_ns offset");
+_Static_assert(__builtin_offsetof(struct tapio_config, conn_refused_window_ns) == 32, "tapio_config conn_refused_window_ns offset");
+_Static_assert(__builtin_offsetof(struct tapio_config, conn_refused_min_count) == 40, "tapio_config conn_refused_min_count offset");
+_Static_assert(__builtin_offsetof(struct tapio_config, rtt_spike_multiplier) == 44, "tapio_config rtt_spike_multiplier offset");
+_Static_assert(__builtin_offsetof(struct tapio_config, rtt_spike_abs_us) == 48, "tapio_config rtt_spike_abs_us offset");
+_Static_assert(__builtin_offsetof(struct tapio_config, rtt_min_baseline_samples) == 52, "tapio_config rtt_min_baseline_samples offset");
+_Static_assert(__builtin_offsetof(struct tapio_config, ignore_exit_count) == 56, "tapio_config ignore_exit_count offset");
+_Static_assert(__builtin_offsetof(struct tapio_config, ignore_exit_codes) == 60, "tapio_config ignore_exit_codes offset");
+_Static_assert(__builtin_offsetof(struct tapio_config, _pad) == 124, "tapio_config _pad offset");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);

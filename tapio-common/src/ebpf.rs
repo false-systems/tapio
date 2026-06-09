@@ -39,14 +39,14 @@ pub const STORAGE_SEVERITY_NORMAL: u8 = 0;
 pub const STORAGE_SEVERITY_WARNING: u8 = 1;
 pub const STORAGE_SEVERITY_CRITICAL: u8 = 2;
 
-pub const TAPIO_CONFIG_ABI_VERSION: u32 = 1;
+pub const TAPIO_CONFIG_ABI_VERSION: u32 = 2;
 pub const TAPIO_F_NETWORK: u64 = 1 << 0;
 pub const TAPIO_F_STORAGE: u64 = 1 << 1;
 pub const TAPIO_F_CONTAINER: u64 = 1 << 2;
 pub const TAPIO_F_NODE_PMC: u64 = 1 << 3;
 pub const TAPIO_CONFIG_MAX_IGNORE_EXIT_CODES: usize = 16;
 
-/// Shared agent -> eBPF runtime config ABI — 120 bytes.
+/// Shared agent -> eBPF runtime config ABI — 128 bytes.
 ///
 /// Layout changes require bumping TAPIO_CONFIG_ABI_VERSION on both sides.
 #[repr(C)]
@@ -56,9 +56,11 @@ pub struct TapioConfig {
     pub generation: u32,
     pub flags: u64,
     pub slow_io_threshold_ns: u64,
+    pub io_latency_critical_ns: u64,
     pub conn_refused_window_ns: u64,
     pub conn_refused_min_count: u32,
     pub rtt_spike_multiplier: u32,
+    pub rtt_spike_abs_us: u32,
     pub rtt_min_baseline_samples: u32,
     pub ignore_exit_count: u32,
     pub ignore_exit_codes: [i32; TAPIO_CONFIG_MAX_IGNORE_EXIT_CODES],
@@ -345,7 +347,7 @@ mod tests {
 
     #[test]
     fn tapio_config_size() {
-        assert_eq!(size_of::<TapioConfig>(), 120);
+        assert_eq!(size_of::<TapioConfig>(), 128);
     }
 
     #[test]
@@ -354,13 +356,15 @@ mod tests {
         assert_eq!(offset_of!(TapioConfig, generation), 4);
         assert_eq!(offset_of!(TapioConfig, flags), 8);
         assert_eq!(offset_of!(TapioConfig, slow_io_threshold_ns), 16);
-        assert_eq!(offset_of!(TapioConfig, conn_refused_window_ns), 24);
-        assert_eq!(offset_of!(TapioConfig, conn_refused_min_count), 32);
-        assert_eq!(offset_of!(TapioConfig, rtt_spike_multiplier), 36);
-        assert_eq!(offset_of!(TapioConfig, rtt_min_baseline_samples), 40);
-        assert_eq!(offset_of!(TapioConfig, ignore_exit_count), 44);
-        assert_eq!(offset_of!(TapioConfig, ignore_exit_codes), 48);
-        assert_eq!(offset_of!(TapioConfig, _pad), 112);
+        assert_eq!(offset_of!(TapioConfig, io_latency_critical_ns), 24);
+        assert_eq!(offset_of!(TapioConfig, conn_refused_window_ns), 32);
+        assert_eq!(offset_of!(TapioConfig, conn_refused_min_count), 40);
+        assert_eq!(offset_of!(TapioConfig, rtt_spike_multiplier), 44);
+        assert_eq!(offset_of!(TapioConfig, rtt_spike_abs_us), 48);
+        assert_eq!(offset_of!(TapioConfig, rtt_min_baseline_samples), 52);
+        assert_eq!(offset_of!(TapioConfig, ignore_exit_count), 56);
+        assert_eq!(offset_of!(TapioConfig, ignore_exit_codes), 60);
+        assert_eq!(offset_of!(TapioConfig, _pad), 124);
     }
 
     #[test]
