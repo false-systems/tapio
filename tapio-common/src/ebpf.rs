@@ -39,34 +39,72 @@ pub const STORAGE_SEVERITY_NORMAL: u8 = 0;
 pub const STORAGE_SEVERITY_WARNING: u8 = 1;
 pub const STORAGE_SEVERITY_CRITICAL: u8 = 2;
 
-/// Network event from network_monitor.c — 80 bytes, packed.
+pub const TAPIO_CONFIG_ABI_VERSION: u32 = 1;
+pub const TAPIO_F_NETWORK: u64 = 1 << 0;
+pub const TAPIO_F_STORAGE: u64 = 1 << 1;
+pub const TAPIO_F_CONTAINER: u64 = 1 << 2;
+pub const TAPIO_F_NODE_PMC: u64 = 1 << 3;
+pub const TAPIO_CONFIG_MAX_IGNORE_EXIT_CODES: usize = 16;
+
+/// Shared agent -> eBPF runtime config ABI — 120 bytes.
+///
+/// Layout changes require bumping TAPIO_CONFIG_ABI_VERSION on both sides.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TapioConfig {
+    pub abi_version: u32,
+    pub generation: u32,
+    pub flags: u64,
+    pub slow_io_threshold_ns: u64,
+    pub conn_refused_window_ns: u64,
+    pub conn_refused_min_count: u32,
+    pub rtt_spike_multiplier: u32,
+    pub rtt_min_baseline_samples: u32,
+    pub ignore_exit_count: u32,
+    pub ignore_exit_codes: [i32; TAPIO_CONFIG_MAX_IGNORE_EXIT_CODES],
+    pub _pad: u32,
+}
+
+impl TapioConfig {
+    pub fn has_valid_abi(&self) -> bool {
+        self.abi_version == TAPIO_CONFIG_ABI_VERSION
+    }
+
+    pub fn observer_enabled(&self, flag: u64) -> bool {
+        self.has_valid_abi() && (self.flags & flag) != 0
+    }
+}
+
+/// Network event from network_monitor.c — 84 bytes, packed.
 /// Each event type uses its own named fields — no overloading.
 ///
 /// C layout:
 /// ```c
 /// struct network_event {
-///     __u32 pid;              // 0
-///     __u32 src_ip;           // 4
-///     __u32 dst_ip;           // 8
-///     __u8  src_ipv6[16];     // 12
-///     __u8  dst_ipv6[16];     // 28
-///     __u16 src_port;         // 44
-///     __u16 dst_port;         // 46
-///     __u16 family;           // 48
-///     __u8  protocol;         // 50
-///     __u8  event_type;       // 51
-///     __u16 old_state;        // 52  TCP state (state change events)
-///     __u16 new_state;        // 54  TCP state (state change events)
-///     __u16 rtt_baseline_ms;  // 56  baseline RTT in ms (RTT spike events)
-///     __u16 rtt_current_ms;   // 58  current RTT in ms (RTT spike events)
-///     __u16 total_retrans;    // 60  total retransmits (retransmit events)
-///     __u16 snd_cwnd;         // 62  congestion window (retransmit events)
-///     __u8  comm[16];         // 64
-/// } __attribute__((packed));  // 80 bytes
+///     __u32 config_generation; // 0
+///     __u32 pid;               // 4
+///     __u32 src_ip;            // 8
+///     __u32 dst_ip;            // 12
+///     __u8  src_ipv6[16];      // 16
+///     __u8  dst_ipv6[16];      // 32
+///     __u16 src_port;          // 48
+///     __u16 dst_port;          // 50
+///     __u16 family;            // 52
+///     __u8  protocol;          // 54
+///     __u8  event_type;        // 55
+///     __u16 old_state;         // 56  TCP state (state change events)
+///     __u16 new_state;         // 58  TCP state (state change events)
+///     __u16 rtt_baseline_ms;   // 60  baseline RTT in ms (RTT spike events)
+///     __u16 rtt_current_ms;    // 62  current RTT in ms (RTT spike events)
+///     __u16 total_retrans;     // 64  total retransmits (retransmit events)
+///     __u16 snd_cwnd;          // 66  congestion window (retransmit events)
+///     __u8  comm[16];          // 68
+/// } __attribute__((packed));   // 84 bytes
 /// ```
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct NetworkEvent {
+    pub config_generation: u32,
     pub pid: u32,
     pub src_ip: u32,
     pub dst_ip: u32,
@@ -147,25 +185,27 @@ impl NetworkEvent {
     }
 }
 
-/// Container event from container_monitor.c — 52 bytes, packed.
+/// Container event from container_monitor.c — 56 bytes, packed.
 ///
 /// C layout:
 /// ```c
 /// struct container_event {
-///     __u64 memory_limit;   // 0
-///     __u64 memory_usage;   // 8
-///     __u64 timestamp_ns;   // 16
-///     __u64 cgroup_id;      // 24  — userspace derives K8s pod context from this ID
-///     __u32 type;           // 32
-///     __u32 pid;            // 36
-///     __u32 tid;            // 40
-///     __s32 exit_code;      // 44
-///     __s32 signal;         // 48
+///     __u32 config_generation; // 0
+///     __u64 memory_limit;      // 4
+///     __u64 memory_usage;      // 12
+///     __u64 timestamp_ns;      // 20
+///     __u64 cgroup_id;         // 28  — userspace derives K8s pod context from this ID
+///     __u32 type;              // 36
+///     __u32 pid;               // 40
+///     __u32 tid;               // 44
+///     __s32 exit_code;         // 48
+///     __s32 signal;            // 52
 /// } __attribute__((packed));
 /// ```
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct ContainerEvent {
+    pub config_generation: u32,
     pub memory_limit: u64,
     pub memory_usage: u64,
     pub timestamp_ns: u64,
@@ -189,29 +229,33 @@ impl ContainerEvent {
     }
 }
 
-/// Storage event from storage_monitor.c — 72 bytes.
+/// Storage event from storage_monitor.c — 80 bytes.
 ///
 /// C layout:
 /// ```c
 /// struct storage_event {
-///     __u64 timestamp_ns;   // 0
-///     __u64 latency_ns;     // 8
-///     __u64 cgroup_id;      // 16
-///     __u64 sector;         // 24
-///     __u32 dev_major;      // 32
-///     __u32 dev_minor;      // 36
-///     __u32 bytes;          // 40
-///     __u32 pid;            // 44
-///     __s32 error_code;     // 48
-///     __u8  opcode;         // 52
-///     __u8  severity;       // 53
-///     __u8  comm[16];       // 54
-///     __u8  _pad[2];        // 70
+///     __u32 config_generation; // 0
+///     __u32 _pad0;             // 4
+///     __u64 timestamp_ns;      // 8
+///     __u64 latency_ns;        // 16
+///     __u64 cgroup_id;         // 24
+///     __u64 sector;            // 32
+///     __u32 dev_major;         // 40
+///     __u32 dev_minor;         // 44
+///     __u32 bytes;             // 48
+///     __u32 pid;               // 52
+///     __s32 error_code;        // 56
+///     __u8  opcode;            // 60
+///     __u8  severity;          // 61
+///     __u8  comm[16];          // 62
+///     __u8  _pad[2];           // 78
 /// };
 /// ```
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct StorageEvent {
+    pub config_generation: u32,
+    pub _pad0: u32,
     pub timestamp_ns: u64,
     pub latency_ns: u64,
     pub cgroup_id: u64,
@@ -246,21 +290,23 @@ impl StorageEvent {
     }
 }
 
-/// PMC event from node_pmc_monitor.c — 36 bytes, packed.
+/// PMC event from node_pmc_monitor.c — 40 bytes, packed.
 ///
 /// C layout:
 /// ```c
 /// struct pmc_event {
-///     __u32 cpu;           // 0
-///     __u64 cycles;        // 4  (unaligned — hence packed)
-///     __u64 instructions;  // 12
-///     __u64 stall_cycles;  // 20
-///     __u64 timestamp;     // 28
-/// } __attribute__((packed)); // 36 bytes
+///     __u32 config_generation; // 0
+///     __u32 cpu;               // 4
+///     __u64 cycles;            // 8
+///     __u64 instructions;      // 16
+///     __u64 stall_cycles;      // 24
+///     __u64 timestamp;         // 32
+/// } __attribute__((packed));   // 40 bytes
 /// ```
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct PmcEvent {
+    pub config_generation: u32,
     pub cpu: u32,
     pub cycles: u64,
     pub instructions: u64,
@@ -298,83 +344,144 @@ mod tests {
     use std::mem::{offset_of, size_of};
 
     #[test]
+    fn tapio_config_size() {
+        assert_eq!(size_of::<TapioConfig>(), 120);
+    }
+
+    #[test]
+    fn tapio_config_offsets() {
+        assert_eq!(offset_of!(TapioConfig, abi_version), 0);
+        assert_eq!(offset_of!(TapioConfig, generation), 4);
+        assert_eq!(offset_of!(TapioConfig, flags), 8);
+        assert_eq!(offset_of!(TapioConfig, slow_io_threshold_ns), 16);
+        assert_eq!(offset_of!(TapioConfig, conn_refused_window_ns), 24);
+        assert_eq!(offset_of!(TapioConfig, conn_refused_min_count), 32);
+        assert_eq!(offset_of!(TapioConfig, rtt_spike_multiplier), 36);
+        assert_eq!(offset_of!(TapioConfig, rtt_min_baseline_samples), 40);
+        assert_eq!(offset_of!(TapioConfig, ignore_exit_count), 44);
+        assert_eq!(offset_of!(TapioConfig, ignore_exit_codes), 48);
+        assert_eq!(offset_of!(TapioConfig, _pad), 112);
+    }
+
+    #[test]
+    fn zeroed_tapio_config_is_inert() {
+        let cfg = TapioConfig::default();
+        assert_eq!(cfg.abi_version, 0);
+        assert_eq!(cfg.generation, 0);
+        assert_eq!(cfg.flags, 0);
+        assert_eq!(cfg.ignore_exit_count, 0);
+        assert!(!cfg.has_valid_abi());
+        assert!(!cfg.observer_enabled(TAPIO_F_NETWORK));
+    }
+
+    #[test]
+    fn version_mismatch_disables_observers() {
+        let cfg = TapioConfig {
+            abi_version: TAPIO_CONFIG_ABI_VERSION + 1,
+            flags: TAPIO_F_NETWORK,
+            ..TapioConfig::default()
+        };
+        assert!(!cfg.has_valid_abi());
+        assert!(!cfg.observer_enabled(TAPIO_F_NETWORK));
+    }
+
+    #[test]
+    fn flag_gating_requires_valid_abi_and_flag() {
+        let cfg = TapioConfig {
+            abi_version: TAPIO_CONFIG_ABI_VERSION,
+            flags: TAPIO_F_NETWORK | TAPIO_F_STORAGE | TAPIO_F_CONTAINER | TAPIO_F_NODE_PMC,
+            ..TapioConfig::default()
+        };
+        assert!(cfg.observer_enabled(TAPIO_F_NETWORK));
+        assert!(cfg.observer_enabled(TAPIO_F_STORAGE));
+        assert!(cfg.observer_enabled(TAPIO_F_CONTAINER));
+        assert!(cfg.observer_enabled(TAPIO_F_NODE_PMC));
+        assert!(!cfg.observer_enabled(1 << 31));
+    }
+
+    #[test]
     fn network_event_size() {
-        assert_eq!(size_of::<NetworkEvent>(), 80);
+        assert_eq!(size_of::<NetworkEvent>(), 84);
     }
 
     #[test]
     fn network_event_offsets() {
-        assert_eq!(offset_of!(NetworkEvent, pid), 0);
-        assert_eq!(offset_of!(NetworkEvent, src_ip), 4);
-        assert_eq!(offset_of!(NetworkEvent, dst_ip), 8);
-        assert_eq!(offset_of!(NetworkEvent, src_ipv6), 12);
-        assert_eq!(offset_of!(NetworkEvent, dst_ipv6), 28);
-        assert_eq!(offset_of!(NetworkEvent, src_port), 44);
-        assert_eq!(offset_of!(NetworkEvent, dst_port), 46);
-        assert_eq!(offset_of!(NetworkEvent, family), 48);
-        assert_eq!(offset_of!(NetworkEvent, protocol), 50);
-        assert_eq!(offset_of!(NetworkEvent, event_type), 51);
-        assert_eq!(offset_of!(NetworkEvent, old_state), 52);
-        assert_eq!(offset_of!(NetworkEvent, new_state), 54);
-        assert_eq!(offset_of!(NetworkEvent, rtt_baseline_ms), 56);
-        assert_eq!(offset_of!(NetworkEvent, rtt_current_ms), 58);
-        assert_eq!(offset_of!(NetworkEvent, total_retrans), 60);
-        assert_eq!(offset_of!(NetworkEvent, snd_cwnd), 62);
-        assert_eq!(offset_of!(NetworkEvent, comm), 64);
+        assert_eq!(offset_of!(NetworkEvent, config_generation), 0);
+        assert_eq!(offset_of!(NetworkEvent, pid), 4);
+        assert_eq!(offset_of!(NetworkEvent, src_ip), 8);
+        assert_eq!(offset_of!(NetworkEvent, dst_ip), 12);
+        assert_eq!(offset_of!(NetworkEvent, src_ipv6), 16);
+        assert_eq!(offset_of!(NetworkEvent, dst_ipv6), 32);
+        assert_eq!(offset_of!(NetworkEvent, src_port), 48);
+        assert_eq!(offset_of!(NetworkEvent, dst_port), 50);
+        assert_eq!(offset_of!(NetworkEvent, family), 52);
+        assert_eq!(offset_of!(NetworkEvent, protocol), 54);
+        assert_eq!(offset_of!(NetworkEvent, event_type), 55);
+        assert_eq!(offset_of!(NetworkEvent, old_state), 56);
+        assert_eq!(offset_of!(NetworkEvent, new_state), 58);
+        assert_eq!(offset_of!(NetworkEvent, rtt_baseline_ms), 60);
+        assert_eq!(offset_of!(NetworkEvent, rtt_current_ms), 62);
+        assert_eq!(offset_of!(NetworkEvent, total_retrans), 64);
+        assert_eq!(offset_of!(NetworkEvent, snd_cwnd), 66);
+        assert_eq!(offset_of!(NetworkEvent, comm), 68);
     }
 
     #[test]
     fn container_event_size() {
-        assert_eq!(size_of::<ContainerEvent>(), 52);
+        assert_eq!(size_of::<ContainerEvent>(), 56);
     }
 
     #[test]
     fn container_event_offsets() {
-        assert_eq!(offset_of!(ContainerEvent, memory_limit), 0);
-        assert_eq!(offset_of!(ContainerEvent, memory_usage), 8);
-        assert_eq!(offset_of!(ContainerEvent, timestamp_ns), 16);
-        assert_eq!(offset_of!(ContainerEvent, cgroup_id), 24);
-        assert_eq!(offset_of!(ContainerEvent, event_type), 32);
-        assert_eq!(offset_of!(ContainerEvent, pid), 36);
-        assert_eq!(offset_of!(ContainerEvent, tid), 40);
-        assert_eq!(offset_of!(ContainerEvent, exit_code), 44);
-        assert_eq!(offset_of!(ContainerEvent, signal), 48);
+        assert_eq!(offset_of!(ContainerEvent, config_generation), 0);
+        assert_eq!(offset_of!(ContainerEvent, memory_limit), 4);
+        assert_eq!(offset_of!(ContainerEvent, memory_usage), 12);
+        assert_eq!(offset_of!(ContainerEvent, timestamp_ns), 20);
+        assert_eq!(offset_of!(ContainerEvent, cgroup_id), 28);
+        assert_eq!(offset_of!(ContainerEvent, event_type), 36);
+        assert_eq!(offset_of!(ContainerEvent, pid), 40);
+        assert_eq!(offset_of!(ContainerEvent, tid), 44);
+        assert_eq!(offset_of!(ContainerEvent, exit_code), 48);
+        assert_eq!(offset_of!(ContainerEvent, signal), 52);
     }
 
     #[test]
     fn storage_event_size() {
-        assert_eq!(size_of::<StorageEvent>(), 72);
+        assert_eq!(size_of::<StorageEvent>(), 80);
     }
 
     #[test]
     fn storage_event_offsets() {
-        assert_eq!(offset_of!(StorageEvent, timestamp_ns), 0);
-        assert_eq!(offset_of!(StorageEvent, latency_ns), 8);
-        assert_eq!(offset_of!(StorageEvent, cgroup_id), 16);
-        assert_eq!(offset_of!(StorageEvent, sector), 24);
-        assert_eq!(offset_of!(StorageEvent, dev_major), 32);
-        assert_eq!(offset_of!(StorageEvent, dev_minor), 36);
-        assert_eq!(offset_of!(StorageEvent, bytes), 40);
-        assert_eq!(offset_of!(StorageEvent, pid), 44);
-        assert_eq!(offset_of!(StorageEvent, error_code), 48);
-        assert_eq!(offset_of!(StorageEvent, opcode), 52);
-        assert_eq!(offset_of!(StorageEvent, severity), 53);
-        assert_eq!(offset_of!(StorageEvent, comm), 54);
-        assert_eq!(offset_of!(StorageEvent, _pad), 70);
+        assert_eq!(offset_of!(StorageEvent, config_generation), 0);
+        assert_eq!(offset_of!(StorageEvent, _pad0), 4);
+        assert_eq!(offset_of!(StorageEvent, timestamp_ns), 8);
+        assert_eq!(offset_of!(StorageEvent, latency_ns), 16);
+        assert_eq!(offset_of!(StorageEvent, cgroup_id), 24);
+        assert_eq!(offset_of!(StorageEvent, sector), 32);
+        assert_eq!(offset_of!(StorageEvent, dev_major), 40);
+        assert_eq!(offset_of!(StorageEvent, dev_minor), 44);
+        assert_eq!(offset_of!(StorageEvent, bytes), 48);
+        assert_eq!(offset_of!(StorageEvent, pid), 52);
+        assert_eq!(offset_of!(StorageEvent, error_code), 56);
+        assert_eq!(offset_of!(StorageEvent, opcode), 60);
+        assert_eq!(offset_of!(StorageEvent, severity), 61);
+        assert_eq!(offset_of!(StorageEvent, comm), 62);
+        assert_eq!(offset_of!(StorageEvent, _pad), 78);
     }
 
     #[test]
     fn pmc_event_size() {
-        assert_eq!(size_of::<PmcEvent>(), 36);
+        assert_eq!(size_of::<PmcEvent>(), 40);
     }
 
     #[test]
     fn pmc_event_offsets() {
-        assert_eq!(offset_of!(PmcEvent, cpu), 0);
-        assert_eq!(offset_of!(PmcEvent, cycles), 4);
-        assert_eq!(offset_of!(PmcEvent, instructions), 12);
-        assert_eq!(offset_of!(PmcEvent, stall_cycles), 20);
-        assert_eq!(offset_of!(PmcEvent, timestamp), 28);
+        assert_eq!(offset_of!(PmcEvent, config_generation), 0);
+        assert_eq!(offset_of!(PmcEvent, cpu), 4);
+        assert_eq!(offset_of!(PmcEvent, cycles), 8);
+        assert_eq!(offset_of!(PmcEvent, instructions), 16);
+        assert_eq!(offset_of!(PmcEvent, stall_cycles), 24);
+        assert_eq!(offset_of!(PmcEvent, timestamp), 32);
     }
 
     #[test]
