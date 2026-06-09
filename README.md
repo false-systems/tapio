@@ -3,7 +3,7 @@
   <code>T A P I O</code>
   <br>
   <br>
-  Opinionated eBPF observer for Linux and Kubernetes
+  Opinionated eBPF observer for Linux and Kubernetes systems
   <br>
   <br>
   <img src="https://img.shields.io/badge/rust-2024%20edition-f74c00" alt="Rust">
@@ -13,122 +13,79 @@
 
 ---
 
-Tapio is an opinionated eBPF observer for Linux and Kubernetes systems.
+Tapio watches selected kernel facts and emits structured anomaly evidence.
 
-It watches a selected set of kernel-level signals, filters noise close to the node, enriches anomalies with Kubernetes context when available, and emits structured operational events.
+It is not a generic eBPF framework. It is not a dashboard. It is not a root-cause engine. Tapio keeps the node agent small, fast, and boringly reliable.
 
-> The kernel already knows when things go wrong. Tapio watches closely enough to notice.
+> Tapio emits evidence, not exhaust.
 
-Tapio emits evidence, not exhaust.
+## What Tapio Is
 
----
+Tapio observes kernel-level failure facts that are easy to miss from application logs alone:
 
-## Why Tapio
+- a TCP connection was refused;
+- a process was killed by OOM;
+- a block I/O completed with an error or abnormal latency;
+- CPU performance counters show stalls or IPC degradation.
 
-Most observability stacks see the application. The kernel sees what actually happened: the OOM kill, the refused connection, the I/O error, the CPU stall. That signal is already there — Tapio's job is to notice the failures that matter and turn them into structured events you can act on.
+Tapio turns those facts into named `kernel.*` anomaly events. Downstream systems can store, correlate, explain, alert, or remediate. Tapio does not guess.
 
-Tapio does not try to replace Prometheus, Grafana, OpenTelemetry, or your observability stack. It provides something lower-level and more direct: structured kernel evidence.
+## Current Shape
 
-Tapio does not guess at root cause. It observes kernel-level anomalies and preserves the evidence. Correlation, explanation, storage, and remediation belong downstream.
+Tapio is a Rust workspace with five crates:
 
----
+| Crate | Role |
+| --- | --- |
+| `tapio-agent` | Linux node agent. Loads eBPF, drains ring buffers, classifies facts, emits to sinks. |
+| `tapio-controller` | Minimal cluster coordination skeleton for the agent/controller boundary. |
+| `tapio-wire` | Shared JSON protocol structs for the agent/controller boundary. |
+| `tapio-cli` | Platform-independent CLI and MCP server for local event files. |
+| `tapio-common` | Shared ABI structs, occurrence schema, anomaly constants, and sink traits. |
 
-## Opinionated by design
+The product split is intentional:
 
-Tapio is opinionated by design.
+```text
+tapio-agent observes.
+tapio-controller coordinates.
+downstream systems explain.
+```
 
-It is not a generic eBPF framework and it does not try to forward every kernel event into userspace.
+The node agent must not grow Kubernetes watches, controller HTTP server dependencies, dashboards, policy engines, or reasoning fields.
 
-Tapio watches a selected set of kernel signals, classifies specific failure patterns, and emits structured anomaly events. The goal is not maximum event volume. The goal is useful kernel evidence.
+## What Tapio Observes
 
-That means Tapio makes product decisions:
-
-- some events are ignored,
-- some filtering happens inside BPF,
-- some classification happens in Rust,
-- only named anomalies are emitted,
-- reasoning and remediation are left downstream.
-
-This keeps Tapio close to the kernel without turning it into another noisy telemetry pipe.
-
----
-
-## What Tapio observes
-
-Tapio is organized around four observers, each watching a specific slice of kernel activity and emitting named anomalies.
-
-| Observer | Kernel sources | Anomalies |
-|----------|----------------|-----------|
+| Observer | Kernel sources | Emitted anomalies |
+| --- | --- | --- |
 | Network | `inet_sock_set_state`, `tcp_receive_reset`, `tcp_retransmit_skb` | `kernel.network.connection_refused`, `kernel.network.connection_timeout`, `kernel.network.retransmit_spike`, `kernel.network.rtt_degradation` |
 | Container | `sched_process_exit`, `oom/mark_victim` | `kernel.container.oom_kill`, `kernel.container.abnormal_exit` |
 | Storage | `block_rq_issue`, `block_rq_complete` | `kernel.storage.io_error`, `kernel.storage.latency_spike` |
-| Node PMC | `perf_event` counters: cycles, instructions, stalls | `kernel.node.cpu_stall`, `kernel.node.memory_pressure`, `kernel.node.ipc_degradation` |
+| Node PMC | `perf_event` counters | `kernel.node.cpu_stall`, `kernel.node.memory_pressure`, `kernel.node.ipc_degradation` |
 
-Anomaly types are stable product concepts, not arbitrary event labels. They follow a `kernel.<observer>.<anomaly>` naming convention.
+Anomaly names are stable product concepts. They are not arbitrary metric labels.
 
----
+## How It Works
 
-## How it works
-
-```
-Kernel signals
-  ↓
-eBPF programs
-  ↓
-Ring buffers
-  ↓
-Rust userspace parser
-  ↓
-Edge anomaly filtering
-  ↓
-Sinks
+```text
+kernel tracepoints / perf events
+  -> eBPF programs
+  -> ring buffers
+  -> Rust userspace parser
+  -> anomaly classification
+  -> sinks
 ```
 
-```
-Kernel signals                  Rust userspace                    Outputs
-──────────────                  ──────────────                    ───────
-inet_sock_set_state ──┐
-tcp_receive_reset  ───┤
-tcp_retransmit_skb ───┼──► ring buffer ──► parse ──► filter ──► stdout
-                      │                              anomaly?     file (.tapio/)
-sched_process_exit ───┤                                                    HTTP
-oom/mark_victim    ───┤                                                    OTLP
-                      │
-block_rq_issue     ───┤
-block_rq_complete  ───┤
-                      │
-perf_event counters ──┘
-```
+Tapio filters close to the source:
 
-The BPF/Rust boundary is defined by packed C structs mirrored in `tapio-common/src/ebpf.rs`. Size assertions enforce layout agreement at compile time. CO-RE (`preserve_access_index` + `bpf_core_read`) handles kernel struct field access across versions; tracepoint argument structs use stable kernel ABI layouts.
+- **BPF-side filtering:** cheap, obvious drops before crossing into userspace.
+- **Rust-side classification:** threshold and state checks where userspace context is safer.
 
-Storage latency correlation uses the request facts exposed by `block_rq_issue` and `block_rq_complete`: device, sector, sector count, and operation. These tracepoints do not expose a stable request pointer on current kernels. If two identical keys are inflight at the same time, Tapio marks the key ambiguous, drops the completion, and increments `tapio_correlation_drops_total{observer="storage",reason="ambiguous_inflight_io"}` instead of emitting misleading latency evidence.
+The BPF/Rust boundary is fixed by C structs mirrored in `tapio-common/src/ebpf.rs`. Tests assert size and field offsets so layout drift is caught before runtime.
 
----
+Storage has a strict correctness rule: if `block_rq_issue` and `block_rq_complete` cannot uniquely correlate an inflight request, Tapio drops that completion and increments `tapio_correlation_drops_total{observer="storage",reason="ambiguous_inflight_io"}`. Missing evidence can be counted. Wrong evidence is not emitted.
 
-## Filtering model
+## Example Event
 
-Tapio filters at two levels, choosing the cheapest place to drop noise.
-
-1. **BPF-side filtering** — for cheap, obvious decisions made before an event ever crosses into userspace.
-2. **Rust-side anomaly classification** — for stateful or richer detection that needs context or thresholds.
-
-| Observer | Where it filters | Behavior |
-|----------|------------------|----------|
-| Storage | BPF | Only I/O errors and latency spikes cross into userspace. |
-| Container | BPF | Only abnormal exits cross: non-zero exit code, terminating signal, or OOM kill. |
-| Network | Rust | BPF emits state transitions and network signals; Rust classifies retransmit spikes, RTT degradation, connection failures, and timeouts. |
-| Node PMC | Rust | BPF samples performance counters; Rust detects IPC degradation, CPU stalls, and memory pressure. |
-
-Thresholds for the Rust-side and BPF-side detectors (RTT spike ratio, I/O latency, PMC stall percentages, IPC) are tunable via the TOML config file — see [Agent](#agent).
-
----
-
-## Output format
-
-Tapio emits structured anomaly events. In JSON output, these are represented as occurrence documents (a FALSE Protocol-compatible schema).
-
-Tapio fills factual fields only: timestamp, source, observer/type, severity, outcome, error code and message, kernel data, and Kubernetes context when available. It does **not** fill reasoning fields — root cause, causal chains, explanations, and remediation are left for downstream systems.
+Tapio emits occurrence JSON. Fields are factual: timestamp, anomaly type, severity, outcome, error, and kernel data. Reasoning fields are intentionally absent.
 
 ```json
 {
@@ -143,14 +100,6 @@ Tapio fills factual fields only: timestamp, source, observer/type, severity, out
     "code": "OOM_KILL",
     "message": "OOM kill pid=1234 (usage=512MB, limit=0MB)"
   },
-  "context": {
-    "node": "worker-3",
-    "namespace": "default",
-    "entities": [
-      { "kind": "pod", "id": "default/checkout-api-7f8b9", "name": "checkout-api-7f8b9" },
-      { "kind": "deployment", "id": "default/checkout-api", "name": "checkout-api" }
-    ]
-  },
   "data": {
     "pid": 1234,
     "tid": 1234,
@@ -164,137 +113,96 @@ Tapio fills factual fields only: timestamp, source, observer/type, severity, out
 }
 ```
 
-`memory_limit_bytes` may be `0` for OOM kills because the BPF tracepoint does not expose the cgroup limit. Cluster context belongs in the controller or downstream systems, not in the node hot path.
+`memory_limit_bytes` can be `0` for OOM kills because the kernel tracepoint does not expose the cgroup limit. Cluster context belongs in `tapio-controller` or downstream systems, not in the node hot path.
 
----
-
-## CLI
-
-The `tapio` CLI reads events from a local data directory and is fully decoupled from the running agent process — it inspects what has been written, so it works the same whether the agent is running or not.
+## Quick Commands
 
 ```bash
-tapio status                    # observer status, event counts
-tapio watch                     # live anomaly stream
-tapio watch --network           # filter by observer
-tapio watch --json              # machine-readable output
-tapio recent                    # last 20 anomalies
-tapio recent --since 5m         # time window
-tapio health                    # node health across all observers
-tapio health network            # drill into one observer
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+scripts/verify-lean.sh
 ```
 
-It reads from `.tapio/occurrences/*.json` by default. Override with `--data-dir` or the `TAPIO_DATA_DIR` environment variable.
+On Linux or inside Lima, also run:
 
-The CLI also exposes a read-only MCP server (`tapio mcp`, stdio JSON-RPC 2.0) so AI agents can query recent anomalies and node health from the same local event store.
+```bash
+scripts/smoke-ebpf-network.sh
+```
 
----
+That smoke test builds the agent, loads real eBPF programs, triggers a TCP connection to a closed localhost port, and checks that Tapio records a network occurrence with the exact destination port.
 
 ## Agent
 
-The agent (`tapio-agent`) is the process that loads the eBPF programs, reads the ring buffers, filters and enriches events, and emits them to sinks.
+`tapio-agent` is Linux-only. It requires kernel 5.8+ with BTF and the capabilities `CAP_BPF`, `CAP_PERFMON`, and `CAP_NET_ADMIN`.
 
 ```bash
-tapio-agent --sink=stdout                  # JSON lines to stdout
-tapio-agent --sink=file                    # .tapio/occurrences/*.json
-tapio-agent --sink=stdout --sink=file      # multiple sinks (fan-out)
-tapio-agent --ebpf-dir /opt/tapio/ebpf     # compiled .o location
+tapio-agent --sink=stdout
+tapio-agent --sink=file
+tapio-agent --sink=stdout --sink=file
+tapio-agent --ebpf-dir /opt/tapio/ebpf
 ```
 
-Flags:
+Important flags:
 
-- `--config <path>` — TOML config file (default `/etc/tapio/tapio.toml`); tunes thresholds, metrics, and the OTLP sink.
-- `--sink <name>` — output sink (`stdout`, `file`, `http`; `otlp` when built with `--features otlp`), repeatable.
-- `--ebpf-dir <path>` — directory of compiled `.o` files (default `/opt/tapio/ebpf`).
-- `--data-dir <path>` — directory for the file sink (default `.tapio/occurrences`).
-- `--http-endpoint <url>` — endpoint for the `http` sink.
+- `--config <path>`: TOML config file, default `/etc/tapio/tapio.toml`.
+- `--sink <name>`: `stdout`, `file`, `http`, or `otlp` when built with `--features otlp`; repeatable.
+- `--ebpf-dir <path>`: directory containing compiled `.o` files.
+- `--data-dir <path>`: file sink output directory, default `.tapio/occurrences`.
+- `--http-endpoint <url>`: HTTP sink endpoint.
 
-The agent requires the capabilities `CAP_BPF`, `CAP_PERFMON`, and `CAP_NET_ADMIN`.
+The agent runs standalone with `stdout` or `file` sinks. It does not need Kubernetes, a controller, or a network destination.
 
-Tapio runs without any external service: `--sink=stdout` and `--sink=file` work standalone, with no Kubernetes and no network destination.
+## CLI
 
----
+The `tapio` CLI reads local occurrence files. It does not talk to the running agent.
 
-## Kubernetes
+```bash
+tapio status
+tapio watch
+tapio watch --network
+tapio watch --json
+tapio recent
+tapio recent --since 5m
+tapio health
+tapio health network
+```
 
-Tapio runs as a privileged DaemonSet, one agent per node.
+By default, the CLI reads `.tapio/occurrences/*.json`. Override that with `--data-dir` or `TAPIO_DATA_DIR`.
 
-Kubernetes is optional for the node agent. Tapio observes the Linux kernel and emits node-local evidence without watching the Kubernetes API. Cluster-aware pod, namespace, and workload context belongs in `tapio-controller` or downstream systems.
-
-## Agent/controller split
-
-Tapio keeps intelligence out of the kernel and bloat out of the node agent.
-
-The agent observes. The controller coordinates. Downstream systems explain.
-
-The v0 agent/controller boundary is `tapio-wire/v1`: agent-initiated HTTP/1.1 plus JSON for hello, config pull, heartbeat, and event batch delivery. The controller is the HTTP server; the agent does not expose an inbound controller API and does not use gRPC for this path.
-
-Kernel facts still move from eBPF to userspace through ring buffers. Tiny runtime config still moves from the agent to eBPF through BPF config maps. Controller context stays out of the node hot path.
-
-See [docs/agent-controller.md](docs/agent-controller.md) for the runtime model, protocol endpoints, security assumptions, failure behavior, and non-goals.
-
----
+The CLI also provides `tapio mcp`, a read-only stdio JSON-RPC MCP server for querying recent anomalies and node health.
 
 ## Sinks
 
-Tapio emits structured anomaly events to local files, stdout, HTTP endpoints, or OTLP-compatible systems.
-
 | Sink | Output |
-|------|--------|
-| `StdoutSink` | JSON lines to stdout |
-| `FileSink` | one `.json` document per event under the data directory |
-| `HttpSink` | batched JSON `POST` to an HTTP ingest endpoint |
-| `OtlpSink` | OTLP/HTTP logs export (protobuf + gzip) to any OTLP-compatible collector |
-| `MultiSink` | fan-out wrapper; sends to all configured sinks, logs errors without short-circuiting |
+| --- | --- |
+| `stdout` | JSON lines to stdout |
+| `file` | one occurrence JSON file per event |
+| `http` | batched JSON `POST` to an HTTP endpoint |
+| `otlp` | OTLP/HTTP logs export when built with `--features otlp` |
 
-Sinks implement the `tapio_common::sink::Sink` trait (sync `send`/`flush`/`name`). The local sinks (`stdout`, `file`) are the default path and need nothing external. The `http` sink is a tiny built-in JSON forwarder. The `otlp` sink is available only when building `tapio-agent` with `--features otlp`.
+Sink guarantees:
 
-Current sink guarantees:
-
-- `OtlpSink` supports plaintext `http://` endpoints only when the `otlp` feature is enabled. `https://` endpoints are rejected at configuration time before any TCP connection is opened or `Authorization` header can be written.
-- `HttpSink` and `OtlpSink` return sink errors when a batch export fails after data is dropped. `MultiSink` records those failures in `tapio_sink_writes_total{result="err"}` while still attempting later sinks.
-- `FileSink` writes one validated occurrence JSON document per event. The CLI rejects corrupt or invalid occurrence files instead of silently treating them as evidence.
-
-Network TLS is a deployment concern: put a local OpenTelemetry Collector, sidecar, node-local proxy, or trusted TLS-terminating boundary in front of Tapio if encrypted OTLP transport is required.
-
----
+- Local `stdout` and `file` sinks are the default zero-service path.
+- HTTP/OTLP export failures are surfaced as sink errors and counters.
+- `otlp` rejects `https://` endpoints before opening a TCP connection or sending auth. Use a local collector, proxy, sidecar, or service mesh for TLS termination.
 
 ## Metrics
 
-Prometheus metrics are optional and disabled by default. Enable them in the TOML config with `[metrics] enabled = true`.
+Prometheus metrics are optional and disabled by default. Enable them in TOML with `[metrics] enabled = true`.
 
-The current metric families are all backed by live code paths:
+Key metrics:
 
-- `tapio_events_total` — userspace records drained from ring buffers.
-- `tapio_anomalies_total` — anomalies emitted by observer and anomaly type.
-- `tapio_lost_events_total` — eBPF ring-buffer reserve failures surfaced from the shared `tapio_metrics` per-CPU map.
-- `tapio_malformed_events_total` — truncated or malformed ring-buffer records dropped by userspace.
-- `tapio_drain_cap_total` — drain loops that hit the per-tick cap.
-- `tapio_sink_writes_total` — sink write attempts by sink name and result (`ok` or `err`).
+- `tapio_events_total`: ring-buffer records drained by userspace.
+- `tapio_anomalies_total`: emitted anomalies by observer and type.
+- `tapio_lost_events_total`: eBPF ring-buffer reserve failures.
+- `tapio_malformed_events_total`: malformed/truncated records dropped by userspace.
+- `tapio_correlation_drops_total`: intentionally dropped ambiguous evidence.
+- `tapio_drain_cap_total`: drain loops that hit the per-tick cap.
+- `tapio_sink_writes_total`: sink write attempts by sink and result.
 
----
+## Building eBPF Objects
 
-## Building
-
-```bash
-cargo build --release -p tapio-agent    # ~8MB, LTO + strip + opt-level=z + panic=abort
-cargo build --release -p tapio-cli      # runs anywhere (no eBPF dependency)
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-scripts/verify-lean.sh                  # fmt + clippy + tests + release size + eBPF compile when headers exist
-scripts/smoke-ebpf-network.sh           # Linux/Lima: load eBPF, trigger closed-port TCP, assert occurrence
-```
-
-Rust edition 2024, MSRV 1.85. The agent requires Linux with kernel 5.8+ and BTF. The CLI runs on any platform — only the agent depends on eBPF.
-
-`scripts/verify-lean.sh` enforces the current binary budgets (`tapio-agent` <= 1.5 MB, `tapio` <= 900 KB by default), saves a cargo tree snapshot under `/tmp/tapio-lean`, compiles all four eBPF programs when `clang` and libbpf headers are available, and fails if eBPF object or map budgets are exceeded. Override with `AGENT_MAX_BYTES`, `CLI_MAX_BYTES`, `OUT_DIR`, or `EBPF_ARCH`; budget increases should be committed with a short reason.
-
-`scripts/smoke-ebpf-network.sh` must run on Linux, or from this repo inside the Lima Ubuntu VM. It starts the real agent, loads the network eBPF program, triggers a TCP connection attempt to a closed localhost port, and asserts that the file sink records a `kernel.network.*` occurrence with the expected destination port.
-
----
-
-## Building eBPF programs
-
-There is no build script — the four eBPF C programs are compiled with clang and placed in `--ebpf-dir`. The agent loads the pre-compiled `.o` files at runtime. All four are required.
+There is no build script for production deployment. Compile the four eBPF C programs with clang and place them in the agent `--ebpf-dir`.
 
 ```bash
 for prog in network_monitor container_monitor storage_monitor node_pmc_monitor; do
@@ -303,39 +211,76 @@ for prog in network_monitor container_monitor storage_monitor node_pmc_monitor; 
 done
 ```
 
-Use `-D__TARGET_ARCH_arm64` instead of `-D__TARGET_ARCH_x86` for arm64 nodes.
+Use `-D__TARGET_ARCH_arm64` for arm64 nodes.
 
----
+## Lean Verification
 
-## Architecture
+`scripts/verify-lean.sh` checks:
 
+- formatting;
+- clippy;
+- tests;
+- release binary budgets;
+- dependency boundaries;
+- eBPF object budgets when Linux headers are available;
+- eBPF map count and `max_entries` budgets.
+
+Current budget model:
+
+| Binary | Budget |
+| --- | --- |
+| `tapio-agent` | target 1.5 MB, hard 1.75 MB |
+| `tapio` | hard 900 KB |
+| `tapio-controller` | reported, no hard budget yet |
+
+The script writes dependency snapshots under `/tmp/tapio-lean`. Budget increases should be explicit and justified.
+
+## Agent / Controller Split
+
+The current agent/controller boundary is agent-initiated HTTP/1.1 plus JSON using `tapio-wire/v1`.
+
+Controller endpoints:
+
+- `POST /v1/agents/hello`
+- `GET /v1/agents/config`
+- `POST /v1/agents/heartbeat`
+- `POST /v1/events`
+
+The controller is the HTTP server. The agent does not expose an inbound controller API and does not use gRPC on this path.
+
+See:
+
+- [docs/architecture.md](docs/architecture.md)
+- [docs/agent-controller.md](docs/agent-controller.md)
+
+## Repository Layout
+
+```text
+tapio-agent/      node-local eBPF observer
+tapio-controller/ cluster coordination skeleton
+tapio-wire/       agent/controller protocol structs
+tapio-cli/        CLI and MCP server for local occurrence files
+tapio-common/     shared ABI structs, occurrences, events, sinks
+ebpf/             eBPF C programs and headers
+scripts/          lean checks, dependency checks, runtime smoke tests
+docs/             architecture and agent/controller notes
 ```
-tapio-common/     #[repr(C)] event structs, kernel.* anomaly types, occurrence schema, Sink trait
-tapio-agent/      DaemonSet — eBPF load → ring buffer → parse → filter → emit
-tapio-controller/ Cluster coordination and tapio-wire/v1 HTTP endpoint contracts
-tapio-cli/        CLI commands + MCP server, reads .tapio/occurrences/
-ebpf/             4 C programs + shared headers
-```
 
-- **tapio-common** is platform-independent: the shared `#[repr(C)]` event structs, the `kernel.*` anomaly type constants, the occurrence schema, and the `Sink` trait.
-- **tapio-agent** is Linux-only (aya requires the kernel). It owns the observers, sinks, and local metrics. It does not own Kubernetes watches or controller HTTP server dependencies.
-- **tapio-controller** owns cluster-aware coordination and the HTTP server side of `tapio-wire/v1`.
-- **tapio-cli** is platform-independent and reads the local event store; it never talks to the agent directly.
+## Non-Goals
 
----
+Tapio intentionally does not:
 
-## What Tapio does not do
+- forward every kernel event;
+- infer root cause;
+- fill reasoning, explanation, remediation, or suggested-fix fields;
+- store/index events long-term;
+- replace Prometheus, Grafana, or OpenTelemetry;
+- put Kubernetes watches in the node agent;
+- expose an inbound controller API from the agent;
+- use gRPC for the v0 agent/controller path;
+- become a generic observability platform.
 
-Tapio is intentionally selective. It does not:
-
-- forward every kernel event into userspace (it is not a generic eBPF framework),
-- store or index events long-term (it is not a datastore),
-- correlate events across nodes or explain them (it is not an intelligence layer),
-- replace Prometheus, Grafana, or OpenTelemetry (it is not a full observability platform),
-- implement HTTPS itself in the minimal OTLP sink (terminate TLS at a collector/proxy),
-- fill reasoning fields — root cause, causal chains, remediation (those belong downstream).
-
-Tapio owns node-level observation. Everything else — storage, correlation, dashboards, explanation — can consume its evidence later.
+Tapio owns node-level kernel evidence. Everything else can consume that evidence later.
 
 ---
 
