@@ -182,9 +182,12 @@ int trace_inet_sock_set_state(struct trace_event_raw_inet_sock_set_state *args)
 					bpf_map_update_elem(&baseline_rtt, &key, baseline, BPF_EXIST);
 				}
 
-				// Check for RTT spike: >Nx baseline. Zero multiplier is inert.
+				// Check for RTT spike: >Nx baseline OR absolute threshold.
+				// Zero multiplier / zero abs threshold are inert.
 				__u32 ratio = cfg.rtt_spike_multiplier;
-				if (ratio > 0 && rtt_us > (baseline->baseline_us * ratio)) {
+				__u32 abs_us = cfg.rtt_spike_abs_us;
+				if ((ratio > 0 && rtt_us > (baseline->baseline_us * ratio)) ||
+				    (abs_us > 0 && rtt_us > abs_us)) {
 					struct network_event *evt = bpf_ringbuf_reserve(&events, sizeof(*evt), 0);
 					if (!evt) {
 						metric_inc(METRIC_LOST_EVENTS);

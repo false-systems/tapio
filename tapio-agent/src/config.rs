@@ -129,6 +129,9 @@ impl Thresholds {
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub fn tapio_config(&self) -> TapioConfig {
         let rtt_spike_multiplier = self.rtt_spike_ratio.min(u32::MAX as u64) as u32;
+        // RTT values in the kernel are u32 microseconds, so a clamped-to-max
+        // threshold can never fire — same effect as the value the operator set.
+        let rtt_spike_abs_us = self.rtt_spike_abs_us.min(u32::MAX as u64) as u32;
 
         // The count+array invariant is enforced at construction: all array
         // entries are populated before ignore_exit_count is set, and count
@@ -141,9 +144,11 @@ impl Thresholds {
             generation: 1,
             flags: TAPIO_F_NETWORK | TAPIO_F_STORAGE | TAPIO_F_CONTAINER | TAPIO_F_NODE_PMC,
             slow_io_threshold_ns: self.io_latency_warning_ns,
+            io_latency_critical_ns: self.io_latency_critical_ns,
             conn_refused_window_ns: 0,
             conn_refused_min_count: 0,
             rtt_spike_multiplier,
+            rtt_spike_abs_us,
             rtt_min_baseline_samples: 5,
             ignore_exit_count,
             ignore_exit_codes,
@@ -273,13 +278,17 @@ mod tests {
     fn tapio_config_sets_primitive_thresholds() {
         let thresholds = Thresholds {
             rtt_spike_ratio: 3,
+            rtt_spike_abs_us: 250_000,
             io_latency_warning_ns: 123,
+            io_latency_critical_ns: 456,
             ..Thresholds::default()
         };
         let config = thresholds.tapio_config();
         assert_eq!(config.rtt_spike_multiplier, 3);
+        assert_eq!(config.rtt_spike_abs_us, 250_000);
         assert_eq!(config.rtt_min_baseline_samples, 5);
         assert_eq!(config.slow_io_threshold_ns, 123);
+        assert_eq!(config.io_latency_critical_ns, 456);
     }
 
     #[test]
@@ -290,6 +299,16 @@ mod tests {
         };
         let config = thresholds.tapio_config();
         assert_eq!(config.rtt_spike_multiplier, u32::MAX);
+    }
+
+    #[test]
+    fn tapio_config_clamps_rtt_abs_threshold_to_u32() {
+        let thresholds = Thresholds {
+            rtt_spike_abs_us: u64::MAX,
+            ..Thresholds::default()
+        };
+        let config = thresholds.tapio_config();
+        assert_eq!(config.rtt_spike_abs_us, u32::MAX);
     }
 
     #[test]

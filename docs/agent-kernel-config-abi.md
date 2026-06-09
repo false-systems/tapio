@@ -88,7 +88,7 @@ currently implemented observer knobs when the ABI is implemented.
 Conceptual C layout:
 
 ```c
-#define TAPIO_CONFIG_ABI_VERSION 1
+#define TAPIO_CONFIG_ABI_VERSION 2
 
 #define TAPIO_F_NETWORK   (1ULL << 0)
 #define TAPIO_F_STORAGE   (1ULL << 1)
@@ -102,9 +102,11 @@ struct tapio_config {
     __u64 flags;
 
     __u64 slow_io_threshold_ns;
+    __u64 io_latency_critical_ns;
     __u64 conn_refused_window_ns;
     __u32 conn_refused_min_count;
     __u32 rtt_spike_multiplier;
+    __u32 rtt_spike_abs_us;
     __u32 rtt_min_baseline_samples;
 
     __u32 ignore_exit_count;
@@ -116,12 +118,17 @@ struct tapio_config {
 
 The v0 field set tracks the intended primitive knobs:
 
-- storage slow I/O threshold;
+- storage slow I/O warning and critical thresholds;
 - network connection-refused window and minimum count;
-- network RTT spike multiplier;
+- network RTT spike multiplier and absolute threshold;
 - network baseline sample count if it becomes profile-controlled;
 - bounded container exit-code ignore list;
 - observer enablement flags.
+
+Every threshold the agent's TOML config exposes for eBPF behavior must have a
+carrier field here. A TOML knob that parses but no longer reaches the kernel is
+a silent operator regression — carry the semantics forward or remove the knob,
+never strand it.
 
 Rules:
 
@@ -145,7 +152,8 @@ Rules:
 
 ## ABI Versioning
 
-`TAPIO_CONFIG_ABI_VERSION` starts at `1`.
+`TAPIO_CONFIG_ABI_VERSION` started at `1`; the current version is `2`
+(added `io_latency_critical_ns` and `rtt_spike_abs_us`).
 
 Bump it on any layout change that changes size, field order, field meaning, or
 interpretation. `tapio-agent` and Tapio eBPF programs must agree on the ABI
@@ -232,6 +240,11 @@ the rules are:
 - a partially updated config may cause one event to be judged by a previous or
   next bounded set, but must not cause undefined behavior or out-of-bounds
   access.
+
+Config gates emission and classification, never state cleanup. Handlers that
+release per-event state (e.g. storage's `inflight_io` completion delete) must
+perform that cleanup even when the observer is disabled or the ABI mismatches,
+or entries leak across config changes and corrupt later correlation.
 
 Each eBPF program copies the whole `tapio_config` value to stack once near
 handler entry, then reads only the stack copy for decisions in that invocation.
