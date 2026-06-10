@@ -3,6 +3,7 @@
 # Enforce Tapio's crate dependency boundaries:
 #   tapio-agent observes      — no inbound server, no cluster brain, no k8s client
 #   tapio-wire  is tiny       — protocol structs only, no server/client frameworks
+#   tapio-profile is pure     — validation/compilation never enters node hot paths
 #   tapio-controller coordinates — owns the server/k8s deps
 #
 set -euo pipefail
@@ -21,6 +22,7 @@ guidance() {
     reqwest)     printf 'must not pull a full HTTP client. Use the minimal sink client instead.' ;;
     kube)        printf 'must not run a Kubernetes client. Kubernetes enrichment belongs in tapio-controller.' ;;
     k8s-openapi) printf 'must not pull Kubernetes API types. They belong in tapio-controller.' ;;
+    tapio-profile) printf 'must not validate or compile Evidence Profiles. It consumes compiled wire config only.' ;;
     *)           printf 'is a forbidden dependency for this crate.' ;;
   esac
 }
@@ -43,8 +45,11 @@ check_boundary() {
   done
 }
 
-# tapio-agent: node observer. No server, no gRPC, no Kubernetes client.
-check_boundary tapio-agent kube k8s-openapi axum hyper tonic reqwest
+# tapio-agent: node observer. No server, no gRPC, no Kubernetes client, no profile logic.
+check_boundary tapio-agent kube k8s-openapi axum hyper tonic reqwest tapio-profile
+
+# tapio-cli: platform-independent local inspection. No profile validation/compilation path.
+check_boundary tapio-cli tapio-profile
 
 # tapio-wire: tiny protocol structs. No server/client frameworks at all.
 check_boundary tapio-wire kube k8s-openapi axum hyper tonic reqwest
