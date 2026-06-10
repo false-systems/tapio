@@ -57,6 +57,10 @@ The controller may use server and Kubernetes dependencies. `axum`, `kube`, and `
 
 It must not depend on HTTP server/client frameworks, Kubernetes crates, gRPC crates, or heavy client stacks.
 
+### tapio-profile
+
+`tapio-profile` is the pure Evidence Profile validation and compilation crate. Operators provide the versioned profile document; callers deserialize it; `tapio-profile` validates it against builtins and compiles it into `tapio-wire` `CompiledConfig`; the controller serves that compiled config; the agent polls it and writes primitive values into kernel config carriers.
+
 ### Downstream Systems
 
 Tapio preserves kernel evidence. Downstream systems decide what to do with it. Long-term storage, causal graphs, root-cause analysis, AI explanation, policy decisions, remediation, dashboards, and alert routing belong downstream.
@@ -148,6 +152,7 @@ Tapio treats binary size as part of the product contract, not a cosmetic metric.
 | `tapio-agent` | `aya`, `tokio`, `serde`, local sinks, tiny outbound HTTP if justified | `kube`, `k8s-openapi`, `axum`, `tonic`, `reqwest`, inbound server, Kubernetes watches |
 | `tapio-controller` | `axum`, future `kube`/`k8s-openapi`, validation, registry, routing | controller-to-agent RPC, dashboards, policy/RCA engines |
 | `tapio-wire` | `serde`, `serde_json`, validation errors | `axum`, `hyper`, `kube`, `k8s-openapi`, `tonic`, `reqwest` |
+| `tapio-profile` | `serde`, `thiserror`, `tapio-wire` | file I/O, async, HTTP, Kubernetes, YAML parsing in the core API, agent/CLI dependencies |
 | Downstream | storage, alerting, RCA, AI, dashboards, policy/remediation | node hot-path observation |
 
 Current audit from this checkout:
