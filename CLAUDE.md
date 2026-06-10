@@ -14,9 +14,10 @@ Tapio runs standalone — `stdout` and `file` sinks need no external service. It
 
 ```bash
 cargo check --workspace                        # type-check all crates
-cargo check -p tapio-common -p tapio-cli       # check platform-independent crates (works on macOS)
+cargo check -p tapio-common -p tapio-cli -p tapio-profile  # check platform-independent crates (works on macOS)
 cargo test --workspace                         # run all tests
 cargo test -p tapio-common                     # test single crate
+cargo test -p tapio-profile                    # test Evidence Profile validation/compilation
 cargo test -p tapio-common -- test_name        # run single test
 cargo clippy --workspace --all-targets -- -D warnings   # lint
 cargo fmt --check                              # format check
@@ -36,6 +37,7 @@ Rust edition 2024, MSRV 1.85. tapio-agent only compiles on Linux (aya dependency
 ### Workspace crates
 
 - **tapio-common**: Shared types. `#[repr(C)]` eBPF event structs mirroring the C programs, `kernel.*` event type hierarchy, FALSE Protocol `Occurrence` builder, `Sink` trait.
+- **tapio-profile**: Pure Evidence Profile validation and compilation. Takes already-deserialized operator documents, returns `ValidatedProfile` or structured `ProfileError`, and compiles only validated profiles into `tapio-wire` compiled config.
 - **tapio-agent**: DaemonSet binary. Loads eBPF C programs via aya, reads ring buffers, parses events, filters anomalies, and emits events to sinks. Linux-only (aya requires kernel). Internal modules: `observer/` (four observer submodules), `sink/` (`StdoutSink`, `FileSink`, `HttpSink`, optional `OtlpSink` behind `--features otlp`), `config.rs` (TOML loader — handles tunable knobs only: `thresholds`, `metrics`, `otlp`. Operational paths like sinks/ebpf-dir/data-dir are CLI-only — disjoint scopes, not overlapping), `metrics.rs` (Prometheus registry, non-global — passed via `Arc` to observers and sinks).
 - **tapio-controller**: Cluster coordination binary. Owns the HTTP server side of `tapio-wire/v1`, in-memory agent registry, heartbeat state, and future Kubernetes-aware coordination.
 - **tapio-cli**: User/AI interface. Single-file crate (`main.rs`). CLI commands (`tapio status`, `tapio watch`, `tapio health`, `tapio recent`). Reads from `.tapio/occurrences/*.json` — decoupled from the agent process. MCP server (`tapio mcp`) exposes `tapio_recent_anomalies`, `tapio_node_health`, `tapio_watch_stream` tools via stdio JSON-RPC 2.0.
