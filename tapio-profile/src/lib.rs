@@ -26,9 +26,10 @@
 //! ```
 //!
 //! The serde layer rejects unknown fields, unknown observer blocks, and type
-//! mismatches through `deny_unknown_fields`. The validate layer rejects semantic
-//! errors with structured [`ProfileError`] values and field paths suitable for
-//! later HTTP 400 responses.
+//! mismatches through `deny_unknown_fields`. Explicit null override blocks
+//! such as `overrides:` or `overrides.network:` are treated as empty overrides.
+//! The validate layer rejects semantic errors with structured [`ProfileError`]
+//! values and field paths suitable for later HTTP 400 responses.
 //!
 //! v0 refuses file I/O, YAML/JSON parsing in the core API, async, HTTP,
 //! Kubernetes, CRDs, logging, metrics, global state, content hashing,
@@ -71,7 +72,7 @@ pub struct EvidenceProfile {
     api_version: Option<String>,
     kind: Option<String>,
     base: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     overrides: ProfileOverrides,
 }
 
@@ -226,13 +227,13 @@ pub fn compile(profile: &ValidatedProfile) -> CompiledConfig {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProfileOverrides {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     network: NetworkOverride,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     storage: StorageOverride,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     container: ContainerOverride,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     node_pmc: NodePmcOverride,
 }
 
@@ -240,7 +241,7 @@ struct ProfileOverrides {
 #[serde(deny_unknown_fields)]
 struct NetworkOverride {
     enabled: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     rtt_spike: RttSpikeOverride,
 }
 
@@ -255,7 +256,7 @@ struct RttSpikeOverride {
 #[serde(deny_unknown_fields)]
 struct StorageOverride {
     enabled: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     slow_io: SlowIoOverride,
 }
 
@@ -277,7 +278,7 @@ struct ContainerOverride {
 #[serde(deny_unknown_fields)]
 struct NodePmcOverride {
     enabled: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     stall_pct: StallPctOverride,
     ipc_degradation: Option<f64>,
 }
@@ -428,6 +429,7 @@ fn apply_container(
             });
         }
         let mut checked = Vec::with_capacity(codes.len());
+        let mut seen = [false; 256];
         for code in codes {
             if !(0..=255).contains(code) {
                 return Err(out_of_range(
@@ -436,7 +438,11 @@ fn apply_container(
                     EXIT_CODE_RANGE,
                 ));
             }
-            checked.push(*code as u8);
+            let code = *code as u8;
+            if !seen[usize::from(code)] {
+                seen[usize::from(code)] = true;
+                checked.push(code);
+            }
         }
         resolved.ignore_exit_codes = checked;
     }
@@ -520,12 +526,24 @@ fn out_of_range<T: ToString>(field: &'static str, value: T, range: &'static str)
 
 fn valid_profile_name(value: &str) -> bool {
     let bytes = value.as_bytes();
-    if bytes.is_empty() || bytes.len() > 63 || !bytes[0].is_ascii_lowercase() {
+    if bytes.is_empty()
+        || bytes.len() > 63
+        || !bytes[0].is_ascii_lowercase()
+        || bytes.ends_with(b"-")
+    {
         return false;
     }
     bytes[1..]
         .iter()
         .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+}
+
+fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 fn path(value: &'static str) -> FieldPath {
@@ -698,6 +716,41 @@ overrides:
     }
 
     #[test]
+    fn explicit_null_overrides_compile_to_production_default() {
+        let compiled = compile_yaml(
+            r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+"#,
+        );
+
+        assert_eq!(compiled, production_default_compiled());
+    }
+
+    #[test]
+    fn explicit_null_nested_override_blocks_are_empty_overrides() {
+        let compiled = compile_yaml(
+            r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  network:
+    rtt_spike:
+  storage:
+    slow_io:
+  container:
+  node_pmc:
+    stall_pct:
+"#,
+        );
+
+        assert_eq!(compiled, production_default_compiled());
+    }
+
+    #[test]
     fn unsupported_api_version_reports_path_and_value() {
         assert_eq!(
             err(r#"
@@ -766,6 +819,21 @@ base: Production
             ProfileError::InvalidProfileName {
                 path: path("base"),
                 value: "Production".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn trailing_hyphen_profile_name_is_rejected() {
+        assert_eq!(
+            err(r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-
+"#),
+            ProfileError::InvalidProfileName {
+                path: path("base"),
+                value: "production-".into(),
             }
         );
     }
@@ -1147,6 +1215,21 @@ overrides:
     }
 
     #[test]
+    fn duplicate_ignore_exit_codes_compile_to_first_seen_unique_values() {
+        let compiled = compile_yaml(
+            r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  container:
+    ignore_exit_codes: [143, 0, 143, 1, 0]
+"#,
+        );
+        assert_eq!(compiled.container.ignore_exit_codes, vec![143, 0, 1]);
+    }
+
+    #[test]
     fn range_maxima_convert_without_overflow() {
         let compiled = compile_yaml(
             r#"
@@ -1192,7 +1275,7 @@ overrides:
     }
 
     #[test]
-    fn production_default_validates_and_matches_current_agent_defaults() {
+    fn minimal_document_compiles_to_builtin_constants() {
         let compiled = compile_yaml(minimal_yaml());
         assert_eq!(compiled, production_default_compiled());
         assert!(compiled.network.enabled);
