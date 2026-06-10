@@ -1,0 +1,15 @@
+[package]
+name = "tapio-profile"
+description = "Evidence Profile validation and compilation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+tapio-wire = { path = "../tapio-wire" }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+serde_yaml = "0.9"

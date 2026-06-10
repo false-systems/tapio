@@ -3,6 +3,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub mod v0;
+pub use v0::{
+    CompiledConfig, CompiledContainer, CompiledNetwork, CompiledNodePmc, CompiledStorage,
+};
 
 pub const WIRE_VERSION: &str = "tapio-wire/v1";
 
@@ -53,27 +56,8 @@ pub struct HelloResponse {
 pub struct ConfigResponse {
     pub wire_version: String,
     pub version: String,
-    pub observers: ObserverConfig,
+    pub config: CompiledConfig,
     pub batching: BatchingConfig,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ObserverConfig {
-    pub network: ObserverEnabled,
-    pub storage: StorageObserverConfig,
-    pub container: ObserverEnabled,
-    pub node_pmc: ObserverEnabled,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ObserverEnabled {
-    pub enabled: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StorageObserverConfig {
-    pub enabled: bool,
-    pub slow_io_threshold_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -204,14 +188,30 @@ impl ConfigResponse {
         Self {
             wire_version: WIRE_VERSION.into(),
             version: "1".into(),
-            observers: ObserverConfig {
-                network: ObserverEnabled { enabled: true },
-                storage: StorageObserverConfig {
+            config: CompiledConfig {
+                network: CompiledNetwork {
                     enabled: true,
-                    slow_io_threshold_ms: 250,
+                    rtt_spike_ratio: 2,
+                    rtt_spike_abs_us: 500_000,
+                    rtt_min_baseline_samples: 5,
+                    conn_refused_window_ns: 0,
+                    conn_refused_min_count: 0,
                 },
-                container: ObserverEnabled { enabled: true },
-                node_pmc: ObserverEnabled { enabled: false },
+                storage: CompiledStorage {
+                    enabled: true,
+                    slow_io_warning_ns: 50_000_000,
+                    slow_io_critical_ns: 200_000_000,
+                },
+                container: CompiledContainer {
+                    enabled: true,
+                    ignore_exit_codes: vec![],
+                },
+                node_pmc: CompiledNodePmc {
+                    enabled: false,
+                    stall_warning_permille: 200,
+                    stall_critical_permille: 400,
+                    ipc_degradation_milli: 1000,
+                },
             },
             batching: BatchingConfig {
                 send_interval_ms: 1000,
@@ -224,8 +224,12 @@ impl ConfigResponse {
         validate_wire_version(&self.wire_version)?;
         required("version", &self.version)?;
         bounded_nonzero(
-            "storage.slow_io_threshold_ms",
-            self.observers.storage.slow_io_threshold_ms,
+            "config.storage.slow_io_warning_ns",
+            self.config.storage.slow_io_warning_ns,
+        )?;
+        bounded_nonzero(
+            "config.storage.slow_io_critical_ns",
+            self.config.storage.slow_io_critical_ns,
         )?;
         bounded_nonzero("batching.send_interval_ms", self.batching.send_interval_ms)?;
         bounded_nonzero("batching.max_batch_events", self.batching.max_batch_events)?;
@@ -468,11 +472,27 @@ mod tests {
               "wire_version":"tapio-wire/v1",
               "version":"1",
               "unknown_future_field": true,
-              "observers":{
-                "network":{"enabled":true},
-                "storage":{"enabled":true,"slow_io_threshold_ms":250},
-                "container":{"enabled":true},
-                "node_pmc":{"enabled":false}
+              "config":{
+                "network":{
+                  "enabled":true,
+                  "rtt_spike_ratio":2,
+                  "rtt_spike_abs_us":500000,
+                  "rtt_min_baseline_samples":5,
+                  "conn_refused_window_ns":0,
+                  "conn_refused_min_count":0
+                },
+                "storage":{
+                  "enabled":true,
+                  "slow_io_warning_ns":50000000,
+                  "slow_io_critical_ns":200000000
+                },
+                "container":{"enabled":true,"ignore_exit_codes":[]},
+                "node_pmc":{
+                  "enabled":false,
+                  "stall_warning_permille":200,
+                  "stall_critical_permille":400,
+                  "ipc_degradation_milli":1000
+                }
               },
               "batching":{"send_interval_ms":1000,"max_batch_events":256}
             }"#,
@@ -482,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn config_missing_observer_block_fails_deserialization() {
+    fn config_missing_compiled_config_block_fails_deserialization() {
         let err = serde_json::from_str::<ConfigResponse>(
             r#"{
               "wire_version":"tapio-wire/v1",
@@ -491,7 +511,7 @@ mod tests {
             }"#,
         )
         .unwrap_err();
-        assert!(err.to_string().contains("observers"));
+        assert!(err.to_string().contains("config"));
     }
 
     #[test]
