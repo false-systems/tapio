@@ -965,6 +965,188 @@ overrides:
     }
 
     #[test]
+    fn range_minima_are_accepted() {
+        let compiled = compile_yaml(
+            r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  network:
+    rtt_spike:
+      ratio: 1
+      abs_ms: 1
+  storage:
+    slow_io:
+      warning_ms: 1
+      critical_ms: 1
+  node_pmc:
+    stall_pct:
+      warning: 0.0
+      critical: 0.0
+    ipc_degradation: 0.0
+"#,
+        );
+
+        assert_eq!(compiled.network.rtt_spike_ratio, 1);
+        assert_eq!(compiled.network.rtt_spike_abs_us, 1_000);
+        assert_eq!(compiled.storage.slow_io_warning_ns, 1_000_000);
+        assert_eq!(compiled.storage.slow_io_critical_ns, 1_000_000);
+        assert_eq!(compiled.node_pmc.stall_warning_permille, 0);
+        assert_eq!(compiled.node_pmc.stall_critical_permille, 0);
+        assert_eq!(compiled.node_pmc.ipc_degradation_milli, 0);
+    }
+
+    #[test]
+    fn rtt_ratio_zero_is_rejected() {
+        assert_eq!(
+            err(r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  network:
+    rtt_spike:
+      ratio: 0
+"#),
+            out_of_range("overrides.network.rtt_spike.ratio", 0_u32, RATIO_RANGE)
+        );
+    }
+
+    #[test]
+    fn rtt_abs_ms_above_maximum_is_rejected() {
+        assert_eq!(
+            err(r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  network:
+    rtt_spike:
+      abs_ms: 600001
+"#),
+            out_of_range(
+                "overrides.network.rtt_spike.abs_ms",
+                600_001_u32,
+                ABS_MS_RANGE
+            )
+        );
+    }
+
+    #[test]
+    fn storage_warning_above_maximum_is_rejected() {
+        assert_eq!(
+            err(r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  storage:
+    slow_io:
+      warning_ms: 60001
+      critical_ms: 600000
+"#),
+            out_of_range(
+                "overrides.storage.slow_io.warning_ms",
+                60_001_u64,
+                WARNING_MS_RANGE
+            )
+        );
+    }
+
+    #[test]
+    fn storage_critical_above_maximum_is_rejected() {
+        assert_eq!(
+            err(r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  storage:
+    slow_io:
+      critical_ms: 600001
+"#),
+            out_of_range(
+                "overrides.storage.slow_io.critical_ms",
+                600_001_u64,
+                CRITICAL_MS_RANGE
+            )
+        );
+    }
+
+    #[test]
+    fn negative_stall_warning_is_rejected() {
+        assert_eq!(
+            err(r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  node_pmc:
+    stall_pct:
+      warning: -0.1
+"#),
+            ProfileError::OutOfRange {
+                path: path("overrides.node_pmc.stall_pct.warning"),
+                value: "-0.1".into(),
+                range: STALL_PCT_RANGE,
+            }
+        );
+    }
+
+    #[test]
+    fn ipc_degradation_above_maximum_is_rejected() {
+        assert_eq!(
+            err(r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  node_pmc:
+    ipc_degradation: 16.1
+"#),
+            ProfileError::OutOfRange {
+                path: path("overrides.node_pmc.ipc_degradation"),
+                value: "16.1".into(),
+                range: IPC_DEGRADATION_RANGE,
+            }
+        );
+    }
+
+    #[test]
+    fn negative_ignore_exit_code_is_rejected() {
+        assert_eq!(
+            err(r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  container:
+    ignore_exit_codes: [-1]
+"#),
+            out_of_range("overrides.container.ignore_exit_codes", -1, EXIT_CODE_RANGE)
+        );
+    }
+
+    #[test]
+    fn exactly_sixteen_ignore_exit_codes_are_accepted() {
+        let compiled = compile_yaml(
+            r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  container:
+    ignore_exit_codes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+"#,
+        );
+        assert_eq!(
+            compiled.container.ignore_exit_codes,
+            (0..16).collect::<Vec<i32>>()
+        );
+    }
+
+    #[test]
     fn range_maxima_convert_without_overflow() {
         let compiled = compile_yaml(
             r#"
