@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "tapio-common",
     "tapio-wire",
+    "tapio-profile",
     "tapio-agent",
     "tapio-controller",
     "tapio-cli",
@@ -58,6 +59,7 @@ anyhow = "1"
 # Workspace crates
 tapio-common = { path = "tapio-common" }
 tapio-wire = { path = "tapio-wire" }
+tapio-profile = { path = "tapio-profile" }
 
 [profile.release]
 lto = true
