@@ -32,12 +32,13 @@ Tapio turns those facts into named `kernel.*` anomaly events. Downstream systems
 
 ## Current Shape
 
-Tapio is a Rust workspace with five crates:
+Tapio is a Rust workspace with six crates:
 
 | Crate | Role |
 | --- | --- |
 | `tapio-agent` | Linux node agent. Loads eBPF, drains ring buffers, classifies facts, emits to sinks. |
 | `tapio-controller` | Minimal cluster coordination skeleton for the agent/controller boundary. |
+| `tapio-profile` | Pure Evidence Profile validation and compilation into wire config. |
 | `tapio-wire` | Shared JSON protocol structs for the agent/controller boundary. |
 | `tapio-cli` | Platform-independent CLI and MCP server for local event files. |
 | `tapio-common` | Shared ABI structs, occurrence schema, anomaly constants, and sink traits. |
@@ -45,8 +46,9 @@ Tapio is a Rust workspace with five crates:
 The product split is intentional:
 
 ```text
-tapio-agent observes.
+tapio-profile validates and compiles.
 tapio-controller coordinates.
+tapio-agent observes.
 downstream systems explain.
 ```
 
@@ -108,12 +110,15 @@ Tapio emits occurrence JSON. Fields are factual: timestamp, anomaly type, severi
     "memory_usage_bytes": 536870912,
     "memory_limit_bytes": 0,
     "cgroup_id": 8429,
+    "config_generation": 1,
     "timestamp_ns": 1743691381042000000
   }
 }
 ```
 
 `memory_limit_bytes` can be `0` for OOM kills because the kernel tracepoint does not expose the cgroup limit. Cluster context belongs in `tapio-controller` or downstream systems, not in the node hot path.
+
+`config_generation` records which runtime config judged the event, so fleet config convergence is observable in the event stream itself.
 
 ## Quick Commands
 
@@ -229,7 +234,7 @@ Current budget model:
 
 | Binary | Budget |
 | --- | --- |
-| `tapio-agent` | target 1.5 MB, hard 1.75 MB |
+| `tapio-agent` | target 1.25 MB, hard 1.5 MB |
 | `tapio` | hard 900 KB |
 | `tapio-controller` | reported, no hard budget yet |
 
@@ -253,17 +258,38 @@ See:
 - [docs/architecture.md](docs/architecture.md)
 - [docs/agent-controller.md](docs/agent-controller.md)
 
+## Runtime Config
+
+Observer behavior is runtime-configurable through a versioned agent-to-kernel ABI, without eBPF reloads:
+
+```text
+EvidenceProfile YAML
+  -> tapio-profile validates and compiles
+  -> CompiledConfig (tapio-wire)
+  -> tapio-controller distributes
+  -> tapio-agent writes tapio_config map carriers
+  -> eBPF programs read primitive flags and thresholds
+  -> emitted events carry config_generation
+```
+
+The kernel side is deliberately dumb: a fixed-layout, version-checked `struct tapio_config` per observer object. All-zeros (the kernel's cold-start map state) is inert — nothing emits until real config lands. On ABI version mismatch, observers stay silent instead of misreading fields.
+
+The operator side is deliberately strict: profiles are versioned YAML documents validated against a closed schema. Unknown fields, unknown observers, and out-of-range values are rejected, not ignored. `compile` is infallible — every failure happens during validation.
+
+See [docs/agent-kernel-config-abi.md](docs/agent-kernel-config-abi.md).
+
 ## Repository Layout
 
 ```text
 tapio-agent/      node-local eBPF observer
 tapio-controller/ cluster coordination skeleton
+tapio-profile/    Evidence Profile validation and compilation
 tapio-wire/       agent/controller protocol structs
 tapio-cli/        CLI and MCP server for local occurrence files
 tapio-common/     shared ABI structs, occurrences, events, sinks
 ebpf/             eBPF C programs and headers
 scripts/          lean checks, dependency checks, runtime smoke tests
-docs/             architecture and agent/controller notes
+docs/             architecture, agent/controller, and config ABI notes
 ```
 
 ## Non-Goals
