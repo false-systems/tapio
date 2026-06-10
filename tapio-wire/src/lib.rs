@@ -207,7 +207,7 @@ impl ConfigResponse {
                     ignore_exit_codes: vec![],
                 },
                 node_pmc: CompiledNodePmc {
-                    enabled: false,
+                    enabled: true,
                     stall_warning_permille: 200,
                     stall_critical_permille: 400,
                     ipc_degradation_milli: 1000,
@@ -488,7 +488,7 @@ mod tests {
                 },
                 "container":{"enabled":true,"ignore_exit_codes":[]},
                 "node_pmc":{
-                  "enabled":false,
+                  "enabled":true,
                   "stall_warning_permille":200,
                   "stall_critical_permille":400,
                   "ipc_degradation_milli":1000
