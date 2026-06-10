@@ -157,7 +157,7 @@ mod tests {
                 ignore_exit_codes: vec![],
             },
             node_pmc: CompiledNodePmc {
-                enabled: false,
+                enabled: true,
                 stall_warning_permille: 200,
                 stall_critical_permille: 400,
                 ipc_degradation_milli: 1000,
