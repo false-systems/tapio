@@ -56,6 +56,8 @@ pub struct HelloResponse {
 pub struct ConfigResponse {
     pub wire_version: String,
     pub version: String,
+    #[serde(default)]
+    pub config_hash: String,
     pub config: CompiledConfig,
     pub batching: BatchingConfig,
 }
@@ -188,6 +190,7 @@ impl ConfigResponse {
         Self {
             wire_version: WIRE_VERSION.into(),
             version: "1".into(),
+            config_hash: String::new(),
             config: CompiledConfig {
                 network: CompiledNetwork {
                     enabled: true,
@@ -477,9 +480,47 @@ mod tests {
 
     #[test]
     fn config_round_trip_and_validate() {
-        let config = ConfigResponse::default_v1();
+        let mut config = ConfigResponse::default_v1();
+        config.config_hash = "sha256:abc123".into();
         let json = serde_json::to_string(&config).unwrap();
         let parsed: ConfigResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.config_hash, "sha256:abc123");
+        parsed.validate().unwrap();
+    }
+
+    #[test]
+    fn config_response_without_hash_still_deserializes() {
+        let parsed: ConfigResponse = serde_json::from_str(
+            r#"{
+              "wire_version":"tapio-wire/v1",
+              "version":"1",
+              "config":{
+                "network":{
+                  "enabled":true,
+                  "rtt_spike_ratio":2,
+                  "rtt_spike_abs_us":500000,
+                  "rtt_min_baseline_samples":5,
+                  "conn_refused_window_ns":0,
+                  "conn_refused_min_count":0
+                },
+                "storage":{
+                  "enabled":true,
+                  "slow_io_warning_ns":50000000,
+                  "slow_io_critical_ns":200000000
+                },
+                "container":{"enabled":true,"ignore_exit_codes":[]},
+                "node_pmc":{
+                  "enabled":true,
+                  "stall_warning_permille":200,
+                  "stall_critical_permille":400,
+                  "ipc_degradation_milli":1000
+                }
+              },
+              "batching":{"send_interval_ms":1000,"max_batch_events":256}
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.config_hash, "");
         parsed.validate().unwrap();
     }
 
