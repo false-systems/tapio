@@ -7,6 +7,7 @@ use axum::http::{StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::Serialize;
 use tapio_wire::{
     ConfigResponse, EventBatchRequest, EventBatchResponse, HeartbeatRequest, HeartbeatResponse,
     HelloRequest, HelloResponse, WireError,
@@ -248,10 +249,33 @@ async fn events(
 async fn not_found() -> impl IntoResponse {
     (
         StatusCode::NOT_FOUND,
-        Json(serde_json::json!({
-            "error": "unknown tapio-controller endpoint"
-        })),
+        Json(ErrorEnvelope::new(
+            "UNKNOWN_ENDPOINT",
+            "unknown tapio-controller endpoint",
+        )),
     )
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorEnvelope {
+    error: ErrorBody,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorBody {
+    code: &'static str,
+    message: String,
+}
+
+impl ErrorEnvelope {
+    fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            error: ErrorBody {
+                code,
+                message: message.into(),
+            },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -265,19 +289,35 @@ impl From<WireError> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = match self.0 {
+        let status = match &self.0 {
             WireError::UnsupportedVersion(_) => StatusCode::BAD_REQUEST,
             WireError::MissingField(_) => StatusCode::BAD_REQUEST,
             WireError::InvalidField { .. } => StatusCode::BAD_REQUEST,
             WireError::ReasoningField(_) => StatusCode::UNPROCESSABLE_ENTITY,
         };
-        (
-            status,
-            Json(serde_json::json!({
-                "error": self.0.to_string()
-            })),
-        )
-            .into_response()
+        (status, Json(error_envelope(&self.0))).into_response()
+    }
+}
+
+fn error_envelope(error: &WireError) -> ErrorEnvelope {
+    // Error-envelope messages are HTTP API surface. Keep them stable and
+    // operator-facing instead of reusing WireError Display, which is primarily
+    // for logs and Rust-side diagnostics.
+    match error {
+        WireError::UnsupportedVersion(version) => ErrorEnvelope::new(
+            "UNSUPPORTED_VERSION",
+            format!("unsupported wire version {version}"),
+        ),
+        WireError::MissingField(field) => {
+            ErrorEnvelope::new("MISSING_FIELD", format!("{field} is required"))
+        }
+        WireError::InvalidField { field, reason } => {
+            ErrorEnvelope::new("INVALID_FIELD", format!("{field}: {reason}"))
+        }
+        WireError::ReasoningField(field) => ErrorEnvelope::new(
+            "REASONING_FIELD",
+            format!("event facts contain reasoning field {field}"),
+        ),
     }
 }
 
@@ -443,17 +483,16 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn unknown_endpoint_returns_clear_error() {
+    async fn http_response(request: &str) -> Option<String> {
         let require_net = std::env::var_os("TAPIO_LEAN_REQUIRE_NET").is_some();
         let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
             Ok(listener) => listener,
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && !require_net => {
                 eprintln!(
-                    "SKIP unknown_endpoint_returns_clear_error: loopback bind not permitted \
+                    "SKIP controller HTTP response test: loopback bind not permitted \
                      in this host/sandbox ({e}); set TAPIO_LEAN_REQUIRE_NET=1 to require it"
                 );
-                return;
+                return None;
             }
             Err(e) => panic!("loopback bind failed: {e}"),
         };
@@ -463,11 +502,10 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
+        let request = request.to_string();
         let response = tokio::task::spawn_blocking(move || {
             let mut stream = TcpStream::connect(addr).unwrap();
-            stream
-                .write_all(b"GET /v1/nope HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-                .unwrap();
+            stream.write_all(request.as_bytes()).unwrap();
             let mut response = String::new();
             stream.read_to_string(&mut response).unwrap();
             response
@@ -476,7 +514,71 @@ mod tests {
         .unwrap();
 
         server.abort();
+        Some(response)
+    }
+
+    fn response_json(response: &str) -> serde_json::Value {
+        let (_, body) = response.split_once("\r\n\r\n").unwrap();
+        serde_json::from_str(body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn unknown_endpoint_returns_error_envelope() {
+        let Some(response) =
+            http_response("GET /v1/nope HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+        else {
+            return;
+        };
         assert!(response.starts_with("HTTP/1.1 404"));
-        assert!(response.contains("unknown tapio-controller endpoint"));
+        let body = response_json(&response);
+        assert_eq!(body["error"]["code"], "UNKNOWN_ENDPOINT");
+        assert_eq!(
+            body["error"]["message"],
+            "unknown tapio-controller endpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn unsupported_wire_version_returns_error_envelope() {
+        let body = serde_json::json!({
+            "wire_version": "tapio-wire/v2",
+            "agent_id": "node/worker-1",
+            "node_name": "worker-1",
+            "tapio_version": "4.0.0",
+            "kernel_release": "6.8.0",
+            "arch": "x86_64"
+        })
+        .to_string();
+        let request = format!(
+            "POST /v1/agents/hello HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let Some(response) = http_response(&request).await else {
+            return;
+        };
+        assert!(response.starts_with("HTTP/1.1 400"));
+        let body = response_json(&response);
+        assert_eq!(body["error"]["code"], "UNSUPPORTED_VERSION");
+        assert_eq!(
+            body["error"]["message"],
+            "unsupported wire version tapio-wire/v2"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_field_returns_error_envelope() {
+        let Some(response) = http_response(
+            "GET /v1/agents/config?node_name=worker-1 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        else {
+            return;
+        };
+        assert!(response.starts_with("HTTP/1.1 400"));
+        let body = response_json(&response);
+        assert_eq!(body["error"]["code"], "MISSING_FIELD");
+        assert_eq!(body["error"]["message"], "agent_id is required");
     }
 }
