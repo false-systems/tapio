@@ -1,19 +1,83 @@
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use axum::extract::State;
-use axum::http::{StatusCode, Uri};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
+use tapio_profile::{BuiltinSet, EvidenceProfile, ProfileError, compile, validate};
 use tapio_wire::{
-    ConfigResponse, EventBatchRequest, EventBatchResponse, HeartbeatRequest, HeartbeatResponse,
-    HelloRequest, HelloResponse, WireError,
+    BatchingConfig, CompiledConfig, ConfigResponse, EventBatchRequest, EventBatchResponse,
+    HeartbeatRequest, HeartbeatResponse, HelloRequest, HelloResponse, WIRE_VERSION, WireError,
 };
 
 const CONTROLLER_ID: &str = "tapio-controller/default";
+const DEFAULT_PROFILE_YAML: &str = r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+"#;
+const INITIAL_GENERATION: u32 = 1;
+
+#[derive(Debug)]
+pub enum ConfigLoadError {
+    ReadProfile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    ParseProfile {
+        path: Option<PathBuf>,
+        source: serde_yaml::Error,
+    },
+    ValidateProfile {
+        path: Option<PathBuf>,
+        source: ProfileError,
+    },
+    SerializeConfig {
+        source: serde_json::Error,
+    },
+}
+
+impl std::fmt::Display for ConfigLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ReadProfile { path, source } => {
+                write!(f, "failed to read profile {}: {source}", path.display())
+            }
+            Self::ParseProfile { path, source } => match path {
+                Some(path) => write!(f, "failed to parse profile {}: {source}", path.display()),
+                None => write!(f, "failed to parse built-in profile: {source}"),
+            },
+            Self::ValidateProfile { path, source } => match path {
+                Some(path) => write!(f, "invalid profile {}: {source}", path.display()),
+                None => write!(f, "invalid built-in profile: {source}"),
+            },
+            Self::SerializeConfig { source } => {
+                write!(
+                    f,
+                    "failed to serialize compiled config for hashing: {source}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConfigLoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ReadProfile { source, .. } => Some(source),
+            Self::ParseProfile { source, .. } => Some(source),
+            Self::ValidateProfile { source, .. } => Some(source),
+            Self::SerializeConfig { source } => Some(source),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ControllerState {
@@ -47,9 +111,69 @@ pub struct EventBatchOutcome {
     pub rejected: u64,
 }
 
+pub fn load_profile(path: &Path) -> Result<CompiledConfig, ConfigLoadError> {
+    let content = std::fs::read_to_string(path).map_err(|source| ConfigLoadError::ReadProfile {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    compile_profile_yaml(&content, Some(path.to_path_buf()))
+}
+
+pub fn production_default_config() -> Result<CompiledConfig, ConfigLoadError> {
+    compile_profile_yaml(DEFAULT_PROFILE_YAML, None)
+}
+
+pub fn config_response_from_compiled(
+    config: CompiledConfig,
+    generation: u32,
+) -> Result<ConfigResponse, ConfigLoadError> {
+    let config_hash = config_hash(&config)?;
+    Ok(ConfigResponse {
+        wire_version: WIRE_VERSION.into(),
+        version: generation.to_string(),
+        config_hash,
+        config,
+        batching: BatchingConfig {
+            send_interval_ms: 1000,
+            max_batch_events: 256,
+        },
+    })
+}
+
+pub fn default_config_response() -> Result<ConfigResponse, ConfigLoadError> {
+    config_response_from_compiled(production_default_config()?, INITIAL_GENERATION)
+}
+
+pub fn config_hash(config: &CompiledConfig) -> Result<String, ConfigLoadError> {
+    let bytes =
+        serde_json::to_vec(config).map_err(|source| ConfigLoadError::SerializeConfig { source })?;
+    let digest = Sha256::digest(&bytes);
+    let mut hash = String::from("sha256:");
+    for byte in digest {
+        let _ = write!(&mut hash, "{byte:02x}");
+    }
+    Ok(hash)
+}
+
+fn compile_profile_yaml(
+    yaml: &str,
+    path: Option<PathBuf>,
+) -> Result<CompiledConfig, ConfigLoadError> {
+    let profile: EvidenceProfile =
+        serde_yaml::from_str(yaml).map_err(|source| ConfigLoadError::ParseProfile {
+            path: path.clone(),
+            source,
+        })?;
+    let validated = validate(&profile, &BuiltinSet::v0())
+        .map_err(|source| ConfigLoadError::ValidateProfile { path, source })?;
+    Ok(compile(&validated))
+}
+
 impl Default for ControllerState {
     fn default() -> Self {
-        Self::new(ConfigResponse::default_v1())
+        let config = default_config_response()
+            .expect("built-in production-default EvidenceProfile must compile");
+        Self::new(config)
     }
 }
 
@@ -225,11 +349,23 @@ async fn hello(
 
 async fn config(
     State(state): State<ControllerState>,
+    headers: HeaderMap,
     uri: Uri,
-) -> Result<Json<ConfigResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     let agent_id = query_param(&uri, "agent_id").ok_or(WireError::MissingField("agent_id"))?;
     let node_name = query_param(&uri, "node_name").ok_or(WireError::MissingField("node_name"))?;
-    Ok(Json(state.config_for(&agent_id, &node_name)?))
+    let config = state.config_for(&agent_id, &node_name)?;
+    let etag = quoted_etag(&config.config_hash);
+
+    if if_none_match_matches(&headers, &etag) {
+        let mut response = StatusCode::NOT_MODIFIED.into_response();
+        insert_etag(response.headers_mut(), &etag);
+        return Ok(response);
+    }
+
+    let mut response = Json(config).into_response();
+    insert_etag(response.headers_mut(), &etag);
+    Ok(response)
 }
 
 async fn heartbeat(
@@ -328,11 +464,29 @@ fn query_param(uri: &Uri, name: &str) -> Option<String> {
     })
 }
 
+fn quoted_etag(config_hash: &str) -> String {
+    format!("\"{config_hash}\"")
+}
+
+fn if_none_match_matches(headers: &HeaderMap, etag: &str) -> bool {
+    headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.trim() == etag)
+}
+
+fn insert_etag(headers: &mut HeaderMap, etag: &str) {
+    if let Ok(value) = HeaderValue::from_str(etag) {
+        headers.insert(header::ETAG, value);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpStream;
+    use std::path::Path;
     use tapio_wire::{EventSeverity, HeartbeatCounters, ObserverStatus, WIRE_VERSION, WireEvent};
 
     fn hello_req() -> HelloRequest {
@@ -386,12 +540,128 @@ mod tests {
         }
     }
 
+    fn write_temp_profile(name: &str, content: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "tapio-{name}-{}-{}.yaml",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, content).unwrap();
+        path
+    }
+
+    fn remove_temp_profile(path: &Path) {
+        let _ = std::fs::remove_file(path);
+    }
+
     #[test]
     fn hello_registers_agent() {
         let state = ControllerState::default();
         let response = state.register_agent(hello_req()).unwrap();
         assert!(response.accepted);
         assert_eq!(state.agent_count(), 1);
+    }
+
+    #[test]
+    fn default_controller_config_is_hashed_production_default() {
+        let state = ControllerState::default();
+        let config = state.config_for("node/worker-1", "worker-1").unwrap();
+        let expected = config_hash(&production_default_config().unwrap()).unwrap();
+        assert_eq!(config.version, "1");
+        assert_eq!(config.config_hash, expected);
+        assert!(config.config_hash.starts_with("sha256:"));
+    }
+
+    #[test]
+    fn valid_profile_loads_and_compiles() {
+        let path = write_temp_profile(
+            "valid-profile",
+            r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  storage:
+    slow_io:
+      warning_ms: 150
+      critical_ms: 400
+"#,
+        );
+
+        let compiled = load_profile(&path).unwrap();
+        remove_temp_profile(&path);
+        assert_eq!(compiled.storage.slow_io_warning_ns, 150_000_000);
+        assert_eq!(compiled.storage.slow_io_critical_ns, 400_000_000);
+    }
+
+    #[test]
+    fn invalid_profile_range_error_includes_field_path() {
+        let path = write_temp_profile(
+            "bad-range",
+            r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+overrides:
+  storage:
+    slow_io:
+      warning_ms: 0
+"#,
+        );
+
+        let error = load_profile(&path).unwrap_err().to_string();
+        remove_temp_profile(&path);
+        assert!(error.contains("overrides.storage.slow_io.warning_ms"));
+    }
+
+    #[test]
+    fn unknown_field_profile_error_includes_field_name() {
+        let path = write_temp_profile(
+            "unknown-field",
+            r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: production-default
+surprise: true
+"#,
+        );
+
+        let error = load_profile(&path).unwrap_err().to_string();
+        remove_temp_profile(&path);
+        assert!(error.contains("surprise"));
+    }
+
+    #[test]
+    fn unknown_base_profile_error_includes_field_path() {
+        let path = write_temp_profile(
+            "unknown-base",
+            r#"
+apiVersion: tapio.false.systems/v0
+kind: EvidenceProfile
+base: staging
+"#,
+        );
+
+        let error = load_profile(&path).unwrap_err().to_string();
+        remove_temp_profile(&path);
+        assert!(error.contains("base"));
+        assert!(error.contains("staging"));
+    }
+
+    #[test]
+    fn config_hash_is_stable_and_changes_with_profile_content() {
+        let first = default_config_response().unwrap();
+        let second = default_config_response().unwrap();
+        assert_eq!(first.config_hash, second.config_hash);
+
+        let mut changed = production_default_config().unwrap();
+        changed.storage.slow_io_warning_ns = 150_000_000;
+        let changed = config_response_from_compiled(changed, 1).unwrap();
+        assert_ne!(first.config_hash, changed.config_hash);
     }
 
     #[test]
@@ -484,6 +754,10 @@ mod tests {
     }
 
     async fn http_response(request: &str) -> Option<String> {
+        http_response_with_state(request, ControllerState::default()).await
+    }
+
+    async fn http_response_with_state(request: &str, state: ControllerState) -> Option<String> {
         let require_net = std::env::var_os("TAPIO_LEAN_REQUIRE_NET").is_some();
         let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
             Ok(listener) => listener,
@@ -497,7 +771,7 @@ mod tests {
             Err(e) => panic!("loopback bind failed: {e}"),
         };
         let addr = listener.local_addr().unwrap();
-        let app = router(ControllerState::default());
+        let app = router(state);
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
@@ -520,6 +794,10 @@ mod tests {
     fn response_json(response: &str) -> serde_json::Value {
         let (_, body) = response.split_once("\r\n\r\n").unwrap();
         serde_json::from_str(body).unwrap()
+    }
+
+    fn response_body(response: &str) -> &str {
+        response.split_once("\r\n\r\n").map_or("", |(_, body)| body)
     }
 
     #[tokio::test]
@@ -580,5 +858,59 @@ mod tests {
         let body = response_json(&response);
         assert_eq!(body["error"]["code"], "MISSING_FIELD");
         assert_eq!(body["error"]["message"], "agent_id is required");
+    }
+
+    #[tokio::test]
+    async fn config_endpoint_returns_etag_and_hash() {
+        let state = ControllerState::default();
+        let expected = state.config_for("node/worker-1", "worker-1").unwrap();
+        let Some(response) = http_response_with_state(
+            "GET /v1/agents/config?agent_id=node/worker-1&node_name=worker-1 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            state,
+        )
+        .await
+        else {
+            return;
+        };
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert!(response.contains(&format!("etag: \"{}\"", expected.config_hash)));
+        let body = response_json(&response);
+        assert_eq!(body["config_hash"], expected.config_hash);
+    }
+
+    #[tokio::test]
+    async fn config_endpoint_returns_304_for_matching_if_none_match() {
+        let state = ControllerState::default();
+        let expected = state.config_for("node/worker-1", "worker-1").unwrap();
+        let request = format!(
+            "GET /v1/agents/config?agent_id=node/worker-1&node_name=worker-1 HTTP/1.1\r\nHost: localhost\r\nIf-None-Match: \"{}\"\r\nConnection: close\r\n\r\n",
+            expected.config_hash
+        );
+        let Some(response) = http_response_with_state(&request, state).await else {
+            return;
+        };
+
+        assert!(response.starts_with("HTTP/1.1 304"));
+        assert!(response.contains(&format!("etag: \"{}\"", expected.config_hash)));
+        assert_eq!(response_body(&response), "");
+    }
+
+    #[tokio::test]
+    async fn config_endpoint_returns_200_for_stale_if_none_match() {
+        let state = ControllerState::default();
+        let expected = state.config_for("node/worker-1", "worker-1").unwrap();
+        let Some(response) = http_response_with_state(
+            "GET /v1/agents/config?agent_id=node/worker-1&node_name=worker-1 HTTP/1.1\r\nHost: localhost\r\nIf-None-Match: \"sha256:stale\"\r\nConnection: close\r\n\r\n",
+            state,
+        )
+        .await
+        else {
+            return;
+        };
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        let body = response_json(&response);
+        assert_eq!(body["config_hash"], expected.config_hash);
     }
 }

@@ -28,14 +28,14 @@ Agent to controller communication is agent-initiated HTTP/1.1 plus JSON in v0. T
 The v0 protocol is `tapio-wire/v1`:
 
 - `POST /v1/agents/hello`
-- `GET /v1/agents/config?agent_id=<agent-id>&node_name=<node-name>&version=<current-version>`
+- `GET /v1/agents/config?agent_id=<agent-id>&node_name=<node-name>`
 - `POST /v1/agents/heartbeat`
 - `POST /v1/events`
 
 Payloads are small, bounded, and versioned. Unknown future JSON fields are ignored by default, while missing required fields and unsupported wire versions fail clearly.
 
 See [wire-api-standard.md](wire-api-standard.md) for the versioning,
-compatibility, config identity, caching, and error-envelope policy.
+compatibility, config identity, ETag caching, and error-envelope policy.
 
 ## Security Assumptions
 

@@ -69,6 +69,19 @@ The hash is computed over the canonical `serde_json::to_vec` bytes of the
 `CompiledConfig` value. Agents and operators should treat the hash, not the
 generation, as the authoritative identity of the desired config.
 
+## Profile Input
+
+In v0, profile documents enter the controller at startup. The controller may
+parse an operator-trusted EvidenceProfile YAML file, validate it with
+`tapio-profile`, compile it into `CompiledConfig`, and fail startup on any
+parse or validation error.
+
+The controller currently uses `serde_yaml 0.9` for this startup-only parser.
+That crate is archived upstream, so it is intentionally contained to
+`tapio-controller`, never linked into `tapio-agent` or `tapio-cli`, and
+replaceable behind the same `Deserialize` boundary. YAML parsing is not part
+of the profile core API.
+
 ## Config Caching
 
 `GET /v1/agents/config` returns:
@@ -86,6 +99,10 @@ If-None-Match: "<config_hash>"
 When the tag matches the active config, the controller returns
 `304 Not Modified` with no body. When it does not match, the controller returns
 `200 OK` with the full `ConfigResponse`.
+
+v0 uses exact single-tag matching only. It does not implement HTTP list
+matching, weak validators, or `*` matching because the agent/controller path is
+a closed protocol, not a general-purpose cache interface.
 
 This is the v1 scaling story: many agents poll, and most receive cheap `304`
 responses.
