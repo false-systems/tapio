@@ -124,7 +124,7 @@ impl HttpSink {
             }
         };
 
-        match post_json(&self.endpoint, &payload) {
+        match crate::httpc::post_json(&self.endpoint, &payload) {
             Ok(()) => {
                 tracing::debug!(count = batch.len(), "http sink: batch sent");
                 if let Ok(mut inner) = self.inner.lock() {
@@ -152,56 +152,10 @@ impl HttpSink {
     }
 }
 
-/// Minimal HTTP POST using std::net::TcpStream.
-fn post_json(endpoint: &str, body: &[u8]) -> Result<(), String> {
-    use std::io::{Read, Write};
-    use std::net::TcpStream;
-
-    let url = endpoint
-        .strip_prefix("http://")
-        .ok_or_else(|| format!("endpoint must start with http://: {endpoint}"))?;
-
-    let (host_port, path) = match url.find('/') {
-        Some(i) => (&url[..i], &url[i..]),
-        None => (url, "/v1/occurrences"),
-    };
-
-    let mut stream =
-        TcpStream::connect(host_port).map_err(|e| format!("connect to {host_port}: {e}"))?;
-    stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
-    stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
-
-    let request = format!(
-        "POST {path} HTTP/1.1\r\nHost: {host_port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| format!("write request: {e}"))?;
-    stream
-        .write_all(body)
-        .map_err(|e| format!("write body: {e}"))?;
-
-    let mut response = [0u8; 256];
-    let n = stream
-        .read(&mut response)
-        .map_err(|e| format!("read response: {e}"))?;
-    let status_line = String::from_utf8_lossy(&response[..n]);
-
-    if !status_line.starts_with("HTTP/1.1 2") && !status_line.starts_with("HTTP/1.0 2") {
-        return Err(format!(
-            "endpoint returned non-2xx: {}",
-            status_line.lines().next().unwrap_or("empty")
-        ));
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::httpc::post_json;
     use tapio_common::occurrence::{Outcome, Severity};
 
     fn occurrence() -> Occurrence {

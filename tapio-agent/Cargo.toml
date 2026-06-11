@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 tapio-common = { workspace = true }
+tapio-wire = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

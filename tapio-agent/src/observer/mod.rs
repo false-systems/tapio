@@ -15,6 +15,83 @@ const METRIC_LOST_EVENTS: u32 = 0;
 #[cfg(target_os = "linux")]
 const METRIC_STORAGE_AMBIGUOUS_IO: u32 = 1;
 
+#[cfg(target_os = "linux")]
+#[derive(Clone, Default)]
+pub struct ConfigCarriers {
+    inner: std::sync::Arc<std::sync::Mutex<ConfigCarrierState>>,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy)]
+struct ConfigCarrier {
+    observer: &'static str,
+    map_fd: std::os::fd::RawFd,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+struct ConfigCarrierState {
+    carriers: Vec<ConfigCarrier>,
+    current: Option<tapio_common::ebpf::TapioConfig>,
+}
+
+#[cfg(target_os = "linux")]
+impl ConfigCarriers {
+    pub fn register(&self, observer: &'static str, map_fd: std::os::fd::RawFd) {
+        let current = {
+            let mut state = self.inner.lock().expect("config carriers lock poisoned");
+            state.carriers.push(ConfigCarrier { observer, map_fd });
+            state.current
+        };
+        if let Some(config) = current {
+            match bpf_map_update_tapio_config(map_fd, &config) {
+                Ok(()) => {
+                    tracing::info!(
+                        observer,
+                        generation = config.generation,
+                        flags = config.flags,
+                        "config applied to late carrier"
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        observer,
+                        map = "tapio_config",
+                        error = %e,
+                        generation = config.generation,
+                        "late config apply failed"
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn update_all(&self, config: &tapio_common::ebpf::TapioConfig) -> Vec<&'static str> {
+        let carriers = {
+            let mut state = self.inner.lock().expect("config carriers lock poisoned");
+            state.current = Some(*config);
+            state.carriers.clone()
+        };
+        let mut failed = Vec::new();
+        for carrier in carriers {
+            match bpf_map_update_tapio_config(carrier.map_fd, config) {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::error!(
+                        observer = carrier.observer,
+                        map = "tapio_config",
+                        error = %e,
+                        generation = config.generation,
+                        "config fan-out failed"
+                    );
+                    failed.push(carrier.observer);
+                }
+            }
+        }
+        failed
+    }
+}
+
 /// Read a per-CPU u64 metric from a BPF PERCPU_ARRAY map by raw fd.
 /// Returns the sum across all CPUs, or 0 on error.
 #[cfg(target_os = "linux")]
@@ -128,23 +205,25 @@ fn bpf_map_update_tapio_config(
 }
 
 #[cfg(target_os = "linux")]
-pub fn write_tapio_config(
+pub fn init_and_register_tapio_config(
     ebpf: &mut aya::Ebpf,
     observer: &'static str,
     config: &tapio_common::ebpf::TapioConfig,
+    carriers: &ConfigCarriers,
 ) -> bool {
     let Some(map) = ebpf.map("tapio_config") else {
-        tracing::error!(observer, map = "tapio_config", "config carrier map missing");
+        tracing::error!(observer, map = "tapio_config", "config map missing");
         return false;
     };
     let map_fd = map_raw_fd(map);
     match bpf_map_update_tapio_config(map_fd, config) {
         Ok(()) => {
+            carriers.register(observer, map_fd);
             tracing::info!(
                 observer,
                 generation = config.generation,
                 flags = config.flags,
-                "tapio_config written to eBPF carrier"
+                "config carrier registered"
             );
             true
         }
@@ -153,7 +232,7 @@ pub fn write_tapio_config(
                 observer,
                 map = "tapio_config",
                 error = %e,
-                "failed to write tapio_config; observer remains at previous or zeroed config"
+                "config init failed"
             );
             false
         }

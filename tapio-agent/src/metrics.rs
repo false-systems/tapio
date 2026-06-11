@@ -12,6 +12,7 @@ pub struct TapioMetrics {
     pub correlation_drops_total: CounterVec,
     pub drain_cap_total: CounterVec,
     pub sink_writes_total: CounterVec,
+    pub config_fetch_total: CounterVec,
 }
 
 #[derive(Clone)]
@@ -66,6 +67,11 @@ impl TapioMetrics {
                 "Total sink write attempts by result",
                 &["sink", "result"],
             ),
+            config_fetch_total: CounterVec::new(
+                "tapio_config_fetch_total",
+                "Controller config poll attempts by result",
+                &["result"],
+            ),
         })
     }
 
@@ -79,6 +85,7 @@ impl TapioMetrics {
             &self.correlation_drops_total,
             &self.drain_cap_total,
             &self.sink_writes_total,
+            &self.config_fetch_total,
         ] {
             counter.encode(&mut out);
         }
