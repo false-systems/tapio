@@ -94,7 +94,6 @@ async fn fetch_once(
     .await
     .map_err(|e| FetchError::Transport(format!("join fetch: {e}")))?
     .map_err(FetchError::Transport)?;
-    let _response_etag = response.etag.as_deref();
 
     match response.status {
         304 => Ok(PollOutcome::NotModified),
@@ -107,6 +106,7 @@ async fn fetch_once(
             config
                 .validate()
                 .map_err(|e| FetchError::Rejected(e.to_string()))?;
+            reject_empty_config_hash(&config.config_hash)?;
             let tapio_config =
                 crate::config::tapio_config_from_compiled(&config.config, &config.version)
                     .map_err(|e| FetchError::Rejected(e.to_string()))?;
@@ -120,6 +120,17 @@ async fn fetch_once(
     }
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn reject_empty_config_hash(hash: &str) -> Result<(), FetchError> {
+    if hash.is_empty() {
+        return Err(FetchError::Rejected(
+            "config response missing config_hash".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 #[cfg(target_os = "linux")]
 fn apply_config(
     carriers: &ConfigCarriers,
@@ -131,13 +142,8 @@ fn apply_config(
     if !failed.is_empty() {
         tracing::warn!(failed = ?failed, "partial config fan-out");
     }
-    let thresholds = crate::config::pmc_thresholds_from_compiled(compiled);
     pmc_thresholds_tx
-        .send(crate::observer::node_pmc::PmcThresholds {
-            stall_pct_warning: thresholds.stall_pct_warning,
-            stall_pct_critical: thresholds.stall_pct_critical,
-            ipc_degradation: thresholds.ipc_degradation,
-        })
+        .send(crate::config::pmc_thresholds_from_compiled(compiled))
         .map_err(|e| FetchError::Transport(format!("PMC thresholds: {e}")))?;
     Ok(())
 }
@@ -204,5 +210,14 @@ mod tests {
             config_url(&controller),
             "http://controller:8080/v1/agents/config?agent_id=node%2Fworker%201&node_name=worker%2F1"
         );
+    }
+
+    #[test]
+    fn empty_config_hash_is_rejected() {
+        assert_eq!(
+            reject_empty_config_hash("").unwrap_err(),
+            FetchError::Rejected("config response missing config_hash".into())
+        );
+        assert!(reject_empty_config_hash("sha256:abc").is_ok());
     }
 }

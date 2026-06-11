@@ -5,11 +5,11 @@ use std::time::Duration;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+const POST_MAX_RESPONSE_BYTES: usize = 8 * 1024;
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub struct HttpResponse {
     pub status: u16,
-    pub etag: Option<String>,
     pub body: Vec<u8>,
 }
 
@@ -30,7 +30,7 @@ pub fn post_json(endpoint: &str, body: &[u8]) -> Result<(), String> {
         &[("Content-Type", "application/json".to_string())],
         body,
         DEFAULT_TIMEOUT,
-        256,
+        POST_MAX_RESPONSE_BYTES,
     )?;
 
     if (200..300).contains(&response.status) {
@@ -118,16 +118,7 @@ fn read_response(mut stream: TcpStream, max_response_bytes: usize) -> Result<Htt
         .next()
         .ok_or_else(|| "missing HTTP status".to_string())?;
     let status = parse_status(status_line)?;
-    let mut etag = None;
-    for line in lines {
-        if let Some((name, value)) = line.split_once(':')
-            && name.trim().eq_ignore_ascii_case("etag")
-        {
-            etag = Some(value.trim().to_string());
-        }
-    }
-
-    Ok(HttpResponse { status, etag, body })
+    Ok(HttpResponse { status, body })
 }
 
 fn parse_status(status_line: &str) -> Result<u16, String> {
@@ -187,7 +178,6 @@ mod tests {
             |url| {
                 let response = get(&url, &[], DEFAULT_TIMEOUT, DEFAULT_MAX_RESPONSE_BYTES).unwrap();
                 assert_eq!(response.status, 200);
-                assert_eq!(response.etag.as_deref(), Some("\"sha256:abc\""));
                 assert_eq!(response.body, b"{}");
             },
         );
@@ -235,5 +225,13 @@ mod tests {
             };
             assert!(err.contains("exceeded"));
         });
+    }
+
+    #[test]
+    fn post_json_tolerates_verbose_2xx_response() {
+        with_server(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Padding: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nContent-Length: 64\r\n\r\n{\"accepted\":256,\"rejected\":0,\"next_config_version\":\"1\",\"x\":\"y\"}",
+            |url| post_json(&url, b"{}").unwrap(),
+        );
     }
 }
