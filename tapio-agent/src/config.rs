@@ -158,14 +158,6 @@ impl Thresholds {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub struct PmcThresholds {
-    pub stall_pct_warning: f64,
-    pub stall_pct_critical: f64,
-    pub ipc_degradation: f64,
-}
-
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub enum CompiledConfigError {
@@ -242,8 +234,10 @@ pub fn tapio_config_from_compiled(
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub fn pmc_thresholds_from_compiled(config: &CompiledConfig) -> PmcThresholds {
-    PmcThresholds {
+pub fn pmc_thresholds_from_compiled(
+    config: &CompiledConfig,
+) -> crate::observer::node_pmc::PmcThresholds {
+    crate::observer::node_pmc::PmcThresholds {
         stall_pct_warning: config.node_pmc.stall_warning_permille as f64 / 10.0,
         stall_pct_critical: config.node_pmc.stall_critical_permille as f64 / 10.0,
         ipc_degradation: config.node_pmc.ipc_degradation_milli as f64 / 1000.0,
