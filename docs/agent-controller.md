@@ -49,7 +49,17 @@ Production Kubernetes mode should eventually bind agent identity to service acco
 
 Controller outage must not stop kernel observation or ring buffer consumption. Agents keep the last known valid config, or safe local defaults if no config has ever been fetched. Event batching queues must be bounded; overflow and send failures must increment visible counters such as `controller_send_failures_total` and `sink_drops_total`.
 
-Heartbeats include evidence-loss counters and degraded reasons. They do not include event payloads or high-cardinality labels.
+Heartbeats include evidence-loss counters, degraded reasons, active config
+generation, and active config hash. They do not include event payloads or
+high-cardinality labels.
+
+The heartbeat `config_hash` is the applied config identity. It is not the last
+hash fetched from the controller. In controller mode, a fresh agent starts
+unconfigured with observers disabled until it applies compiled config; during
+that window it reports an empty hash and the degraded reason `unconfigured`.
+After apply, it reports the generation/hash pair it is actually running. The
+controller stores these heartbeat values in memory so future status APIs can
+answer which agents have not converged to a target hash.
 
 ## Non-Goals
 

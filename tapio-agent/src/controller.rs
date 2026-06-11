@@ -6,6 +6,8 @@ use tapio_common::ebpf::TapioConfig;
 use tapio_wire::ConfigResponse;
 
 #[cfg(target_os = "linux")]
+use crate::heartbeat::{ActiveConfigIdentity, AppliedConfigIdentity};
+#[cfg(target_os = "linux")]
 use crate::observer::ConfigCarriers;
 
 #[derive(Debug, Clone)]
@@ -29,6 +31,7 @@ pub async fn poll_loop(
     controller: ControllerConfig,
     carriers: ConfigCarriers,
     pmc_thresholds_tx: tokio::sync::watch::Sender<crate::observer::node_pmc::PmcThresholds>,
+    active_config: ActiveConfigIdentity,
     metrics: crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
@@ -50,6 +53,10 @@ pub async fn poll_loop(
                 match fetch_once(&controller, etag.as_deref(), &carriers, &pmc_thresholds_tx).await {
                     Ok(PollOutcome::Applied { generation, hash }) => {
                         etag = Some(format!("\"{hash}\""));
+                        active_config.mark_applied(AppliedConfigIdentity::new(
+                            generation.to_string(),
+                            hash.clone(),
+                        ));
                         let label = "applied";
                         metrics.config_fetch_total.with_label_values(&[label]).inc();
                         tracing::info!(generation, hash = %hash, "config applied");
