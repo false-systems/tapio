@@ -34,6 +34,9 @@ The v0 protocol is `tapio-wire/v1`:
 
 Payloads are small, bounded, and versioned. Unknown future JSON fields are ignored by default, while missing required fields and unsupported wire versions fail clearly.
 
+See [wire-api-standard.md](wire-api-standard.md) for the versioning,
+compatibility, config identity, caching, and error-envelope policy.
+
 ## Security Assumptions
 
 The v0 controller endpoint is intended for explicit in-cluster plaintext HTTP or local development. TLS can be provided by the cluster, service mesh, or proxy layer initially.

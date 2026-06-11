@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-pub mod v0;
-pub use v0::{
+pub mod config;
+pub use config::{
     CompiledConfig, CompiledContainer, CompiledNetwork, CompiledNodePmc, CompiledStorage,
 };
 
@@ -436,6 +436,24 @@ mod tests {
         let json = serde_json::to_string(&hello()).unwrap();
         let parsed: HelloRequest = serde_json::from_str(&json).unwrap();
         parsed.validate().unwrap();
+    }
+
+    #[test]
+    fn hello_request_unknown_fields_are_ignored() {
+        let parsed: HelloRequest = serde_json::from_str(
+            r#"{
+              "wire_version":"tapio-wire/v1",
+              "agent_id":"node/worker-1",
+              "node_name":"worker-1",
+              "tapio_version":"4.0.0",
+              "kernel_release":"6.8.0",
+              "arch":"x86_64",
+              "future_capability_shape":{"ignored":true}
+            }"#,
+        )
+        .unwrap();
+        parsed.validate().unwrap();
+        assert_eq!(parsed.agent_id, "node/worker-1");
     }
 
     #[test]
