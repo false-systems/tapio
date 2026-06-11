@@ -69,6 +69,17 @@ The hash is computed over the canonical `serde_json::to_vec` bytes of the
 `CompiledConfig` value. Agents and operators should treat the hash, not the
 generation, as the authoritative identity of the desired config.
 
+Heartbeat payloads also carry `config_hash`. This field is additive in
+`tapio-wire/v1`: older heartbeat JSON without it still deserializes and
+validates with an empty hash. A controller-managed agent sets it to the hash
+of the compiled config it has actually applied, not merely the config it last
+fetched. Empty hash means the agent has not applied controller config yet.
+
+When a controller-mode agent has not applied any compiled config, it reports
+the degraded reason `unconfigured`. This is the first worked example of v1
+additive evolution: new senders add `config_hash`, older payloads remain
+accepted, and the protocol version does not change.
+
 ## Profile Input
 
 In v0, profile documents enter the controller at startup. The controller may
