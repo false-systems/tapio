@@ -23,6 +23,8 @@ guidance() {
     kube)        printf 'must not run a Kubernetes client. Kubernetes enrichment belongs in tapio-controller.' ;;
     k8s-openapi) printf 'must not pull Kubernetes API types. They belong in tapio-controller.' ;;
     tapio-profile) printf 'must not validate or compile Evidence Profiles. It consumes compiled wire config only.' ;;
+    serde_yaml)   printf 'must not parse operator YAML. Profile input belongs in tapio-controller.' ;;
+    sha2)         printf 'must not compute controller config identities. Config hashing belongs in tapio-controller.' ;;
     *)           printf 'is a forbidden dependency for this crate.' ;;
   esac
 }
@@ -46,10 +48,10 @@ check_boundary() {
 }
 
 # tapio-agent: node observer. No server, no gRPC, no Kubernetes client, no profile logic.
-check_boundary tapio-agent kube k8s-openapi axum hyper tonic reqwest tapio-profile
+check_boundary tapio-agent kube k8s-openapi axum hyper tonic reqwest tapio-profile serde_yaml sha2
 
 # tapio-cli: platform-independent local inspection. No profile validation/compilation path.
-check_boundary tapio-cli tapio-profile
+check_boundary tapio-cli tapio-profile serde_yaml sha2
 
 # tapio-wire: tiny protocol structs. No server/client frameworks at all.
 check_boundary tapio-wire kube k8s-openapi axum hyper tonic reqwest
