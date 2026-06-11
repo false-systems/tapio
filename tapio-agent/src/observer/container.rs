@@ -222,6 +222,7 @@ pub async fn run(
     sink: &dyn tapio_common::sink::Sink,
     boot_offset_ns: u64,
     tapio_config: tapio_common::ebpf::TapioConfig,
+    carriers: &super::ConfigCarriers,
     metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
@@ -230,7 +231,7 @@ pub async fn run(
 
     tracing::info!(path = ebpf_path, "loading container eBPF program");
     let mut ebpf = super::load_ebpf(ebpf_path, "container")?;
-    if !super::write_tapio_config(&mut ebpf, "container", &tapio_config) {
+    if !super::init_and_register_tapio_config(&mut ebpf, "container", &tapio_config, carriers) {
         anyhow::bail!("container observer: failed to initialize tapio_config carrier");
     }
 

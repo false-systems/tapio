@@ -4,6 +4,7 @@ use tapio_common::ebpf::{
     TAPIO_CONFIG_ABI_VERSION, TAPIO_F_CONTAINER, TAPIO_F_NETWORK, TAPIO_F_NODE_PMC,
     TAPIO_F_STORAGE, TapioConfig,
 };
+use tapio_wire::CompiledConfig;
 
 /// Agent configuration loaded from TOML file.
 /// CLI flags take precedence — fields here are all optional so missing values
@@ -154,6 +155,92 @@ impl Thresholds {
             ignore_exit_codes,
             _pad: 0,
         }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub enum CompiledConfigError {
+    InvalidGeneration { value: String },
+}
+
+impl std::fmt::Display for CompiledConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidGeneration { value } => {
+                write!(f, "config version {value:?} is not a valid u32 generation")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CompiledConfigError {}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn tapio_config_from_compiled(
+    config: &CompiledConfig,
+    generation: &str,
+) -> Result<TapioConfig, CompiledConfigError> {
+    let generation =
+        generation
+            .parse::<u32>()
+            .map_err(|_| CompiledConfigError::InvalidGeneration {
+                value: generation.to_string(),
+            })?;
+
+    let mut flags = 0;
+    if config.network.enabled {
+        flags |= TAPIO_F_NETWORK;
+    }
+    if config.storage.enabled {
+        flags |= TAPIO_F_STORAGE;
+    }
+    if config.container.enabled {
+        flags |= TAPIO_F_CONTAINER;
+    }
+    if config.node_pmc.enabled {
+        flags |= TAPIO_F_NODE_PMC;
+    }
+
+    let mut ignore_exit_codes = [0; tapio_common::ebpf::TAPIO_CONFIG_MAX_IGNORE_EXIT_CODES];
+    for (slot, code) in ignore_exit_codes
+        .iter_mut()
+        .zip(config.container.ignore_exit_codes.iter())
+    {
+        *slot = *code;
+    }
+    let ignore_exit_count = config
+        .container
+        .ignore_exit_codes
+        .len()
+        .min(tapio_common::ebpf::TAPIO_CONFIG_MAX_IGNORE_EXIT_CODES)
+        as u32;
+
+    Ok(TapioConfig {
+        abi_version: TAPIO_CONFIG_ABI_VERSION,
+        generation,
+        flags,
+        slow_io_threshold_ns: config.storage.slow_io_warning_ns,
+        io_latency_critical_ns: config.storage.slow_io_critical_ns,
+        conn_refused_window_ns: config.network.conn_refused_window_ns,
+        conn_refused_min_count: config.network.conn_refused_min_count,
+        rtt_spike_multiplier: config.network.rtt_spike_ratio,
+        rtt_spike_abs_us: config.network.rtt_spike_abs_us,
+        rtt_min_baseline_samples: config.network.rtt_min_baseline_samples,
+        ignore_exit_count,
+        ignore_exit_codes,
+        _pad: 0,
+    })
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn pmc_thresholds_from_compiled(
+    config: &CompiledConfig,
+) -> crate::observer::node_pmc::PmcThresholds {
+    crate::observer::node_pmc::PmcThresholds {
+        stall_pct_warning: config.node_pmc.stall_warning_permille as f64 / 10.0,
+        stall_pct_critical: config.node_pmc.stall_critical_permille as f64 / 10.0,
+        ipc_degradation: config.node_pmc.ipc_degradation_milli as f64 / 1000.0,
     }
 }
 
@@ -316,5 +403,84 @@ mod tests {
         let config = Config::default().tapio_config();
         assert_eq!(config.ignore_exit_count, 0);
         assert!(config.ignore_exit_count as usize <= config.ignore_exit_codes.len());
+    }
+
+    fn compiled_config() -> CompiledConfig {
+        CompiledConfig {
+            network: tapio_wire::CompiledNetwork {
+                enabled: true,
+                rtt_spike_ratio: 3,
+                rtt_spike_abs_us: 250_000,
+                rtt_min_baseline_samples: 7,
+                conn_refused_window_ns: 1_000_000_000,
+                conn_refused_min_count: 4,
+            },
+            storage: tapio_wire::CompiledStorage {
+                enabled: true,
+                slow_io_warning_ns: 150_000_000,
+                slow_io_critical_ns: 400_000_000,
+            },
+            container: tapio_wire::CompiledContainer {
+                enabled: true,
+                ignore_exit_codes: vec![0, 143],
+            },
+            node_pmc: tapio_wire::CompiledNodePmc {
+                enabled: false,
+                stall_warning_permille: 250,
+                stall_critical_permille: 500,
+                ipc_degradation_milli: 800,
+            },
+        }
+    }
+
+    #[test]
+    fn compiled_config_maps_to_tapio_config_fields() {
+        let config = tapio_config_from_compiled(&compiled_config(), "17").unwrap();
+        assert_eq!(config.abi_version, TAPIO_CONFIG_ABI_VERSION);
+        assert_eq!(config.generation, 17);
+        assert_eq!(
+            config.flags,
+            TAPIO_F_NETWORK | TAPIO_F_STORAGE | TAPIO_F_CONTAINER
+        );
+        assert_eq!(config.rtt_spike_multiplier, 3);
+        assert_eq!(config.rtt_spike_abs_us, 250_000);
+        assert_eq!(config.rtt_min_baseline_samples, 7);
+        assert_eq!(config.conn_refused_window_ns, 1_000_000_000);
+        assert_eq!(config.conn_refused_min_count, 4);
+        assert_eq!(config.slow_io_threshold_ns, 150_000_000);
+        assert_eq!(config.io_latency_critical_ns, 400_000_000);
+        assert_eq!(config.ignore_exit_count, 2);
+        assert_eq!(config.ignore_exit_codes[0], 0);
+        assert_eq!(config.ignore_exit_codes[1], 143);
+    }
+
+    #[test]
+    fn compiled_config_rejects_invalid_generation() {
+        assert_eq!(
+            tapio_config_from_compiled(&compiled_config(), "not-a-number").unwrap_err(),
+            CompiledConfigError::InvalidGeneration {
+                value: "not-a-number".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn compiled_config_truncates_ignore_exit_codes_to_abi_bound() {
+        let mut compiled = compiled_config();
+        compiled.container.ignore_exit_codes = (0..32).collect();
+        let config = tapio_config_from_compiled(&compiled, "1").unwrap();
+        assert_eq!(
+            config.ignore_exit_count as usize,
+            tapio_common::ebpf::TAPIO_CONFIG_MAX_IGNORE_EXIT_CODES
+        );
+        assert_eq!(config.ignore_exit_codes[15], 15);
+    }
+
+    #[test]
+    fn compiled_config_maps_pmc_thresholds_to_f64() {
+        let thresholds = pmc_thresholds_from_compiled(&compiled_config());
+        assert_eq!(thresholds.stall_pct_warning, 25.0);
+        assert_eq!(thresholds.stall_pct_critical, 50.0);
+        assert_eq!(thresholds.ipc_degradation, 0.8);
     }
 }
