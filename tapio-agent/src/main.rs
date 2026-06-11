@@ -1,9 +1,12 @@
 mod config;
+mod controller;
+mod httpc;
 mod metrics;
 mod observer;
 mod sink;
 
 use std::io::{self, Write};
+use std::time::Duration;
 use tracing::info;
 
 /// Stderr writer that silently swallows broken pipe errors.
@@ -26,12 +29,15 @@ impl Write for BrokenPipeGuard {
     }
 }
 
+#[derive(Debug)]
 struct Args {
     config: String,
     sinks: Vec<String>,
     ebpf_dir: String,
     data_dir: String,
     http_endpoint: String,
+    controller_endpoint: Option<String>,
+    config_poll_interval: Duration,
 }
 
 impl Default for Args {
@@ -42,15 +48,21 @@ impl Default for Args {
             ebpf_dir: "/opt/tapio/ebpf".into(),
             data_dir: ".tapio/occurrences".into(),
             http_endpoint: "http://localhost:8765".into(),
+            controller_endpoint: None,
+            config_poll_interval: Duration::from_secs(30),
         }
     }
 }
 
 impl Args {
     fn parse() -> anyhow::Result<Self> {
+        Self::parse_from(std::env::args().skip(1))
+    }
+
+    fn parse_from(values: impl IntoIterator<Item = String>) -> anyhow::Result<Self> {
         let mut args = Self::default();
         let mut explicit_sinks = Vec::new();
-        let mut iter = std::env::args().skip(1).peekable();
+        let mut iter = values.into_iter().peekable();
 
         while let Some(arg) = iter.next() {
             let (flag, inline_value) = match arg.split_once('=') {
@@ -72,6 +84,21 @@ impl Args {
                 "--ebpf-dir" => args.ebpf_dir = next_arg(flag, inline_value, &mut iter)?,
                 "--data-dir" => args.data_dir = next_arg(flag, inline_value, &mut iter)?,
                 "--http-endpoint" => args.http_endpoint = next_arg(flag, inline_value, &mut iter)?,
+                "--controller-endpoint" => {
+                    let endpoint = next_arg(flag, inline_value, &mut iter)?;
+                    validate_http_endpoint("--controller-endpoint", &endpoint)?;
+                    args.controller_endpoint = Some(endpoint);
+                }
+                "--config-poll-interval" => {
+                    let value = next_arg(flag, inline_value, &mut iter)?;
+                    let seconds = value.parse::<u64>().map_err(|e| {
+                        anyhow::anyhow!("--config-poll-interval must be seconds: {e}")
+                    })?;
+                    if seconds < 5 {
+                        anyhow::bail!("--config-poll-interval must be at least 5 seconds");
+                    }
+                    args.config_poll_interval = Duration::from_secs(seconds);
+                }
                 other => anyhow::bail!("unknown argument: {other}"),
             }
         }
@@ -82,6 +109,16 @@ impl Args {
 
         Ok(args)
     }
+}
+
+fn validate_http_endpoint(flag: &str, endpoint: &str) -> anyhow::Result<()> {
+    if endpoint.starts_with("https://") {
+        anyhow::bail!("{flag} does not support https://; use an explicit http:// endpoint");
+    }
+    if !endpoint.starts_with("http://") {
+        anyhow::bail!("{flag} must start with http://");
+    }
+    Ok(())
 }
 
 fn next_arg<I>(
@@ -126,6 +163,8 @@ Options:
   --ebpf-dir <path>        Directory containing compiled eBPF .o files [default: /opt/tapio/ebpf]
   --data-dir <path>        Directory for file sink output [default: .tapio/occurrences]
   --http-endpoint <url>    Endpoint for the http sink [default: http://localhost:8765]
+  --controller-endpoint <url> Controller config URL (http:// only)
+  --config-poll-interval <seconds> Config poll interval, minimum 5 [default: 30]
   -h, --help               Print help
   -V, --version            Print version",
         env!("CARGO_PKG_VERSION")
@@ -172,6 +211,25 @@ fn create_sinks(
         anyhow::bail!("at least one sink is required");
     }
     Ok(sinks)
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn node_name() -> String {
+    std::env::var("TAPIO_NODE_NAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "unknown-node".into())
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn agent_id() -> String {
+    std::env::var("TAPIO_AGENT_ID").unwrap_or_else(|_| format!("node/{}", node_name()))
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn config_file_mentions_thresholds(path: &std::path::Path) -> bool {
+    std::fs::read_to_string(path)
+        .map(|content| content.lines().any(|line| line.trim() == "[thresholds]"))
+        .unwrap_or(false)
 }
 
 /// Fan-out sink that sends to all inner sinks. Failure in one doesn't block others.
@@ -317,7 +375,26 @@ async fn main() -> anyhow::Result<()> {
         });
 
         let ebpf_dir = args.ebpf_dir.clone();
-        let tapio_config = cfg.tapio_config();
+        let controller_mode = args.controller_endpoint.is_some();
+        if controller_mode && config_file_mentions_thresholds(std::path::Path::new(&args.config)) {
+            tracing::warn!(
+                config = %args.config,
+                "TOML [thresholds] ignored"
+            );
+        }
+        let tapio_config = if controller_mode {
+            tapio_common::ebpf::TapioConfig::default()
+        } else {
+            cfg.tapio_config()
+        };
+        let carriers = observer::ConfigCarriers::default();
+        let standalone_thresholds = observer::node_pmc::PmcThresholds {
+            stall_pct_warning: cfg.thresholds.stall_pct_warning,
+            stall_pct_critical: cfg.thresholds.stall_pct_critical,
+            ipc_degradation: cfg.thresholds.ipc_degradation,
+        };
+        let (pmc_thresholds_tx, pmc_thresholds_rx) =
+            tokio::sync::watch::channel(standalone_thresholds);
         info!(
             generation = tapio_config.generation,
             flags = tapio_config.flags,
@@ -325,17 +402,47 @@ async fn main() -> anyhow::Result<()> {
         );
 
         let sink1: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
+        let mut tasks = tokio::task::JoinSet::new();
+
+        if let Some(endpoint) = args.controller_endpoint.clone() {
+            tracing::info!(endpoint = %endpoint, "controller mode");
+            let controller = controller::ControllerConfig {
+                endpoint,
+                agent_id: agent_id(),
+                node_name: node_name(),
+                poll_interval: args.config_poll_interval,
+            };
+            let poll_carriers = carriers.clone();
+            let poll_thresholds = pmc_thresholds_tx.clone();
+            let poll_metrics = tapio_metrics.clone();
+            let poll_shutdown = shutdown_rx.clone();
+            tasks.spawn(async move {
+                controller::poll_loop(
+                    controller,
+                    poll_carriers,
+                    poll_thresholds,
+                    poll_metrics,
+                    poll_shutdown,
+                )
+                .await;
+            });
+        } else {
+            tracing::info!("standalone mode");
+        }
+
         let metrics1 = tapio_metrics.clone();
         let rx1 = shutdown_rx.clone();
         let dir1 = ebpf_dir.clone();
         let config1 = tapio_config;
-        let net = tokio::spawn(async move {
+        let carriers1 = carriers.clone();
+        tasks.spawn(async move {
             let path = format!("{dir1}/network_monitor.o");
             if let Err(e) = observer::network::run(
                 &path,
                 sink1.as_ref(),
                 boot_offset_ns,
                 config1,
+                &carriers1,
                 &metrics1,
                 rx1,
             )
@@ -350,13 +457,15 @@ async fn main() -> anyhow::Result<()> {
         let rx2 = shutdown_rx.clone();
         let dir2 = ebpf_dir.clone();
         let config2 = tapio_config;
-        let ctr = tokio::spawn(async move {
+        let carriers2 = carriers.clone();
+        tasks.spawn(async move {
             let path = format!("{dir2}/container_monitor.o");
             if let Err(e) = observer::container::run(
                 &path,
                 sink2.as_ref(),
                 boot_offset_ns,
                 config2,
+                &carriers2,
                 &metrics2,
                 rx2,
             )
@@ -371,13 +480,15 @@ async fn main() -> anyhow::Result<()> {
         let rx3 = shutdown_rx.clone();
         let dir3 = ebpf_dir.clone();
         let config3 = tapio_config;
-        let stg = tokio::spawn(async move {
+        let carriers3 = carriers.clone();
+        tasks.spawn(async move {
             let path = format!("{dir3}/storage_monitor.o");
             if let Err(e) = observer::storage::run(
                 &path,
                 sink3.as_ref(),
                 boot_offset_ns,
                 config3,
+                &carriers3,
                 &metrics3,
                 rx3,
             )
@@ -387,25 +498,25 @@ async fn main() -> anyhow::Result<()> {
             }
         });
 
-        let pmc_thresholds = observer::node_pmc::PmcThresholds {
-            stall_pct_warning: cfg.thresholds.stall_pct_warning,
-            stall_pct_critical: cfg.thresholds.stall_pct_critical,
-            ipc_degradation: cfg.thresholds.ipc_degradation,
-        };
-
         let sink4: Arc<dyn tapio_common::sink::Sink> = multi_sink.clone();
         let metrics4 = tapio_metrics.clone();
         let rx4 = shutdown_rx.clone();
         let dir4 = ebpf_dir.clone();
         let config4 = tapio_config;
-        let pmc = tokio::spawn(async move {
+        let carriers4 = carriers.clone();
+        let thresholds4 = pmc_thresholds_rx.clone();
+        let pmc_runtime = observer::node_pmc::PmcRuntimeConfig {
+            tapio_config: config4,
+            carriers: carriers4,
+            thresholds_rx: thresholds4,
+        };
+        tasks.spawn(async move {
             let path = format!("{dir4}/node_pmc_monitor.o");
             if let Err(e) = observer::node_pmc::run(
                 &path,
                 sink4.as_ref(),
                 boot_offset_ns,
-                config4,
-                pmc_thresholds,
+                pmc_runtime,
                 &metrics4,
                 rx4,
             )
@@ -415,7 +526,11 @@ async fn main() -> anyhow::Result<()> {
             }
         });
 
-        let _ = tokio::join!(net, ctr, stg, pmc);
+        while let Some(result) = tasks.join_next().await {
+            if let Err(e) = result {
+                tracing::error!(error = %e, "agent task failed");
+            }
+        }
         info!("all observers stopped");
         Ok(())
     }
@@ -595,5 +710,40 @@ mod tests {
             log_level_from_rust_log(Some("verbose")),
             tracing::level_filters::LevelFilter::ERROR
         );
+    }
+
+    #[test]
+    fn args_controller_endpoint_accepts_http_only() {
+        let args = Args::parse_from([
+            "--controller-endpoint".to_string(),
+            "http://controller:8080".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            args.controller_endpoint.as_deref(),
+            Some("http://controller:8080")
+        );
+    }
+
+    #[test]
+    fn args_controller_endpoint_rejects_https() {
+        let err = Args::parse_from([
+            "--controller-endpoint".to_string(),
+            "https://controller:8443".to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("does not support https://"));
+    }
+
+    #[test]
+    fn args_config_poll_interval_enforces_minimum() {
+        let err = Args::parse_from(["--config-poll-interval".to_string(), "4".to_string()])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("at least 5 seconds"));
     }
 }

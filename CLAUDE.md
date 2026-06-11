@@ -124,6 +124,8 @@ The `tapio-agent` binary accepts:
 - `--ebpf-dir <path>` — directory with compiled `.o` files (default: `/opt/tapio/ebpf`)
 - `--data-dir <path>` — directory for file sink output (default: `.tapio/occurrences`)
 - `--http-endpoint <url>` — endpoint for the `http` sink (default: `http://localhost:8765`)
+- `--controller-endpoint <url>` — controller base URL for compiled config polling (`http://` only; absent means standalone TOML mode)
+- `--config-poll-interval <seconds>` — controller config polling interval, minimum 5 seconds (default: `30`)
 
 ## Environment variables
 
@@ -135,4 +137,5 @@ The `tapio-agent` binary accepts:
 - **Logging**: `tracing` crate, env-filtered via `RUST_LOG`
 - **Metrics**: `prometheus` crate on configurable port (default `:9090`) via a tiny local HTTP handler. Enable with `[metrics] enabled = true` in config. **Binds to `127.0.0.1` by default** — set `bind_address = "0.0.0.0"` to expose to the node network (e.g. for cluster Prometheus scrape). Families: `tapio_events_total`, `tapio_anomalies_total`, `tapio_lost_events_total`, `tapio_malformed_events_total`, `tapio_drain_cap_total`, `tapio_sink_writes_total`
 - **Metric prefix**: `tapio_`
+- **Controller config metric**: `tapio_config_fetch_total{result="applied|not_modified|error|rejected"}` counts controller-mode config poll outcomes.
 - **eBPF-side metrics**: the shared per-CPU `tapio_metrics` map currently exports only `METRIC_LOST_EVENTS` to userspace. Do not add counters to `metrics.h` unless userspace reads and exposes them or the counter is otherwise consumed.

@@ -2,10 +2,18 @@ use tapio_common::ebpf::*;
 use tapio_common::events::*;
 use tapio_common::occurrence::{Occurrence, Outcome, Severity};
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PmcThresholds {
     pub stall_pct_warning: f64,
     pub stall_pct_critical: f64,
     pub ipc_degradation: f64,
+}
+
+#[cfg(target_os = "linux")]
+pub struct PmcRuntimeConfig {
+    pub tapio_config: tapio_common::ebpf::TapioConfig,
+    pub carriers: super::ConfigCarriers,
+    pub thresholds_rx: tokio::sync::watch::Receiver<PmcThresholds>,
 }
 
 pub struct ClassifiedAnomaly {
@@ -239,8 +247,7 @@ pub async fn run(
     ebpf_path: &str,
     sink: &dyn tapio_common::sink::Sink,
     boot_offset_ns: u64,
-    tapio_config: tapio_common::ebpf::TapioConfig,
-    thresholds: PmcThresholds,
+    runtime: PmcRuntimeConfig,
     metrics: &crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
@@ -251,7 +258,12 @@ pub async fn run(
 
     tracing::info!(path = ebpf_path, "loading PMC eBPF program");
     let mut ebpf = super::load_ebpf(ebpf_path, "pmc")?;
-    if !super::write_tapio_config(&mut ebpf, "node_pmc", &tapio_config) {
+    if !super::init_and_register_tapio_config(
+        &mut ebpf,
+        "node_pmc",
+        &runtime.tapio_config,
+        &runtime.carriers,
+    ) {
         anyhow::bail!("node_pmc observer: failed to initialize tapio_config carrier");
     }
 
@@ -384,6 +396,7 @@ pub async fn run(
                         };
                         event_count += 1;
                         metrics.events_total.with_label_values(&["node_pmc"]).inc();
+                        let thresholds = *runtime.thresholds_rx.borrow();
                         if let Some(anomaly) = classify(&event, &thresholds) {
                             let occ = build_occurrence(&event, &anomaly, boot_offset_ns);
                             anomaly_count += 1;
@@ -466,6 +479,22 @@ mod tests {
     fn classify_normal_returns_none() {
         let evt = make_pmc(1000, 1500, 100); // IPC=1.5, stalls=10%
         assert!(classify(&evt, &default_thresholds()).is_none());
+    }
+
+    #[test]
+    fn watch_threshold_update_reaches_classify() {
+        let (tx, rx) = tokio::sync::watch::channel(default_thresholds());
+        let evt = make_pmc(1000, 1500, 250); // 25% stalls: warning under defaults.
+        assert!(classify(&evt, &rx.borrow()).is_some());
+
+        tx.send(PmcThresholds {
+            stall_pct_warning: 30.0,
+            stall_pct_critical: 60.0,
+            ipc_degradation: 1.0,
+        })
+        .unwrap();
+
+        assert!(classify(&evt, &rx.borrow()).is_none());
     }
 
     #[test]
