@@ -2,8 +2,6 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-#[cfg(target_os = "linux")]
-use std::time::{Duration, Instant};
 
 use tapio_wire::{
     DegradedReason, HeartbeatCounters, HeartbeatRequest, ObserverStatus, WIRE_VERSION,
@@ -13,7 +11,7 @@ const OBSERVERS: [(&str, u64); 4] = [
     ("network", tapio_common::ebpf::TAPIO_F_NETWORK),
     ("storage", tapio_common::ebpf::TAPIO_F_STORAGE),
     ("container", tapio_common::ebpf::TAPIO_F_CONTAINER),
-    ("node_pmc", tapio_common::ebpf::TAPIO_F_NODE_PMC),
+    ("node", tapio_common::ebpf::TAPIO_F_NODE_PMC),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,88 +87,7 @@ pub fn build_heartbeat(snapshot: HeartbeatSnapshot) -> HeartbeatRequest {
     }
 }
 
-#[cfg(target_os = "linux")]
-pub struct HeartbeatConfig {
-    pub endpoint: String,
-    pub agent_id: String,
-    pub node_name: String,
-    pub interval: Duration,
-    pub controller_mode: bool,
-    pub started_at: Instant,
-}
-
-#[cfg(target_os = "linux")]
-pub async fn heartbeat_loop(
-    config: HeartbeatConfig,
-    active_config: ActiveConfigIdentity,
-    metrics: crate::metrics::TapioMetrics,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
-) {
-    tracing::info!(
-        endpoint = %config.endpoint,
-        interval_secs = config.interval.as_secs(),
-        "heartbeat start"
-    );
-    let mut interval = tokio::time::interval(config.interval);
-    let mut controller_send_failures_total = 0;
-
-    loop {
-        tokio::select! {
-            _ = shutdown.changed() => {
-                tracing::info!("heartbeat stop");
-                break;
-            }
-            _ = interval.tick() => {
-                let applied = active_config.applied();
-                let heartbeat = build_heartbeat(HeartbeatSnapshot {
-                    agent_id: config.agent_id.clone(),
-                    node_name: config.node_name.clone(),
-                    uptime_seconds: config.started_at.elapsed().as_secs(),
-                    observers: observer_statuses(applied.as_ref()),
-                    counters: counters_from_metrics(&metrics, controller_send_failures_total),
-                    controller_mode: config.controller_mode,
-                    active_config: applied,
-                });
-
-                if let Err(error) = post_once(&config.endpoint, &heartbeat).await {
-                    controller_send_failures_total += 1;
-                    tracing::warn!(error = %error, "heartbeat failed");
-                }
-            }
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-async fn post_once(endpoint: &str, heartbeat: &HeartbeatRequest) -> Result<(), String> {
-    let url = heartbeat_url(endpoint);
-    let body = serde_json::to_vec(heartbeat).map_err(|e| format!("encode heartbeat: {e}"))?;
-    tokio::task::spawn_blocking(move || crate::httpc::post_json(&url, &body))
-        .await
-        .map_err(|e| format!("join heartbeat: {e}"))?
-}
-
-#[cfg(target_os = "linux")]
-fn heartbeat_url(endpoint: &str) -> String {
-    format!("{}/v1/agents/heartbeat", endpoint.trim_end_matches('/'))
-}
-
-#[cfg(target_os = "linux")]
-fn counters_from_metrics(
-    metrics: &crate::metrics::TapioMetrics,
-    controller_send_failures_total: u64,
-) -> HeartbeatCounters {
-    HeartbeatCounters {
-        events_total: metrics.events_total.total(),
-        malformed_events_total: metrics.malformed_events_total.total(),
-        lost_events_total: metrics.lost_events_total.total(),
-        correlation_drops_total: metrics.correlation_drops_total.total(),
-        sink_drops_total: metrics.sink_writes_total.total_where_label(1, "err"),
-        controller_send_failures_total,
-    }
-}
-
-fn observer_statuses(
+pub(crate) fn observer_statuses(
     active_config: Option<&AppliedConfigIdentity>,
 ) -> BTreeMap<String, ObserverStatus> {
     OBSERVERS
@@ -279,15 +196,6 @@ mod tests {
         assert_eq!(observers["network"], ObserverStatus::Running);
         assert_eq!(observers["storage"], ObserverStatus::Running);
         assert_eq!(observers["container"], ObserverStatus::Disabled);
-        assert_eq!(observers["node_pmc"], ObserverStatus::Disabled);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn heartbeat_url_appends_heartbeat_path() {
-        assert_eq!(
-            heartbeat_url("http://controller:8765/"),
-            "http://controller:8765/v1/agents/heartbeat"
-        );
+        assert_eq!(observers["node"], ObserverStatus::Disabled);
     }
 }
