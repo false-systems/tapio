@@ -4,6 +4,7 @@ mod heartbeat;
 mod httpc;
 mod metrics;
 mod observer;
+mod registration;
 mod sink;
 
 use std::io::{self, Write};
@@ -39,6 +40,7 @@ struct Args {
     http_endpoint: String,
     controller_endpoint: Option<String>,
     config_poll_interval: Duration,
+    heartbeat_interval: Duration,
 }
 
 impl Default for Args {
@@ -51,6 +53,7 @@ impl Default for Args {
             http_endpoint: "http://localhost:8765".into(),
             controller_endpoint: None,
             config_poll_interval: Duration::from_secs(30),
+            heartbeat_interval: Duration::from_secs(30),
         }
     }
 }
@@ -99,6 +102,16 @@ impl Args {
                         anyhow::bail!("--config-poll-interval must be at least 5 seconds");
                     }
                     args.config_poll_interval = Duration::from_secs(seconds);
+                }
+                "--heartbeat-interval" => {
+                    let value = next_arg(flag, inline_value, &mut iter)?;
+                    let seconds = value.parse::<u64>().map_err(|e| {
+                        anyhow::anyhow!("--heartbeat-interval must be seconds: {e}")
+                    })?;
+                    if seconds < 5 {
+                        anyhow::bail!("--heartbeat-interval must be at least 5 seconds");
+                    }
+                    args.heartbeat_interval = Duration::from_secs(seconds);
                 }
                 other => anyhow::bail!("unknown argument: {other}"),
             }
@@ -160,12 +173,13 @@ Usage: tapio-agent [OPTIONS]
 
 Options:
   --config <path>          TOML config file [default: /etc/tapio/tapio.toml]
-  --sink <name>            Output sink: stdout, file, http; otlp with --features otlp [default: stdout]
+  --sink <name>            Output sink: stdout, file, http, controller; otlp with --features otlp [default: stdout]
   --ebpf-dir <path>        Directory containing compiled eBPF .o files [default: /opt/tapio/ebpf]
   --data-dir <path>        Directory for file sink output [default: .tapio/occurrences]
   --http-endpoint <url>    Endpoint for the http sink [default: http://localhost:8765]
   --controller-endpoint <url> Controller config URL (http:// only)
-  --config-poll-interval <seconds> Controller config poll and heartbeat interval, minimum 5 [default: 30]
+  --config-poll-interval <seconds> Config poll interval, minimum 5 [default: 30]
+  --heartbeat-interval <seconds> Controller heartbeat interval, minimum 5 [default: 30]
   -h, --help               Print help
   -V, --version            Print version",
         env!("CARGO_PKG_VERSION")
@@ -176,6 +190,8 @@ Options:
 fn create_sinks(
     args: &Args,
     cfg: &config::Config,
+    controller_state: std::sync::Arc<controller::ControllerState>,
+    metrics: metrics::TapioMetrics,
 ) -> anyhow::Result<Vec<Box<dyn tapio_common::sink::Sink>>> {
     #[cfg(not(feature = "otlp"))]
     let _ = cfg;
@@ -190,6 +206,23 @@ fn create_sinks(
                 100,
                 std::time::Duration::from_secs(1),
             ))),
+            "controller" => {
+                let endpoint = args.controller_endpoint.clone().ok_or_else(|| {
+                    anyhow::anyhow!("--sink controller requires --controller-endpoint")
+                })?;
+                let controller = controller::ControllerConfig {
+                    endpoint,
+                    agent_id: agent_id(),
+                    node_name: node_name(),
+                    poll_interval: args.config_poll_interval,
+                    heartbeat_interval: args.heartbeat_interval,
+                };
+                sinks.push(Box::new(sink::controller::ControllerSink::new(
+                    controller,
+                    controller_state.clone(),
+                    metrics.clone(),
+                )));
+            }
             "otlp" => {
                 #[cfg(feature = "otlp")]
                 {
@@ -317,7 +350,13 @@ async fn main() -> anyhow::Result<()> {
     info!("tapio v4 — kernel eyes");
 
     let tapio_metrics = metrics::TapioMetrics::new()?;
-    let sinks = create_sinks(&args, &cfg)?;
+    let controller_state =
+        controller::ControllerState::new(if args.controller_endpoint.is_some() {
+            "0"
+        } else {
+            "1"
+        });
+    let sinks = create_sinks(&args, &cfg, controller_state.clone(), tapio_metrics.clone())?;
     let sink_names: Vec<&str> = sinks.iter().map(|s| s.name()).collect();
     info!(sinks = ?sink_names, "sinks configured");
 
@@ -422,32 +461,27 @@ async fn main() -> anyhow::Result<()> {
                 agent_id: controller_agent_id.clone(),
                 node_name: controller_node_name.clone(),
                 poll_interval: args.config_poll_interval,
+                heartbeat_interval: args.heartbeat_interval,
             };
-            let heartbeat = heartbeat::HeartbeatConfig {
-                endpoint,
-                agent_id: controller_agent_id,
-                node_name: controller_node_name,
-                interval: args.config_poll_interval,
-                controller_mode: true,
-                started_at: std::time::Instant::now(),
-            };
+            let registration_controller = controller.clone();
+            let registration_metrics = tapio_metrics.clone();
+            let registration_shutdown = shutdown_rx.clone();
+            let registration_state = controller_state.clone();
+            tasks.spawn(async move {
+                registration::registration_loop(
+                    registration_controller,
+                    registration_state,
+                    registration_metrics,
+                    registration_shutdown,
+                )
+                .await;
+            });
             let poll_carriers = carriers.clone();
             let poll_thresholds = pmc_thresholds_tx.clone();
             let poll_active_config = active_config.clone();
             let poll_metrics = tapio_metrics.clone();
+            let poll_state = controller_state.clone();
             let poll_shutdown = shutdown_rx.clone();
-            let heartbeat_active_config = active_config.clone();
-            let heartbeat_metrics = tapio_metrics.clone();
-            let heartbeat_shutdown = shutdown_rx.clone();
-            tasks.spawn(async move {
-                heartbeat::heartbeat_loop(
-                    heartbeat,
-                    heartbeat_active_config,
-                    heartbeat_metrics,
-                    heartbeat_shutdown,
-                )
-                .await;
-            });
             tasks.spawn(async move {
                 controller::poll_loop(
                     controller,
@@ -455,6 +489,7 @@ async fn main() -> anyhow::Result<()> {
                     poll_thresholds,
                     poll_active_config,
                     poll_metrics,
+                    poll_state,
                     poll_shutdown,
                 )
                 .await;
