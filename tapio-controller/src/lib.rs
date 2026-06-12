@@ -1517,7 +1517,7 @@ base: staging
 
     #[tokio::test]
     async fn hostile_05_empty_agent_id_or_node_name_returns_400_and_preserves_registry() {
-        for (field, mut hello) in [
+        for (field, hello) in [
             (
                 "agent_id",
                 HelloRequest {
@@ -1545,9 +1545,6 @@ base: staging
             assert_eq!(body["error"]["code"], "MISSING_FIELD");
             assert_eq!(body["error"]["message"], format!("{field} is required"));
             assert_eq!(state.agent_count(), 0);
-
-            hello.agent_id = "node/worker-1".into();
-            hello.node_name = "worker-1".into();
         }
 
         for (field, heartbeat) in [
