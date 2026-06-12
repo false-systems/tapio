@@ -20,6 +20,14 @@ Those two identities move together. A request with an unsupported
 The controller speaks exactly one version in v0 of the product. No
 multi-version negotiation or compatibility shim exists.
 
+The v0 controller protocol has five operations:
+
+- `POST /v1/agents/hello`
+- `GET /v1/agents/config`
+- `POST /v1/agents/heartbeat`
+- `POST /v1/events`
+- `GET /v1/status`
+
 ## Compatibility Policy
 
 Within `tapio-wire/v1`, changes are additive-only:
@@ -128,6 +136,16 @@ The `agent_id` and `node_name` query parameters are required for
 `GET /v1/agents/config`, but v0 config is cluster-wide. The controller may
 ignore those values for assignment until per-node or per-namespace config is
 added later.
+
+## Status Read Surface
+
+`GET /v1/status` is a read-only controller snapshot. It reports controller
+identity, start time, active config identity, event and batch counters,
+registered agents, last heartbeat age, echoed heartbeat counters, observer
+statuses, and per-agent event batch sequence state. It reports facts only:
+ages and counters, not health, stale, or degraded verdicts. It has no query
+parameters, no pagination, and inherits the v0 trust model with no auth until
+the shared auth work lands.
 
 ## Error Envelope
 
