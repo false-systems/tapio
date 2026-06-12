@@ -9,19 +9,26 @@ use tapio_wire::{
     DegradedReason, HeartbeatCounters, HeartbeatRequest, ObserverStatus, WIRE_VERSION,
 };
 
-const OBSERVERS: [&str; 4] = ["network", "storage", "container", "node_pmc"];
+const OBSERVERS: [(&str, u64); 4] = [
+    ("network", tapio_common::ebpf::TAPIO_F_NETWORK),
+    ("storage", tapio_common::ebpf::TAPIO_F_STORAGE),
+    ("container", tapio_common::ebpf::TAPIO_F_CONTAINER),
+    ("node_pmc", tapio_common::ebpf::TAPIO_F_NODE_PMC),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedConfigIdentity {
     pub version: String,
     pub hash: String,
+    pub flags: u64,
 }
 
 impl AppliedConfigIdentity {
-    pub fn new(version: impl Into<String>, hash: impl Into<String>) -> Self {
+    pub fn new(version: impl Into<String>, hash: impl Into<String>, flags: u64) -> Self {
         Self {
             version: version.into(),
             hash: hash.into(),
+            flags,
         }
     }
 }
@@ -119,7 +126,7 @@ pub async fn heartbeat_loop(
                     agent_id: config.agent_id.clone(),
                     node_name: config.node_name.clone(),
                     uptime_seconds: config.started_at.elapsed().as_secs(),
-                    observers: observer_statuses(applied.is_some()),
+                    observers: observer_statuses(applied.as_ref()),
                     counters: counters_from_metrics(&metrics, controller_send_failures_total),
                     controller_mode: config.controller_mode,
                     active_config: applied,
@@ -163,15 +170,18 @@ fn counters_from_metrics(
     }
 }
 
-fn observer_statuses(configured: bool) -> BTreeMap<String, ObserverStatus> {
-    let status = if configured {
-        ObserverStatus::Running
-    } else {
-        ObserverStatus::Disabled
-    };
+fn observer_statuses(
+    active_config: Option<&AppliedConfigIdentity>,
+) -> BTreeMap<String, ObserverStatus> {
     OBSERVERS
         .into_iter()
-        .map(|observer| (observer.to_string(), status.clone()))
+        .map(|(observer, flag)| {
+            let status = match active_config {
+                Some(config) if (config.flags & flag) != 0 => ObserverStatus::Running,
+                _ => ObserverStatus::Disabled,
+            };
+            (observer.to_string(), status)
+        })
         .collect()
 }
 
@@ -208,8 +218,12 @@ mod tests {
     #[test]
     fn heartbeat_builder_uses_applied_not_fetched_hash() {
         let active = ActiveConfigIdentity::default();
-        let fetched_but_not_applied = AppliedConfigIdentity::new("18", "sha256:fetched");
-        active.mark_applied(AppliedConfigIdentity::new("17", "sha256:applied"));
+        let fetched_but_not_applied = AppliedConfigIdentity::new("18", "sha256:fetched", 0);
+        active.mark_applied(AppliedConfigIdentity::new(
+            "17",
+            "sha256:applied",
+            tapio_common::ebpf::TAPIO_F_NETWORK,
+        ));
 
         let heartbeat = build_heartbeat(snapshot(true, active.applied()));
 
@@ -242,7 +256,7 @@ mod tests {
 
     #[test]
     fn unconfigured_observers_are_reported_disabled() {
-        let observers = observer_statuses(false);
+        let observers = observer_statuses(None);
 
         assert_eq!(observers.len(), 4);
         assert!(
@@ -253,15 +267,19 @@ mod tests {
     }
 
     #[test]
-    fn configured_observers_are_reported_running() {
-        let observers = observer_statuses(true);
+    fn configured_observers_are_reported_from_applied_flags() {
+        let active = AppliedConfigIdentity::new(
+            "1",
+            "sha256:active",
+            tapio_common::ebpf::TAPIO_F_NETWORK | tapio_common::ebpf::TAPIO_F_STORAGE,
+        );
+        let observers = observer_statuses(Some(&active));
 
         assert_eq!(observers.len(), 4);
-        assert!(
-            observers
-                .values()
-                .all(|status| *status == ObserverStatus::Running)
-        );
+        assert_eq!(observers["network"], ObserverStatus::Running);
+        assert_eq!(observers["storage"], ObserverStatus::Running);
+        assert_eq!(observers["container"], ObserverStatus::Disabled);
+        assert_eq!(observers["node_pmc"], ObserverStatus::Disabled);
     }
 
     #[cfg(target_os = "linux")]

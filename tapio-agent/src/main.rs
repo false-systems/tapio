@@ -165,7 +165,7 @@ Options:
   --data-dir <path>        Directory for file sink output [default: .tapio/occurrences]
   --http-endpoint <url>    Endpoint for the http sink [default: http://localhost:8765]
   --controller-endpoint <url> Controller config URL (http:// only)
-  --config-poll-interval <seconds> Config poll interval, minimum 5 [default: 30]
+  --config-poll-interval <seconds> Controller config poll and heartbeat interval, minimum 5 [default: 30]
   -h, --help               Print help
   -V, --version            Print version",
         env!("CARGO_PKG_VERSION")
@@ -391,7 +391,11 @@ async fn main() -> anyhow::Result<()> {
         let carriers = observer::ConfigCarriers::default();
         let active_config = heartbeat::ActiveConfigIdentity::default();
         if !controller_mode {
-            active_config.mark_applied(heartbeat::AppliedConfigIdentity::new("1", ""));
+            active_config.mark_applied(heartbeat::AppliedConfigIdentity::new(
+                "1",
+                "",
+                tapio_config.flags,
+            ));
         }
         let standalone_thresholds = observer::node_pmc::PmcThresholds {
             stall_pct_warning: cfg.thresholds.stall_pct_warning,

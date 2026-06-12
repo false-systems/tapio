@@ -74,11 +74,17 @@ Heartbeat payloads also carry `config_hash`. This field is additive in
 validates with an empty hash. A controller-managed agent sets it to the hash
 of the compiled config it has actually applied, not merely the config it last
 fetched. Empty hash means the agent has not applied controller config yet.
+In that unconfigured state, `config_version` is the string `"0"`.
 
 When a controller-mode agent has not applied any compiled config, it reports
 the degraded reason `unconfigured`. This is the first worked example of v1
 additive evolution: new senders add `config_hash`, older payloads remain
 accepted, and the protocol version does not change.
+
+Enums carried in `tapio-wire/v1` payloads must include a receiver-side
+catch-all variant. Adding an enum variant is sender-additive, but without a
+catch-all it is receiver-breaking because older controllers reject the whole
+payload during deserialization.
 
 ## Profile Input
 
