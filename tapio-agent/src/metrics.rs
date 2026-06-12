@@ -12,6 +12,8 @@ pub struct TapioMetrics {
     pub correlation_drops_total: CounterVec,
     pub drain_cap_total: CounterVec,
     pub sink_writes_total: CounterVec,
+    pub sink_drops_total: CounterVec,
+    pub controller_send_failures_total: CounterVec,
     pub config_fetch_total: CounterVec,
 }
 
@@ -67,6 +69,16 @@ impl TapioMetrics {
                 "Total sink write attempts by result",
                 &["sink", "result"],
             ),
+            sink_drops_total: CounterVec::new(
+                "tapio_sink_drops_total",
+                "Total sink events dropped by sink and reason",
+                &["sink", "reason"],
+            ),
+            controller_send_failures_total: CounterVec::new(
+                "tapio_controller_send_failures_total",
+                "Controller send failures by request kind",
+                &["kind"],
+            ),
             config_fetch_total: CounterVec::new(
                 "tapio_config_fetch_total",
                 "Controller config poll attempts by result",
@@ -85,6 +97,8 @@ impl TapioMetrics {
             &self.correlation_drops_total,
             &self.drain_cap_total,
             &self.sink_writes_total,
+            &self.sink_drops_total,
+            &self.controller_send_failures_total,
             &self.config_fetch_total,
         ] {
             counter.encode(&mut out);
@@ -114,28 +128,9 @@ impl CounterVec {
         }
     }
 
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub fn total(&self) -> u64 {
-        self.values
-            .lock()
-            .expect("metrics lock poisoned")
-            .values()
-            .sum()
-    }
-
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub fn total_where_label(&self, label_index: usize, label_value: &str) -> u64 {
-        self.values
-            .lock()
-            .expect("metrics lock poisoned")
-            .iter()
-            .filter(|(labels, _)| {
-                labels
-                    .get(label_index)
-                    .is_some_and(|value| value == label_value)
-            })
-            .map(|(_, value)| *value)
-            .sum()
+    pub fn sum(&self) -> u64 {
+        let values = self.values.lock().expect("metrics lock poisoned");
+        values.values().copied().sum()
     }
 
     fn encode(&self, out: &mut String) {
@@ -181,6 +176,12 @@ impl Counter {
     pub fn inc_by(&self, value: u64) {
         let mut values = self.values.lock().expect("metrics lock poisoned");
         *values.entry(self.label_values.clone()).or_insert(0) += value;
+    }
+
+    #[cfg(test)]
+    pub fn value(&self) -> u64 {
+        let values = self.values.lock().expect("metrics lock poisoned");
+        values.get(&self.label_values).copied().unwrap_or(0)
     }
 }
 
@@ -281,6 +282,8 @@ mod tests {
         assert!(buf.contains("tapio_anomalies_total"));
         assert!(buf.contains("tapio_malformed_events_total"));
         assert!(buf.contains("tapio_correlation_drops_total"));
+        assert!(buf.contains("tapio_sink_drops_total"));
+        assert!(buf.contains("tapio_controller_send_failures_total"));
     }
 
     #[test]
@@ -313,5 +316,17 @@ mod tests {
 
         let buf = m.encode();
         assert!(buf.contains("quote\\\"slash\\\\newline\\n"));
+    }
+
+    #[test]
+    fn counters_can_be_read() {
+        let m = TapioMetrics::new().expect("metrics registration");
+        let network = m.events_total.with_label_values(&["network"]);
+        let storage = m.events_total.with_label_values(&["storage"]);
+        network.inc_by(2);
+        storage.inc_by(3);
+
+        assert_eq!(network.value(), 2);
+        assert_eq!(m.events_total.sum(), 5);
     }
 }

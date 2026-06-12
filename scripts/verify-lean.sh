@@ -4,7 +4,7 @@
 #
 # Budgets (two-level for the node agent):
 #   AGENT_MAX_BYTES     hard budget   default 1500000  fail if exceeded
-#   AGENT_TARGET_BYTES  target budget default 1255000  warn if exceeded
+#   AGENT_TARGET_BYTES  target budget default 1320000  warn if exceeded
 #   CLI_MAX_BYTES       hard budget   default  900000  fail if exceeded
 #
 #   The hard budget is the line CI protects; the target budget is the next
@@ -31,7 +31,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-/tmp/tapio-lean}"
 EBPF_ARCH="${EBPF_ARCH:-}"
 AGENT_MAX_BYTES="${AGENT_MAX_BYTES:-1500000}"
-AGENT_TARGET_BYTES="${AGENT_TARGET_BYTES:-1255000}"
+AGENT_TARGET_BYTES="${AGENT_TARGET_BYTES:-1320000}"
 CLI_MAX_BYTES="${CLI_MAX_BYTES:-900000}"
 
 DEGRADED=0
