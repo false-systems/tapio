@@ -37,6 +37,7 @@ prometheus = { version = "0.13", default-features = false }
 
 # HTTP (metrics + health only)
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+tower = { version = "0.5", features = ["util"] }
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
