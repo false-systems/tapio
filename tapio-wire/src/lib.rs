@@ -155,6 +155,50 @@ pub struct EventBatchResponse {
     pub next_config_version: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusResponse {
+    pub wire_version: String,
+    pub controller_id: String,
+    pub started_at_unix: u64,
+    pub config: StatusConfig,
+    pub totals: StatusTotals,
+    pub agents: Vec<AgentStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusConfig {
+    pub version: String,
+    pub config_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusTotals {
+    pub accepted_events_total: u64,
+    pub rejected_events_total: u64,
+    pub batches_accepted_total: u64,
+    pub batches_rejected_total: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentStatus {
+    pub agent_id: String,
+    pub node_name: String,
+    pub tapio_version: String,
+    pub registered_at_unix: u64,
+    pub last_heartbeat_age_seconds: Option<u64>,
+    pub reported_config_version: String,
+    pub reported_counters: HeartbeatCounters,
+    pub observers: BTreeMap<String, ObserverStatus>,
+    pub sequence: SequenceStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SequenceStatus {
+    pub last_seen: Option<u64>,
+    pub gaps_total: u64,
+    pub regressions_total: u64,
+}
+
 impl HelloRequest {
     pub fn validate(&self) -> WireResult<()> {
         validate_wire_version(&self.wire_version)?;
@@ -322,6 +366,33 @@ impl EventBatchResponse {
     }
 }
 
+impl StatusResponse {
+    pub fn validate(&self) -> WireResult<()> {
+        validate_wire_version(&self.wire_version)?;
+        required("controller_id", &self.controller_id)?;
+        self.config.validate()?;
+        for agent in &self.agents {
+            agent.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl StatusConfig {
+    pub fn validate(&self) -> WireResult<()> {
+        Ok(())
+    }
+}
+
+impl AgentStatus {
+    pub fn validate(&self) -> WireResult<()> {
+        required("agent_id", &self.agent_id)?;
+        required("node_name", &self.node_name)?;
+        required("tapio_version", &self.tapio_version)?;
+        Ok(())
+    }
+}
+
 pub fn validate_wire_version(version: &str) -> WireResult<()> {
     if version == WIRE_VERSION {
         Ok(())
@@ -441,6 +512,46 @@ mod tests {
                     "dst_port": 50798,
                     "protocol": "tcp"
                 }),
+            }],
+        }
+    }
+
+    fn status() -> StatusResponse {
+        StatusResponse {
+            wire_version: WIRE_VERSION.into(),
+            controller_id: "tapio-controller/default".into(),
+            started_at_unix: 1_781_234_567,
+            config: StatusConfig {
+                version: "3".into(),
+                config_hash: "sha256:abc123".into(),
+            },
+            totals: StatusTotals {
+                accepted_events_total: 412,
+                rejected_events_total: 0,
+                batches_accepted_total: 9,
+                batches_rejected_total: 0,
+            },
+            agents: vec![AgentStatus {
+                agent_id: "node/worker-1".into(),
+                node_name: "worker-1".into(),
+                tapio_version: "4.0.0".into(),
+                registered_at_unix: 1_781_234_001,
+                last_heartbeat_age_seconds: Some(12),
+                reported_config_version: "3".into(),
+                reported_counters: HeartbeatCounters {
+                    events_total: 309,
+                    malformed_events_total: 0,
+                    lost_events_total: 0,
+                    correlation_drops_total: 0,
+                    sink_drops_total: 0,
+                    controller_send_failures_total: 0,
+                },
+                observers: BTreeMap::from([("network".into(), ObserverStatus::Running)]),
+                sequence: SequenceStatus {
+                    last_seen: Some(9),
+                    gaps_total: 1,
+                    regressions_total: 0,
+                },
             }],
         }
     }
@@ -677,5 +788,55 @@ mod tests {
         let mut batch = batch();
         batch.events[0].event_type = "app.database.slow".into();
         assert!(batch.validate(256).is_err());
+    }
+
+    #[test]
+    fn status_round_trip_and_validate() {
+        let json = serde_json::to_string(&status()).unwrap();
+        let parsed: StatusResponse = serde_json::from_str(&json).unwrap();
+        parsed.validate().unwrap();
+        assert_eq!(parsed.agents[0].sequence.gaps_total, 1);
+    }
+
+    #[test]
+    fn status_unknown_fields_are_ignored() {
+        let parsed: StatusResponse = serde_json::from_str(
+            r#"{
+              "wire_version":"tapio-wire/v1",
+              "controller_id":"tapio-controller/default",
+              "started_at_unix":1781234567,
+              "future_top_level":true,
+              "config":{"version":"3","config_hash":"sha256:abc123","future":true},
+              "totals":{
+                "accepted_events_total":412,
+                "rejected_events_total":0,
+                "batches_accepted_total":9,
+                "batches_rejected_total":0,
+                "future":12
+              },
+              "agents":[{
+                "agent_id":"node/worker-1",
+                "node_name":"worker-1",
+                "tapio_version":"4.0.0",
+                "registered_at_unix":1781234001,
+                "last_heartbeat_age_seconds":12,
+                "reported_config_version":"3",
+                "reported_counters":{
+                  "events_total":309,
+                  "malformed_events_total":0,
+                  "lost_events_total":0,
+                  "correlation_drops_total":0,
+                  "sink_drops_total":0,
+                  "controller_send_failures_total":0
+                },
+                "observers":{"network":"running"},
+                "sequence":{"last_seen":9,"gaps_total":1,"regressions_total":0},
+                "future_agent_field":"ignored"
+              }]
+            }"#,
+        )
+        .unwrap();
+        parsed.validate().unwrap();
+        assert_eq!(parsed.controller_id, "tapio-controller/default");
     }
 }
