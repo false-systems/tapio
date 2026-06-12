@@ -110,7 +110,7 @@ Exposes kernel context to AI agents via stdio JSON-RPC 2.0 transport (`tapio mcp
 - **Agent/controller dependency boundary** — tapio-controller dependencies must never enter tapio-agent through workspace defaults. `tapio-agent` must not depend on `kube`, `k8s-openapi`, `axum`, `hyper`, `tonic`, or `reqwest`; `scripts/check-agent-deps.sh` enforces this.
 - **Lean** — every dependency must justify its existence. Target: <8MB release binary, <10MB RSS
 - **Lean gate** — run `scripts/verify-lean.sh` before release-worthy changes. It checks fmt, clippy, tests, release binary budgets, dependency tree output + boundaries, eBPF object budgets, eBPF map budgets, and eBPF compilation when clang/libbpf headers are available. The agent uses a **two-level binary budget**: hard `AGENT_MAX_BYTES` (default `1500000`, fails) and target `AGENT_TARGET_BYTES` (default `1320000`, warns); `CLI_MAX_BYTES` (default `900000`) is a hard limit. The hard budget is the line CI protects; the target is the next ratchet point and currently includes the measured controller heartbeat reporting path plus the bounded controller event sink and registration client. Override budgets only when the increase is intentional and documented (never to hide a regression); ratchet `AGENT_TARGET_BYTES` down before `AGENT_MAX_BYTES`. eBPF budget increases must be explicit in `scripts/verify-lean.sh`. Reliability knobs: `TAPIO_LEAN_ALLOW_DEGRADED=1` accepts a PARTIAL run when a host limitation (e.g. no loopback bind) forces a required test to skip; `TAPIO_LEAN_REQUIRE_NET=1` forces network tests to run where loopback is available. See `docs/architecture.md` "Performance and Size Model".
-- **Runtime smoke** — run `scripts/smoke-ebpf-network.sh` on Linux/Lima for kernel behavior changes. It loads the real network observer, triggers a closed-port TCP connect, and checks that userspace emits a network occurrence with the exact destination port.
+- **Runtime smoke** — run `scripts/smoke-ebpf-network.sh` on Linux/Lima for kernel behavior changes. It loads the real network observer, triggers a closed-port TCP connect, and checks that userspace emits a network occurrence with the exact destination port. Run `scripts/smoke-agent-controller.sh` for agent/controller changes; it exercises hello, heartbeat, controller event shipping, outage behavior, controller recovery, and agent restart against the real binaries.
 
 ## Testing patterns
 
@@ -132,6 +132,8 @@ The `tapio-agent` binary accepts:
 
 - **`RUST_LOG`**: Controls log verbosity (e.g. `RUST_LOG=info` or `RUST_LOG=tapio_agent=debug`).
 - **`TAPIO_DATA_DIR`**: Override the CLI's default data directory (default: `.tapio/occurrences`).
+- **`TAPIO_NODE_NAME`**: Override the agent node name used in controller registration.
+- **`TAPIO_AGENT_ID`**: Override the agent identity used in controller registration.
 
 ## Observability
 
