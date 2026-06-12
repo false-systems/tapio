@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -19,15 +19,15 @@ const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(2);
 const MAX_RETRIES: usize = 3;
 
 pub struct ControllerSink {
-    tx: SyncSender<WorkerMessage>,
+    tx: Option<SyncSender<WorkerMessage>>,
     metrics: crate::metrics::TapioMetrics,
+    shutdown: Arc<AtomicBool>,
     worker: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 enum WorkerMessage {
     Event(WireEvent),
     Flush(SyncSender<Result<(), String>>),
-    Shutdown,
 }
 
 struct Worker {
@@ -35,7 +35,8 @@ struct Worker {
     state: Arc<ControllerState>,
     metrics: crate::metrics::TapioMetrics,
     rx: Receiver<WorkerMessage>,
-    sequence: AtomicU64,
+    shutdown: Arc<AtomicBool>,
+    sequence: u64,
     max_request_bytes: usize,
     buffer: Vec<WireEvent>,
 }
@@ -66,21 +67,30 @@ impl ControllerSink {
         let worker_metrics = metrics.clone();
         let worker_state = state.clone();
         let worker_controller = controller.clone();
-        let handle = thread::spawn(move || {
-            Worker {
-                controller: worker_controller,
-                state: worker_state,
-                metrics: worker_metrics,
-                rx,
-                sequence: AtomicU64::new(1),
-                max_request_bytes,
-                buffer: Vec::new(),
-            }
-            .run();
-        });
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = shutdown.clone();
+        let handle = match thread::Builder::new()
+            .name("controller-sink".into())
+            .spawn(move || {
+                Worker {
+                    controller: worker_controller,
+                    state: worker_state,
+                    metrics: worker_metrics,
+                    rx,
+                    shutdown: worker_shutdown,
+                    sequence: 1,
+                    max_request_bytes,
+                    buffer: Vec::new(),
+                }
+                .run();
+            }) {
+            Ok(handle) => handle,
+            Err(error) => panic!("spawn controller sink worker: {error}"),
+        };
         Self {
-            tx,
+            tx: Some(tx),
             metrics,
+            shutdown,
             worker: Mutex::new(Some(handle)),
         }
     }
@@ -88,16 +98,21 @@ impl ControllerSink {
 
 impl Sink for ControllerSink {
     fn send(&self, occurrence: &Occurrence) -> Result<(), SinkError> {
-        let event = occurrence_to_wire_event(occurrence, &self.metrics)?;
-        try_enqueue_controller_event(&self.tx, event, &self.metrics);
+        let event = occurrence_to_wire_event(occurrence)?;
+        if let Some(tx) = &self.tx {
+            try_enqueue_controller_event(tx, event, &self.metrics);
+        }
         Ok(())
     }
 
     fn flush(&self) -> Result<(), SinkError> {
+        let Some(tx) = &self.tx else {
+            return Err(SinkError::Send("controller sink worker stopped".into()));
+        };
         let (ack_tx, ack_rx) = sync_channel(1);
         let started = Instant::now();
         loop {
-            match self.tx.try_send(WorkerMessage::Flush(ack_tx.clone())) {
+            match tx.try_send(WorkerMessage::Flush(ack_tx.clone())) {
                 Ok(()) => break,
                 Err(TrySendError::Full(_)) if started.elapsed() < FLUSH_DEADLINE => {
                     thread::sleep(Duration::from_millis(10));
@@ -124,16 +139,8 @@ impl Sink for ControllerSink {
 
 impl Drop for ControllerSink {
     fn drop(&mut self) {
-        let started = Instant::now();
-        loop {
-            match self.tx.try_send(WorkerMessage::Shutdown) {
-                Ok(()) | Err(TrySendError::Disconnected(_)) => break,
-                Err(TrySendError::Full(_)) if started.elapsed() < FLUSH_DEADLINE => {
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(TrySendError::Full(_)) => break,
-            }
-        }
+        self.shutdown.store(true, Ordering::Relaxed);
+        self.tx.take();
         if let Ok(mut worker) = self.worker.lock()
             && let Some(handle) = worker.take()
         {
@@ -144,36 +151,54 @@ impl Drop for ControllerSink {
 
 impl Worker {
     fn run(&mut self) {
+        let mut next_flush_at: Option<Instant> = None;
         loop {
             let (send_interval_ms, max_batch_events) = self.state.batching();
             let flush_interval = Duration::from_millis(send_interval_ms);
-            match self.rx.recv_timeout(flush_interval) {
+
+            if self.shutdown.load(Ordering::Relaxed) {
+                self.flush_buffer_once(max_batch_events as usize).ok();
+                break;
+            }
+
+            let timeout = next_flush_at
+                .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+                .unwrap_or(flush_interval);
+
+            match self.rx.recv_timeout(timeout) {
                 Ok(WorkerMessage::Event(event)) => {
+                    if self.buffer.is_empty() {
+                        next_flush_at = Some(Instant::now() + flush_interval);
+                    }
                     self.buffer.push(event);
                     if self.buffer.len() >= max_batch_events as usize {
-                        let _ = self.flush_buffer(max_batch_events as usize);
+                        let _ = self.flush_buffer(max_batch_events as usize, MAX_RETRIES);
+                        next_flush_at = None;
                     }
                 }
                 Ok(WorkerMessage::Flush(ack)) => {
-                    let result = self.flush_buffer(max_batch_events as usize);
+                    let result = self.flush_buffer(max_batch_events as usize, MAX_RETRIES);
+                    next_flush_at = None;
                     let _ = ack.send(result);
                 }
-                Ok(WorkerMessage::Shutdown) => {
-                    self.flush_buffer(max_batch_events as usize).ok();
-                    break;
-                }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    self.flush_buffer(max_batch_events as usize).ok();
+                    self.flush_buffer(max_batch_events as usize, MAX_RETRIES)
+                        .ok();
+                    next_flush_at = None;
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    self.flush_buffer(max_batch_events as usize).ok();
+                    self.flush_buffer_once(max_batch_events as usize).ok();
                     break;
                 }
             }
         }
     }
 
-    fn flush_buffer(&mut self, max_batch_events: usize) -> Result<(), String> {
+    fn flush_buffer_once(&mut self, max_batch_events: usize) -> Result<(), String> {
+        self.flush_buffer(max_batch_events, 0)
+    }
+
+    fn flush_buffer(&mut self, max_batch_events: usize, max_retries: usize) -> Result<(), String> {
         if self.buffer.is_empty() {
             return Ok(());
         }
@@ -181,7 +206,7 @@ impl Worker {
         let batches = split_events_by_size(events, max_batch_events, self.max_request_bytes);
         let mut last_error = None;
         for batch in batches {
-            if let Err(error) = self.send_event_batch(batch) {
+            if let Err(error) = self.send_event_batch(batch, max_retries) {
                 last_error = Some(error);
             }
         }
@@ -191,8 +216,13 @@ impl Worker {
         }
     }
 
-    fn send_event_batch(&self, events: Vec<WireEvent>) -> Result<(), String> {
-        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+    fn send_event_batch(
+        &mut self,
+        events: Vec<WireEvent>,
+        max_retries: usize,
+    ) -> Result<(), String> {
+        let sequence = self.sequence;
+        self.sequence = self.sequence.saturating_add(1);
         let event_count = events.len() as u64;
         let request = EventBatchRequest {
             wire_version: WIRE_VERSION.into(),
@@ -209,7 +239,7 @@ impl Worker {
             serde_json::to_vec(&request).map_err(|e| format!("encode EventBatchRequest: {e}"))?;
 
         let mut backoff = INITIAL_RETRY_BACKOFF;
-        for attempt in 0..=MAX_RETRIES {
+        for attempt in 0..=max_retries {
             match crate::httpc::post_json_response(
                 &events_url(&self.controller),
                 &body,
@@ -236,16 +266,19 @@ impl Worker {
                     return Ok(());
                 }
                 Ok(response) => {
-                    if attempt == MAX_RETRIES {
+                    if attempt == max_retries {
                         return self
                             .drop_failed_batch(event_count, format!("HTTP {}", response.status));
                     }
                 }
                 Err(error) => {
-                    if attempt == MAX_RETRIES {
+                    if attempt == max_retries {
                         return self.drop_failed_batch(event_count, error);
                     }
                 }
+            }
+            if self.shutdown.load(Ordering::Relaxed) {
+                return self.drop_failed_batch(event_count, "shutdown retry skipped".into());
             }
             thread::sleep(backoff);
             backoff = (backoff * 2).min(MAX_RETRY_BACKOFF);
@@ -296,16 +329,13 @@ fn try_enqueue_controller_event(
     }
 }
 
-fn occurrence_to_wire_event(
-    occurrence: &Occurrence,
-    metrics: &crate::metrics::TapioMetrics,
-) -> Result<WireEvent, SinkError> {
+fn occurrence_to_wire_event(occurrence: &Occurrence) -> Result<WireEvent, SinkError> {
     let observer = observer_from_type(&occurrence.occurrence_type)?;
     Ok(WireEvent {
         event_type: occurrence.occurrence_type.clone(),
         timestamp_unix_nanos: timestamp_to_unix_nanos(&occurrence.timestamp),
         observer,
-        severity: map_severity(&occurrence.severity, metrics),
+        severity: map_severity(&occurrence.severity),
         facts: occurrence
             .data
             .clone()
@@ -325,31 +355,13 @@ fn observer_from_type(event_type: &str) -> Result<String, SinkError> {
     }
 }
 
-fn map_severity(severity: &Severity, _metrics: &crate::metrics::TapioMetrics) -> EventSeverity {
+fn map_severity(severity: &Severity) -> EventSeverity {
     match severity {
         Severity::Debug => EventSeverity::Debug,
         Severity::Info => EventSeverity::Info,
         Severity::Warning => EventSeverity::Warning,
         Severity::Error => EventSeverity::Error,
         Severity::Critical => EventSeverity::Critical,
-    }
-}
-
-#[cfg(test)]
-fn map_severity_str(value: &str, metrics: &crate::metrics::TapioMetrics) -> EventSeverity {
-    match value {
-        "debug" => EventSeverity::Debug,
-        "info" => EventSeverity::Info,
-        "warning" => EventSeverity::Warning,
-        "error" => EventSeverity::Error,
-        "critical" => EventSeverity::Critical,
-        _ => {
-            metrics
-                .malformed_events_total
-                .with_label_values(&["controller"])
-                .inc();
-            EventSeverity::Info
-        }
     }
 }
 
@@ -360,15 +372,19 @@ fn split_events_by_size(
 ) -> Vec<Vec<WireEvent>> {
     let mut batches = Vec::new();
     let mut current = Vec::new();
+    let mut current_len = empty_batch_len();
     for event in events {
-        let mut candidate = current.clone();
-        candidate.push(event.clone());
+        let event_len = serde_json::to_vec(&event)
+            .map(|bytes| bytes.len())
+            .unwrap_or(usize::MAX);
+        let candidate_len = batch_len_with_added_event(current_len, current.len(), event_len);
         if !current.is_empty()
-            && (candidate.len() > max_batch_events
-                || serialized_batch_len(&candidate) > max_request_bytes)
+            && (current.len() + 1 > max_batch_events || candidate_len > max_request_bytes)
         {
             batches.push(std::mem::take(&mut current));
+            current_len = empty_batch_len();
         }
+        current_len = batch_len_with_added_event(current_len, current.len(), event_len);
         current.push(event);
     }
     if !current.is_empty() {
@@ -377,18 +393,30 @@ fn split_events_by_size(
     batches
 }
 
-fn serialized_batch_len(events: &[WireEvent]) -> usize {
+fn empty_batch_len() -> usize {
     let request = EventBatchRequest {
         wire_version: WIRE_VERSION.into(),
         agent_id: "agent".into(),
         node_name: "node".into(),
         sequence: 1,
         sent_at_unix_nanos: 0,
-        events: events.to_vec(),
+        events: Vec::new(),
     };
     serde_json::to_vec(&request)
         .map(|bytes| bytes.len())
         .unwrap_or(usize::MAX)
+}
+
+fn batch_len_with_added_event(
+    current_len: usize,
+    current_events: usize,
+    event_len: usize,
+) -> usize {
+    current_len
+        .saturating_sub(1)
+        .saturating_add(usize::from(current_events > 0))
+        .saturating_add(event_len)
+        .saturating_add(1)
 }
 
 fn timestamp_to_unix_nanos(timestamp: &str) -> u64 {
@@ -398,7 +426,10 @@ fn timestamp_to_unix_nanos(timestamp: &str) -> u64 {
     let Some((year, month, day)) = parse_date(date) else {
         return 0;
     };
-    let time = time.strip_suffix("+00:00").unwrap_or(time);
+    let time = time
+        .strip_suffix("+00:00")
+        .or_else(|| time.strip_suffix('Z'))
+        .unwrap_or(time);
     let (clock, fraction) = time
         .split_once('.')
         .map_or((time, ""), |(clock, fraction)| (clock, fraction));
@@ -507,8 +538,7 @@ mod tests {
 
     #[test]
     fn occurrence_maps_to_wire_event() {
-        let metrics = crate::metrics::TapioMetrics::new().expect("metrics");
-        let event = occurrence_to_wire_event(&occurrence(), &metrics).expect("wire event");
+        let event = occurrence_to_wire_event(&occurrence()).expect("wire event");
         let json = serde_json::to_string(&event).expect("serialize wire event");
         let parsed: WireEvent = serde_json::from_str(&json).expect("deserialize wire event");
 
@@ -520,23 +550,10 @@ mod tests {
     }
 
     #[test]
-    fn unknown_severity_maps_to_info_and_counts_malformed() {
-        let metrics = crate::metrics::TapioMetrics::new().expect("metrics");
-        assert_eq!(map_severity_str("notice", &metrics), EventSeverity::Info);
-        assert_eq!(
-            metrics
-                .malformed_events_total
-                .with_label_values(&["controller"])
-                .value(),
-            1
-        );
-    }
-
-    #[test]
     fn queue_full_counts_drop() {
         let metrics = crate::metrics::TapioMetrics::new().expect("metrics");
         let (tx, _rx) = sync_channel(1);
-        let event = occurrence_to_wire_event(&occurrence(), &metrics).expect("wire event");
+        let event = occurrence_to_wire_event(&occurrence()).expect("wire event");
         try_enqueue_controller_event(&tx, event.clone(), &metrics);
         try_enqueue_controller_event(&tx, event, &metrics);
 
@@ -551,11 +568,58 @@ mod tests {
 
     #[test]
     fn batch_splitting_respects_event_limit_and_size() {
-        let metrics = crate::metrics::TapioMetrics::new().expect("metrics");
-        let event = occurrence_to_wire_event(&occurrence(), &metrics).expect("wire event");
+        let event = occurrence_to_wire_event(&occurrence()).expect("wire event");
         let batches = split_events_by_size(vec![event.clone(), event.clone(), event], 2, 800);
         assert!(batches.iter().all(|batch| batch.len() <= 2));
         assert!(batches.len() >= 2);
+    }
+
+    #[test]
+    fn steady_trickle_flushes_on_interval() {
+        let listener = match TcpListener::bind("127.0.0.1:0") {
+            Ok(listener) => listener,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::PermissionDenied
+                    && std::env::var_os("TAPIO_LEAN_REQUIRE_NET").is_none() =>
+            {
+                eprintln!("SKIP controller sink loopback test: loopback bind not permitted ({e})");
+                return;
+            }
+            Err(e) => panic!("loopback bind failed: {e}"),
+        };
+        let addr = listener.local_addr().expect("local addr");
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let request = read_http_request(&mut stream);
+            let request = String::from_utf8_lossy(&request);
+            let body = request.split("\r\n\r\n").nth(1).expect("request body");
+            let batch: EventBatchRequest = serde_json::from_str(body).expect("valid event batch");
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 78\r\n\r\n{\"wire_version\":\"tapio-wire/v1\",\"accepted\":5,\"rejected\":0,\"next_config_version\":\"1\"}",
+                )
+                .expect("write response");
+            batch.events.len()
+        });
+
+        let metrics = crate::metrics::TapioMetrics::new().expect("metrics");
+        let state = ControllerState::new("1");
+        state.set_batching(50, 100);
+        let sink = ControllerSink::with_limits(
+            controller(format!("http://{addr}")),
+            state,
+            metrics,
+            DEFAULT_QUEUE_CAPACITY,
+            DEFAULT_MAX_REQUEST_BYTES,
+        );
+        let occurrence = occurrence();
+        for _ in 0..5 {
+            sink.send(&occurrence).expect("enqueue event");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        let event_count = handle.join().expect("server");
+        assert_eq!(event_count, 5);
     }
 
     #[test]
@@ -584,17 +648,18 @@ mod tests {
         });
         let metrics = crate::metrics::TapioMetrics::new().expect("metrics");
         let state = ControllerState::new("1");
-        let worker = Worker {
+        let mut worker = Worker {
             controller: controller(format!("http://{addr}")),
             state,
             metrics: metrics.clone(),
             rx: sync_channel(1).1,
-            sequence: AtomicU64::new(1),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            sequence: 1,
             max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
             buffer: Vec::new(),
         };
-        let event = occurrence_to_wire_event(&occurrence(), &metrics).expect("wire event");
-        assert!(worker.send_event_batch(vec![event]).is_err());
+        let event = occurrence_to_wire_event(&occurrence()).expect("wire event");
+        assert!(worker.send_event_batch(vec![event], MAX_RETRIES).is_err());
         handle.join().expect("server");
         assert_eq!(
             metrics
@@ -653,20 +718,35 @@ mod tests {
             sequences
         });
         let metrics = crate::metrics::TapioMetrics::new().expect("metrics");
-        let worker = Worker {
+        let mut worker = Worker {
             controller: controller(format!("http://{addr}")),
             state: ControllerState::new("1"),
             metrics: metrics.clone(),
             rx: sync_channel(1).1,
-            sequence: AtomicU64::new(1),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            sequence: 1,
             max_request_bytes: DEFAULT_MAX_REQUEST_BYTES,
             buffer: Vec::new(),
         };
-        let event = occurrence_to_wire_event(&occurrence(), &metrics).expect("wire event");
-        assert!(worker.send_event_batch(vec![event.clone()]).is_err());
-        worker.send_event_batch(vec![event]).expect("second batch");
+        let event = occurrence_to_wire_event(&occurrence()).expect("wire event");
+        assert!(
+            worker
+                .send_event_batch(vec![event.clone()], MAX_RETRIES)
+                .is_err()
+        );
+        worker
+            .send_event_batch(vec![event], MAX_RETRIES)
+            .expect("second batch");
         let sequences = handle.join().expect("server");
         assert_eq!(sequences, vec![1, 1, 1, 1, 2]);
+    }
+
+    #[test]
+    fn timestamp_parser_accepts_z_without_fraction() {
+        assert_eq!(
+            timestamp_to_unix_nanos("2023-11-14T22:13:20Z"),
+            1_700_000_000_000_000_000
+        );
     }
 
     fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {

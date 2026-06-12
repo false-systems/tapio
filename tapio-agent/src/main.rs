@@ -351,9 +351,9 @@ async fn main() -> anyhow::Result<()> {
     let tapio_metrics = metrics::TapioMetrics::new()?;
     let controller_state =
         controller::ControllerState::new(if args.controller_endpoint.is_some() {
-            "0"
+            controller::CONTROLLER_MODE_INITIAL_CONFIG_VERSION
         } else {
-            "1"
+            controller::STANDALONE_INITIAL_CONFIG_VERSION
         });
     let sinks = create_sinks(&args, &cfg, controller_state.clone(), tapio_metrics.clone())?;
     let sink_names: Vec<&str> = sinks.iter().map(|s| s.name()).collect();
