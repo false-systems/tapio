@@ -33,6 +33,9 @@ struct Worker {
     state: Arc<ControllerState>,
     metrics: crate::metrics::TapioMetrics,
     rx: Receiver<WorkerMessage>,
+    // Process-local event batch sequence. This intentionally is not reset on
+    // controller re-hello; the controller treats hello as a fresh baseline for
+    // whatever sequence the continuing agent sends next.
     sequence: u64,
     max_request_bytes: usize,
     buffer: Vec<WireEvent>,

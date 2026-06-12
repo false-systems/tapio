@@ -170,7 +170,8 @@ Status code policy:
 
 | Status | Codes | Meaning |
 | --- | --- | --- |
-| `400` | `MISSING_FIELD`, `UNSUPPORTED_VERSION`, `INVALID_FIELD` | malformed request, unsupported wire version, or invalid wire field |
+| `400` | `MISSING_FIELD`, `UNSUPPORTED_VERSION`, `INVALID_FIELD`, `MALFORMED_JSON` | malformed request, unsupported wire version, invalid wire field, or invalid JSON body |
+| `413` | `PAYLOAD_TOO_LARGE` | request body exceeds the controller's explicit size limit |
 | `422` | `REASONING_FIELD` | semantically rejected event facts |
 | `404` | `UNKNOWN_ENDPOINT` | no Tapio controller route matched |
 | `500` | `INTERNAL_ERROR` | unexpected controller failure; body never carries internals |
