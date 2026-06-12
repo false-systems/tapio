@@ -145,7 +145,9 @@ registered agents, last heartbeat age, echoed heartbeat counters, observer
 statuses, and per-agent event batch sequence state. It reports facts only:
 ages and counters, not health, stale, or degraded verdicts. It has no query
 parameters, no pagination, and inherits the v0 trust model with no auth until
-the shared auth work lands.
+the shared auth work lands. A rejected event batch increments rejected batch
+counters but does not advance sequence tracking; if the agent moves on to the
+next sequence, the following accepted batch may also create a sequence gap.
 
 ## Error Envelope
 

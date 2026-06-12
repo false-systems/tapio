@@ -155,6 +155,7 @@ pub struct EventBatchResponse {
     pub next_config_version: String,
 }
 
+#[cfg(feature = "status")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub wire_version: String,
@@ -165,12 +166,14 @@ pub struct StatusResponse {
     pub agents: Vec<AgentStatus>,
 }
 
+#[cfg(feature = "status")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusConfig {
     pub version: String,
     pub config_hash: String,
 }
 
+#[cfg(feature = "status")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusTotals {
     pub accepted_events_total: u64,
@@ -179,6 +182,7 @@ pub struct StatusTotals {
     pub batches_rejected_total: u64,
 }
 
+#[cfg(feature = "status")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentStatus {
     pub agent_id: String,
@@ -192,6 +196,7 @@ pub struct AgentStatus {
     pub sequence: SequenceStatus,
 }
 
+#[cfg(feature = "status")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SequenceStatus {
     pub last_seen: Option<u64>,
@@ -366,6 +371,7 @@ impl EventBatchResponse {
     }
 }
 
+#[cfg(feature = "status")]
 impl StatusResponse {
     pub fn validate(&self) -> WireResult<()> {
         validate_wire_version(&self.wire_version)?;
@@ -378,12 +384,14 @@ impl StatusResponse {
     }
 }
 
+#[cfg(feature = "status")]
 impl StatusConfig {
     pub fn validate(&self) -> WireResult<()> {
-        Ok(())
+        required("config.version", &self.version)
     }
 }
 
+#[cfg(feature = "status")]
 impl AgentStatus {
     pub fn validate(&self) -> WireResult<()> {
         required("agent_id", &self.agent_id)?;
@@ -516,6 +524,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "status")]
     fn status() -> StatusResponse {
         StatusResponse {
             wire_version: WIRE_VERSION.into(),
@@ -790,6 +799,7 @@ mod tests {
         assert!(batch.validate(256).is_err());
     }
 
+    #[cfg(feature = "status")]
     #[test]
     fn status_round_trip_and_validate() {
         let json = serde_json::to_string(&status()).unwrap();
@@ -798,6 +808,7 @@ mod tests {
         assert_eq!(parsed.agents[0].sequence.gaps_total, 1);
     }
 
+    #[cfg(feature = "status")]
     #[test]
     fn status_unknown_fields_are_ignored() {
         let parsed: StatusResponse = serde_json::from_str(
