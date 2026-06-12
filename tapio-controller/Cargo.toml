@@ -10,7 +10,7 @@ name = "tapio-controller"
 path = "src/main.rs"
 
 [dependencies]
-tapio-wire = { workspace = true }
+tapio-wire = { workspace = true, features = ["status"] }
 tapio-profile = { workspace = true }
 anyhow = { workspace = true }
 axum = { workspace = true }

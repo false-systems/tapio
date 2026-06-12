@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
@@ -13,11 +14,14 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tapio_profile::{BuiltinSet, EvidenceProfile, ProfileError, compile, validate};
 use tapio_wire::{
-    BatchingConfig, CompiledConfig, ConfigResponse, EventBatchRequest, EventBatchResponse,
-    HeartbeatRequest, HeartbeatResponse, HelloRequest, HelloResponse, WIRE_VERSION, WireError,
+    AgentStatus, BatchingConfig, CompiledConfig, ConfigResponse, EventBatchRequest,
+    EventBatchResponse, HeartbeatCounters, HeartbeatRequest, HeartbeatResponse, HelloRequest,
+    HelloResponse, SequenceStatus, StatusConfig, StatusResponse, StatusTotals, WIRE_VERSION,
+    WireError,
 };
 
 const CONTROLLER_ID: &str = "tapio-controller/default";
+const MAX_REQUEST_BODY_BYTES: usize = 262_144;
 const DEFAULT_PROFILE_YAML: &str = r#"
 apiVersion: tapio.false.systems/v0
 kind: EvidenceProfile
@@ -87,10 +91,14 @@ pub struct ControllerState {
 #[derive(Debug)]
 struct InnerState {
     config: ConfigResponse,
+    started_at: SystemTime,
     agents: BTreeMap<String, RegisteredAgent>,
     last_heartbeats: BTreeMap<String, StoredHeartbeat>,
+    sequences: BTreeMap<String, SequenceTracking>,
     accepted_events_total: u64,
     rejected_events_total: u64,
+    batches_accepted_total: u64,
+    batches_rejected_total: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +111,13 @@ pub struct RegisteredAgent {
 pub struct StoredHeartbeat {
     pub heartbeat: HeartbeatRequest,
     pub seen_at: SystemTime,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SequenceTracking {
+    last_seen: Option<u64>,
+    gaps_total: u64,
+    regressions_total: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,10 +197,14 @@ impl ControllerState {
         Self {
             inner: Arc::new(Mutex::new(InnerState {
                 config,
+                started_at: SystemTime::now(),
                 agents: BTreeMap::new(),
                 last_heartbeats: BTreeMap::new(),
+                sequences: BTreeMap::new(),
                 accepted_events_total: 0,
                 rejected_events_total: 0,
+                batches_accepted_total: 0,
+                batches_rejected_total: 0,
             })),
         }
     }
@@ -199,13 +218,17 @@ impl ControllerState {
             tapio_version = %hello.tapio_version,
             "agent registered"
         );
+        let agent_id = hello.agent_id.clone();
         inner.agents.insert(
-            hello.agent_id.clone(),
+            agent_id.clone(),
             RegisteredAgent {
                 hello,
                 registered_at: SystemTime::now(),
             },
         );
+        inner
+            .sequences
+            .insert(agent_id, SequenceTracking::default());
         // Derive the response from the active config so the batching limits we
         // advertise here match what /v1/events enforces.
         Ok(HelloResponse::from_config(CONTROLLER_ID, &inner.config))
@@ -257,8 +280,36 @@ impl ControllerState {
         match batch.validate(max_batch_events) {
             Ok(()) => {
                 let accepted = batch.events.len() as u64;
-                let mut inner = self.inner.lock().expect("controller state lock poisoned");
-                inner.accepted_events_total += accepted;
+                let next_config_version = {
+                    let mut inner = self.inner.lock().expect("controller state lock poisoned");
+                    inner.accepted_events_total += accepted;
+                    inner.batches_accepted_total += 1;
+                    update_sequence_tracking(&mut inner, &batch.agent_id, batch.sequence);
+                    inner.config.version.clone()
+                };
+
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    for event in &batch.events {
+                        match serde_json::to_string(event) {
+                            Ok(event_json) => {
+                                tracing::trace!(
+                                    agent_id = %batch.agent_id,
+                                    sequence = batch.sequence,
+                                    event = %event_json,
+                                    "event accepted"
+                                );
+                            }
+                            Err(error) => {
+                                tracing::trace!(
+                                    agent_id = %batch.agent_id,
+                                    sequence = batch.sequence,
+                                    error = %error,
+                                    "event trace serialization failed"
+                                );
+                            }
+                        }
+                    }
+                }
                 tracing::debug!(
                     agent_id = %batch.agent_id,
                     sequence = batch.sequence,
@@ -269,13 +320,14 @@ impl ControllerState {
                     wire_version: tapio_wire::WIRE_VERSION.into(),
                     accepted,
                     rejected: 0,
-                    next_config_version: inner.config.version.clone(),
+                    next_config_version,
                 })
             }
             Err(error) => {
                 let rejected = batch.events.len() as u64;
                 let mut inner = self.inner.lock().expect("controller state lock poisoned");
                 inner.rejected_events_total += rejected;
+                inner.batches_rejected_total += 1;
                 tracing::warn!(
                     agent_id = %batch.agent_id,
                     rejected,
@@ -343,6 +395,97 @@ impl ControllerState {
             rejected: inner.rejected_events_total,
         }
     }
+
+    pub fn status(&self) -> StatusResponse {
+        let now = SystemTime::now();
+        let inner = self.inner.lock().expect("controller state lock poisoned");
+        let agents = inner
+            .agents
+            .iter()
+            .map(|(agent_id, registered)| {
+                let heartbeat = inner.last_heartbeats.get(agent_id);
+                let sequence = inner.sequences.get(agent_id).cloned().unwrap_or_default();
+                AgentStatus {
+                    agent_id: registered.hello.agent_id.clone(),
+                    node_name: registered.hello.node_name.clone(),
+                    tapio_version: registered.hello.tapio_version.clone(),
+                    registered_at_unix: unix_seconds(registered.registered_at),
+                    last_heartbeat_age_seconds: heartbeat.map(|stored| {
+                        now.duration_since(stored.seen_at)
+                            .map(|age| age.as_secs())
+                            .unwrap_or(0)
+                    }),
+                    reported_config_version: heartbeat
+                        .map(|stored| stored.heartbeat.config_version.clone())
+                        .unwrap_or_default(),
+                    reported_counters: heartbeat
+                        .map(|stored| stored.heartbeat.counters.clone())
+                        .unwrap_or_else(zero_heartbeat_counters),
+                    observers: heartbeat
+                        .map(|stored| stored.heartbeat.observers.clone())
+                        .unwrap_or_default(),
+                    sequence: SequenceStatus {
+                        last_seen: sequence.last_seen,
+                        gaps_total: sequence.gaps_total,
+                        regressions_total: sequence.regressions_total,
+                    },
+                }
+            })
+            .collect();
+
+        StatusResponse {
+            wire_version: WIRE_VERSION.into(),
+            controller_id: CONTROLLER_ID.into(),
+            started_at_unix: unix_seconds(inner.started_at),
+            config: StatusConfig {
+                version: inner.config.version.clone(),
+                config_hash: inner.config.config_hash.clone(),
+            },
+            totals: StatusTotals {
+                accepted_events_total: inner.accepted_events_total,
+                rejected_events_total: inner.rejected_events_total,
+                batches_accepted_total: inner.batches_accepted_total,
+                batches_rejected_total: inner.batches_rejected_total,
+            },
+            agents,
+        }
+    }
+}
+
+fn update_sequence_tracking(inner: &mut InnerState, agent_id: &str, sequence: u64) {
+    let tracking = inner.sequences.entry(agent_id.to_string()).or_default();
+    match tracking.last_seen {
+        None => tracking.last_seen = Some(sequence),
+        Some(last_seen) if sequence == last_seen.saturating_add(1) => {
+            tracking.last_seen = Some(sequence);
+        }
+        Some(last_seen) if sequence > last_seen.saturating_add(1) => {
+            tracking.gaps_total = tracking
+                .gaps_total
+                .saturating_add(sequence.saturating_sub(last_seen.saturating_add(1)));
+            tracking.last_seen = Some(sequence);
+        }
+        Some(_) => {
+            tracking.regressions_total = tracking.regressions_total.saturating_add(1);
+        }
+    }
+}
+
+fn zero_heartbeat_counters() -> HeartbeatCounters {
+    HeartbeatCounters {
+        events_total: 0,
+        malformed_events_total: 0,
+        lost_events_total: 0,
+        correlation_drops_total: 0,
+        sink_drops_total: 0,
+        controller_send_failures_total: 0,
+    }
+}
+
+fn unix_seconds(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 pub fn router(state: ControllerState) -> Router {
@@ -351,7 +494,9 @@ pub fn router(state: ControllerState) -> Router {
         .route("/v1/agents/config", get(config))
         .route("/v1/agents/heartbeat", post(heartbeat))
         .route("/v1/events", post(events))
+        .route("/v1/status", get(status))
         .fallback(not_found)
+        .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .with_state(state)
 }
 
@@ -395,6 +540,10 @@ async fn events(
     Json(req): Json<EventBatchRequest>,
 ) -> Result<Json<EventBatchResponse>, ApiError> {
     Ok(Json(state.record_event_batch(req)?))
+}
+
+async fn status(State(state): State<ControllerState>) -> Json<StatusResponse> {
+    Json(state.status())
 }
 
 async fn not_found() -> impl IntoResponse {
@@ -554,6 +703,22 @@ mod tests {
                 facts: serde_json::json!({"dst_port": 50798, "protocol": "tcp"}),
             }],
         }
+    }
+
+    fn event_batch_with_sequence(sequence: u64) -> EventBatchRequest {
+        EventBatchRequest {
+            sequence,
+            ..event_batch_req()
+        }
+    }
+
+    fn status_agent(status: &StatusResponse, agent_id: &str) -> AgentStatus {
+        status
+            .agents
+            .iter()
+            .find(|agent| agent.agent_id == agent_id)
+            .cloned()
+            .unwrap()
     }
 
     fn write_temp_profile(name: &str, content: &str) -> PathBuf {
@@ -806,6 +971,150 @@ base: staging
         );
     }
 
+    #[test]
+    fn status_reflects_hello_heartbeat_and_batch() {
+        let state = ControllerState::default();
+        state.register_agent(hello_req()).unwrap();
+        state.record_heartbeat(heartbeat_req()).unwrap();
+        state.record_event_batch(event_batch_req()).unwrap();
+
+        let status = state.status();
+        status.validate().unwrap();
+        assert_eq!(status.controller_id, CONTROLLER_ID);
+        assert_eq!(status.config.version, "1");
+        assert_eq!(status.totals.accepted_events_total, 1);
+        assert_eq!(status.totals.rejected_events_total, 0);
+        assert_eq!(status.totals.batches_accepted_total, 1);
+        assert_eq!(status.totals.batches_rejected_total, 0);
+
+        let agent = status_agent(&status, "node/worker-1");
+        assert_eq!(agent.node_name, "worker-1");
+        assert_eq!(agent.tapio_version, "4.0.0");
+        assert_eq!(agent.reported_config_version, "1");
+        assert_eq!(agent.reported_counters.events_total, 10);
+        assert_eq!(agent.observers["network"], ObserverStatus::Running);
+        assert_eq!(agent.sequence.last_seen, Some(1));
+        assert_eq!(agent.sequence.gaps_total, 0);
+        assert_eq!(agent.sequence.regressions_total, 0);
+        assert!(agent.last_heartbeat_age_seconds.is_some());
+    }
+
+    #[test]
+    fn status_reports_none_age_for_agent_without_heartbeat() {
+        let state = ControllerState::default();
+        state.register_agent(hello_req()).unwrap();
+
+        let status = state.status();
+        let agent = status_agent(&status, "node/worker-1");
+        assert_eq!(agent.last_heartbeat_age_seconds, None);
+        assert_eq!(agent.reported_config_version, "");
+        assert_eq!(agent.reported_counters.events_total, 0);
+        assert!(agent.observers.is_empty());
+    }
+
+    #[test]
+    fn sequence_tracking_counts_gaps_and_regressions() {
+        let state = ControllerState::default();
+        state.register_agent(hello_req()).unwrap();
+
+        for sequence in [1, 2, 3] {
+            state
+                .record_event_batch(event_batch_with_sequence(sequence))
+                .unwrap();
+        }
+        let agent = status_agent(&state.status(), "node/worker-1");
+        assert_eq!(agent.sequence.last_seen, Some(3));
+        assert_eq!(agent.sequence.gaps_total, 0);
+        assert_eq!(agent.sequence.regressions_total, 0);
+
+        state
+            .record_event_batch(event_batch_with_sequence(5))
+            .unwrap();
+        let agent = status_agent(&state.status(), "node/worker-1");
+        assert_eq!(agent.sequence.last_seen, Some(5));
+        assert_eq!(agent.sequence.gaps_total, 1);
+        assert_eq!(agent.sequence.regressions_total, 0);
+
+        state
+            .record_event_batch(event_batch_with_sequence(4))
+            .unwrap();
+        let agent = status_agent(&state.status(), "node/worker-1");
+        assert_eq!(agent.sequence.last_seen, Some(5));
+        assert_eq!(agent.sequence.gaps_total, 1);
+        assert_eq!(agent.sequence.regressions_total, 1);
+    }
+
+    #[test]
+    fn sequence_gap_counts_missing_batches() {
+        let state = ControllerState::default();
+        state.register_agent(hello_req()).unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(1))
+            .unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(2))
+            .unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(5))
+            .unwrap();
+
+        let agent = status_agent(&state.status(), "node/worker-1");
+        assert_eq!(agent.sequence.last_seen, Some(5));
+        assert_eq!(agent.sequence.gaps_total, 2);
+    }
+
+    #[test]
+    fn hello_resets_sequence_tracking_and_first_batch_sets_baseline() {
+        let state = ControllerState::default();
+        state.register_agent(hello_req()).unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(1))
+            .unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(5))
+            .unwrap();
+        assert_eq!(
+            status_agent(&state.status(), "node/worker-1")
+                .sequence
+                .gaps_total,
+            3
+        );
+
+        state.register_agent(hello_req()).unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(1))
+            .unwrap();
+        let agent = status_agent(&state.status(), "node/worker-1");
+        assert_eq!(agent.sequence.last_seen, Some(1));
+        assert_eq!(agent.sequence.gaps_total, 0);
+        assert_eq!(agent.sequence.regressions_total, 0);
+
+        state.register_agent(hello_req()).unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(47))
+            .unwrap();
+        let agent = status_agent(&state.status(), "node/worker-1");
+        assert_eq!(agent.sequence.last_seen, Some(47));
+        assert_eq!(agent.sequence.gaps_total, 0);
+        assert_eq!(agent.sequence.regressions_total, 0);
+    }
+
+    #[test]
+    fn status_counts_accepted_and_rejected_batches() {
+        let state = ControllerState::default();
+        state.record_event_batch(event_batch_req()).unwrap();
+
+        let mut invalid = event_batch_req();
+        invalid.events[0].facts = serde_json::json!({"possible_causes":["guess"]});
+        assert!(state.record_event_batch(invalid).is_err());
+
+        let status = state.status();
+        assert_eq!(status.totals.accepted_events_total, 1);
+        assert_eq!(status.totals.rejected_events_total, 1);
+        assert_eq!(status.totals.batches_accepted_total, 1);
+        assert_eq!(status.totals.batches_rejected_total, 1);
+    }
+
     async fn http_response(request: &str) -> Option<String> {
         http_response_with_state(request, ControllerState::default()).await
     }
@@ -965,5 +1274,41 @@ base: staging
         assert!(response.starts_with("HTTP/1.1 200"));
         let body = response_json(&response);
         assert_eq!(body["config_hash"], expected.config_hash);
+    }
+
+    #[tokio::test]
+    async fn status_endpoint_returns_state_snapshot() {
+        let state = ControllerState::default();
+        state.register_agent(hello_req()).unwrap();
+        state.record_heartbeat(heartbeat_req()).unwrap();
+        state.record_event_batch(event_batch_req()).unwrap();
+        let Some(response) = http_response_with_state(
+            "GET /v1/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            state,
+        )
+        .await
+        else {
+            return;
+        };
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        let body = response_json(&response);
+        assert_eq!(body["wire_version"], WIRE_VERSION);
+        assert_eq!(body["totals"]["accepted_events_total"], 1);
+        assert_eq!(body["agents"][0]["agent_id"], "node/worker-1");
+    }
+
+    #[tokio::test]
+    async fn event_body_over_explicit_limit_returns_413() {
+        let body = "{".to_string() + &" ".repeat(MAX_REQUEST_BODY_BYTES + 1);
+        let request = format!(
+            "POST /v1/events HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let Some(response) = http_response(&request).await else {
+            return;
+        };
+        assert!(response.starts_with("HTTP/1.1 413"));
     }
 }
