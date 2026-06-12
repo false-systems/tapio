@@ -11,6 +11,9 @@ use std::io::{self, Write};
 use std::time::Duration;
 use tracing::info;
 
+const UNCONFIGURED_CONFIG_VERSION: &str = "0";
+const STANDALONE_CONFIG_VERSION: &str = "1";
+
 /// Stderr writer that silently swallows broken pipe errors.
 /// Prevents panic=abort from killing the agent when piped to `head`, `grep`, etc.
 struct BrokenPipeGuard;
@@ -350,12 +353,12 @@ async fn main() -> anyhow::Result<()> {
     info!("tapio v4 — kernel eyes");
 
     let tapio_metrics = metrics::TapioMetrics::new()?;
-    let controller_state =
-        controller::ControllerState::new(if args.controller_endpoint.is_some() {
-            "0"
-        } else {
-            "1"
-        });
+    let initial_config_version = if args.controller_endpoint.is_some() {
+        UNCONFIGURED_CONFIG_VERSION
+    } else {
+        STANDALONE_CONFIG_VERSION
+    };
+    let controller_state = controller::ControllerState::new(initial_config_version);
     let sinks = create_sinks(&args, &cfg, controller_state.clone(), tapio_metrics.clone())?;
     let sink_names: Vec<&str> = sinks.iter().map(|s| s.name()).collect();
     info!(sinks = ?sink_names, "sinks configured");
@@ -431,7 +434,7 @@ async fn main() -> anyhow::Result<()> {
         let active_config = heartbeat::ActiveConfigIdentity::default();
         if !controller_mode {
             active_config.mark_applied(heartbeat::AppliedConfigIdentity::new(
-                "1",
+                STANDALONE_CONFIG_VERSION,
                 "",
                 tapio_config.flags,
             ));
@@ -467,10 +470,12 @@ async fn main() -> anyhow::Result<()> {
             let registration_metrics = tapio_metrics.clone();
             let registration_shutdown = shutdown_rx.clone();
             let registration_state = controller_state.clone();
+            let registration_active_config = active_config.clone();
             tasks.spawn(async move {
                 registration::registration_loop(
                     registration_controller,
                     registration_state,
+                    registration_active_config,
                     registration_metrics,
                     registration_shutdown,
                 )

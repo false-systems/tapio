@@ -128,30 +128,6 @@ impl CounterVec {
         }
     }
 
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub fn total(&self) -> u64 {
-        self.values
-            .lock()
-            .expect("metrics lock poisoned")
-            .values()
-            .sum()
-    }
-
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub fn total_where_label(&self, label_index: usize, label_value: &str) -> u64 {
-        self.values
-            .lock()
-            .expect("metrics lock poisoned")
-            .iter()
-            .filter(|(labels, _)| {
-                labels
-                    .get(label_index)
-                    .is_some_and(|value| value == label_value)
-            })
-            .map(|(_, value)| *value)
-            .sum()
-    }
-
     pub fn sum(&self) -> u64 {
         let values = self.values.lock().expect("metrics lock poisoned");
         values.values().copied().sum()
