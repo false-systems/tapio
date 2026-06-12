@@ -47,7 +47,7 @@ Production Kubernetes mode should eventually bind agent identity to service acco
 
 ## Failure Behavior
 
-Controller outage must not stop kernel observation or ring buffer consumption. Agents keep the last known valid config, or safe local defaults if no config has ever been fetched. Event batching queues must be bounded; overflow and send failures must increment visible counters such as `controller_send_failures_total` and `sink_drops_total`.
+Controller outage must not stop kernel observation or ring buffer consumption. Agents keep the last known valid config, or safe local defaults if no config has ever been fetched. Event batching queues must be bounded; overflow and send failures must be visible. In v0, sink failures are exposed through local metrics and heartbeat counters; heartbeat send failures are logged locally and reported as `controller_send_failures_total` in later heartbeats once delivery resumes.
 
 Heartbeats include evidence-loss counters, degraded reasons, active config
 generation, and active config hash. They do not include event payloads or

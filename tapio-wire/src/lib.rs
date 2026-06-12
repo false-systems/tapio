@@ -96,6 +96,8 @@ pub enum ObserverStatus {
 #[serde(rename_all = "snake_case")]
 pub enum DegradedReason {
     Unconfigured,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -621,6 +623,33 @@ mod tests {
         parsed.validate().unwrap();
         assert_eq!(parsed.config_hash, "");
         assert!(parsed.degraded_reasons.is_empty());
+    }
+
+    #[test]
+    fn heartbeat_unknown_degraded_reason_is_forward_compatible() {
+        let parsed: HeartbeatRequest = serde_json::from_str(
+            r#"{
+              "wire_version":"tapio-wire/v1",
+              "agent_id":"node/worker-1",
+              "node_name":"worker-1",
+              "config_version":"1",
+              "config_hash":"sha256:abc123",
+              "uptime_seconds":1234,
+              "observers":{"network":"running"},
+              "counters":{
+                "events_total":1,
+                "malformed_events_total":0,
+                "lost_events_total":0,
+                "correlation_drops_total":0,
+                "sink_drops_total":0,
+                "controller_send_failures_total":0
+              },
+              "degraded_reasons":["lost_events"]
+            }"#,
+        )
+        .unwrap();
+        parsed.validate().unwrap();
+        assert_eq!(parsed.degraded_reasons, vec![DegradedReason::Unknown]);
     }
 
     #[test]
