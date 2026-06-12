@@ -132,6 +132,8 @@ The `tapio-agent` binary accepts:
 
 - **`RUST_LOG`**: Controls log verbosity (e.g. `RUST_LOG=info` or `RUST_LOG=tapio_agent=debug`).
 - **`TAPIO_DATA_DIR`**: Override the CLI's default data directory (default: `.tapio/occurrences`).
+- **`TAPIO_NODE_NAME`**: Override the agent node name used in controller registration.
+- **`TAPIO_AGENT_ID`**: Override the agent identity used in controller registration.
 
 ## Observability
 
