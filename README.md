@@ -132,9 +132,10 @@ On Linux or inside Lima, also run:
 
 ```bash
 scripts/smoke-ebpf-network.sh
+scripts/smoke-agent-controller.sh
 ```
 
-That smoke test builds the agent, loads real eBPF programs, triggers a TCP connection to a closed localhost port, and checks that Tapio records a network occurrence with the exact destination port.
+The eBPF smoke test builds the agent, loads real eBPF programs, triggers a TCP connection to a closed localhost port, and checks that Tapio records a network occurrence with the exact destination port. The agent/controller smoke test builds the agent and controller, then verifies hello, heartbeat, event payload delivery through `/v1/status` and trace logs, controller outage behavior, recovery, and agent restart.
 
 ## Agent
 
