@@ -280,27 +280,33 @@ impl ControllerState {
         match batch.validate(max_batch_events) {
             Ok(()) => {
                 let accepted = batch.events.len() as u64;
-                let mut inner = self.inner.lock().expect("controller state lock poisoned");
-                inner.accepted_events_total += accepted;
-                inner.batches_accepted_total += 1;
-                update_sequence_tracking(&mut inner, &batch.agent_id, batch.sequence);
-                for event in &batch.events {
-                    match serde_json::to_string(event) {
-                        Ok(event_json) => {
-                            tracing::trace!(
-                                agent_id = %batch.agent_id,
-                                sequence = batch.sequence,
-                                event = %event_json,
-                                "event accepted"
-                            );
-                        }
-                        Err(error) => {
-                            tracing::trace!(
-                                agent_id = %batch.agent_id,
-                                sequence = batch.sequence,
-                                error = %error,
-                                "event trace serialization failed"
-                            );
+                let next_config_version = {
+                    let mut inner = self.inner.lock().expect("controller state lock poisoned");
+                    inner.accepted_events_total += accepted;
+                    inner.batches_accepted_total += 1;
+                    update_sequence_tracking(&mut inner, &batch.agent_id, batch.sequence);
+                    inner.config.version.clone()
+                };
+
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    for event in &batch.events {
+                        match serde_json::to_string(event) {
+                            Ok(event_json) => {
+                                tracing::trace!(
+                                    agent_id = %batch.agent_id,
+                                    sequence = batch.sequence,
+                                    event = %event_json,
+                                    "event accepted"
+                                );
+                            }
+                            Err(error) => {
+                                tracing::trace!(
+                                    agent_id = %batch.agent_id,
+                                    sequence = batch.sequence,
+                                    error = %error,
+                                    "event trace serialization failed"
+                                );
+                            }
                         }
                     }
                 }
@@ -314,7 +320,7 @@ impl ControllerState {
                     wire_version: tapio_wire::WIRE_VERSION.into(),
                     accepted,
                     rejected: 0,
-                    next_config_version: inner.config.version.clone(),
+                    next_config_version,
                 })
             }
             Err(error) => {
@@ -404,10 +410,10 @@ impl ControllerState {
                     node_name: registered.hello.node_name.clone(),
                     tapio_version: registered.hello.tapio_version.clone(),
                     registered_at_unix: unix_seconds(registered.registered_at),
-                    last_heartbeat_age_seconds: heartbeat.and_then(|stored| {
+                    last_heartbeat_age_seconds: heartbeat.map(|stored| {
                         now.duration_since(stored.seen_at)
-                            .ok()
                             .map(|age| age.as_secs())
+                            .unwrap_or(0)
                     }),
                     reported_config_version: heartbeat
                         .map(|stored| stored.heartbeat.config_version.clone())
