@@ -11,6 +11,11 @@ use tapio_wire::ConfigResponse;
 #[cfg(target_os = "linux")]
 use crate::observer::ConfigCarriers;
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const CONTROLLER_MODE_INITIAL_CONFIG_VERSION: &str = "0";
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const STANDALONE_INITIAL_CONFIG_VERSION: &str = "1";
+
 #[derive(Debug, Clone)]
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub struct ControllerConfig {
@@ -43,7 +48,7 @@ impl ControllerState {
         self.config_version
             .read()
             .map(|version| version.clone())
-            .unwrap_or_else(|_| "0".into())
+            .unwrap_or_else(|_| CONTROLLER_MODE_INITIAL_CONFIG_VERSION.into())
     }
 
     pub fn set_config_version(&self, version: impl Into<String>) {

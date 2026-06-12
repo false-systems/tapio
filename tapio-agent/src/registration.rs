@@ -22,13 +22,39 @@ pub async fn registration_loop(
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
     let started_at = Instant::now();
+
+    loop {
+        if !hello_until_accepted(&controller, &state, &metrics, &mut shutdown).await {
+            return;
+        }
+        if !heartbeat_loop(
+            controller.clone(),
+            state.clone(),
+            metrics.clone(),
+            started_at,
+            shutdown.clone(),
+        )
+        .await
+        {
+            return;
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn hello_until_accepted(
+    controller: &ControllerConfig,
+    state: &Arc<ControllerState>,
+    metrics: &crate::metrics::TapioMetrics,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+) -> bool {
     let mut backoff = INITIAL_HELLO_BACKOFF;
 
     loop {
         tokio::select! {
             _ = shutdown.changed() => {
                 tracing::info!("controller registration stop");
-                return;
+                return false;
             }
             result = hello_once_async(controller.clone()) => {
                 match result {
@@ -42,7 +68,7 @@ pub async fn registration_loop(
                             max_batch_events = response.max_batch_events,
                             "controller hello accepted"
                         );
-                        break;
+                        return true;
                     }
                     Ok(response) => {
                         metrics.controller_send_failures_total.with_label_values(&["hello"]).inc();
@@ -63,14 +89,12 @@ pub async fn registration_loop(
         tokio::select! {
             _ = shutdown.changed() => {
                 tracing::info!("controller registration stop");
-                return;
+                return false;
             }
             _ = tokio::time::sleep(backoff) => {}
         }
         backoff = (backoff * 2).min(MAX_HELLO_BACKOFF);
     }
-
-    heartbeat_loop(controller, state, metrics, started_at, shutdown).await;
 }
 
 #[cfg(target_os = "linux")]
@@ -80,7 +104,7 @@ async fn heartbeat_loop(
     metrics: crate::metrics::TapioMetrics,
     started_at: Instant,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
-) {
+) -> bool {
     tracing::info!(
         interval_secs = controller.heartbeat_interval.as_secs(),
         "controller heartbeat start"
@@ -91,7 +115,7 @@ async fn heartbeat_loop(
         tokio::select! {
             _ = shutdown.changed() => {
                 tracing::info!("controller heartbeat stop");
-                break;
+                return false;
             }
             _ = interval.tick() => {
                 let version_before = state.config_version();
@@ -102,6 +126,11 @@ async fn heartbeat_loop(
                     started_at,
                 ).await {
                     Ok(response) => {
+                        if !response.accepted {
+                            metrics.controller_send_failures_total.with_label_values(&["heartbeat"]).inc();
+                            tracing::warn!("controller heartbeat rejected; retrying hello");
+                            return true;
+                        }
                         if response.next_config_version != version_before {
                             tracing::debug!(
                                 applied_config_version = %version_before,
@@ -207,7 +236,7 @@ fn build_heartbeat_request(
             ("network".into(), ObserverStatus::Running),
             ("container".into(), ObserverStatus::Running),
             ("storage".into(), ObserverStatus::Running),
-            ("node_pmc".into(), ObserverStatus::Running),
+            ("node".into(), ObserverStatus::Running),
         ]),
         counters: HeartbeatCounters {
             events_total: metrics.events_total.sum(),
@@ -384,6 +413,22 @@ mod tests {
                 assert_eq!(heartbeat.counters.events_total, 3);
                 assert_eq!(heartbeat.counters.controller_send_failures_total, 1);
             },
+        );
+    }
+
+    #[test]
+    fn heartbeat_rejected_response_is_decoded() {
+        with_server(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 79\r\n\r\n{\"wire_version\":\"tapio-wire/v1\",\"accepted\":false,\"next_config_version\":\"8\"}",
+            |endpoint| {
+                let metrics = crate::metrics::TapioMetrics::new().expect("metrics");
+                let state = ControllerState::new("7");
+                let response =
+                    heartbeat_once(&controller(endpoint), &metrics, &state, Instant::now())
+                        .expect("heartbeat response decodes");
+                assert!(!response.accepted);
+            },
+            |_| {},
         );
     }
 
