@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
+use axum::extract::rejection::JsonRejection;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -496,8 +497,9 @@ pub fn router(state: ControllerState) -> Router {
 
 async fn hello(
     State(state): State<ControllerState>,
-    Json(req): Json<HelloRequest>,
+    req: Result<Json<HelloRequest>, JsonRejection>,
 ) -> Result<Json<HelloResponse>, ApiError> {
+    let req = json_payload(req)?;
     Ok(Json(state.register_agent(req)?))
 }
 
@@ -524,15 +526,17 @@ async fn config(
 
 async fn heartbeat(
     State(state): State<ControllerState>,
-    Json(req): Json<HeartbeatRequest>,
+    req: Result<Json<HeartbeatRequest>, JsonRejection>,
 ) -> Result<Json<HeartbeatResponse>, ApiError> {
+    let req = json_payload(req)?;
     Ok(Json(state.record_heartbeat(req)?))
 }
 
 async fn events(
     State(state): State<ControllerState>,
-    Json(req): Json<EventBatchRequest>,
+    req: Result<Json<EventBatchRequest>, JsonRejection>,
 ) -> Result<Json<EventBatchResponse>, ApiError> {
+    let req = json_payload(req)?;
     Ok(Json(state.record_event_batch(req)?))
 }
 
@@ -572,24 +576,52 @@ impl ErrorEnvelope {
     }
 }
 
+fn json_payload<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {
+    payload.map(|Json(value)| value).map_err(|error| {
+        if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            ApiError::PayloadTooLarge(error.to_string())
+        } else {
+            ApiError::MalformedJson(error.to_string())
+        }
+    })
+}
+
 #[derive(Debug)]
-pub struct ApiError(WireError);
+pub enum ApiError {
+    Wire(WireError),
+    MalformedJson(String),
+    PayloadTooLarge(String),
+}
 
 impl From<WireError> for ApiError {
     fn from(value: WireError) -> Self {
-        Self(value)
+        Self::Wire(value)
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = match &self.0 {
-            WireError::UnsupportedVersion(_) => StatusCode::BAD_REQUEST,
-            WireError::MissingField(_) => StatusCode::BAD_REQUEST,
-            WireError::InvalidField { .. } => StatusCode::BAD_REQUEST,
-            WireError::ReasoningField(_) => StatusCode::UNPROCESSABLE_ENTITY,
-        };
-        (status, Json(error_envelope(&self.0))).into_response()
+        match self {
+            Self::Wire(error) => {
+                let status = match &error {
+                    WireError::UnsupportedVersion(_) => StatusCode::BAD_REQUEST,
+                    WireError::MissingField(_) => StatusCode::BAD_REQUEST,
+                    WireError::InvalidField { .. } => StatusCode::BAD_REQUEST,
+                    WireError::ReasoningField(_) => StatusCode::UNPROCESSABLE_ENTITY,
+                };
+                (status, Json(error_envelope(&error))).into_response()
+            }
+            Self::MalformedJson(message) => (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorEnvelope::new("MALFORMED_JSON", message)),
+            )
+                .into_response(),
+            Self::PayloadTooLarge(message) => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(ErrorEnvelope::new("PAYLOAD_TOO_LARGE", message)),
+            )
+                .into_response(),
+        }
     }
 }
 
@@ -642,10 +674,13 @@ fn insert_etag(headers: &mut HeaderMap, etag: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Method, Request};
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::path::Path;
     use tapio_wire::{EventSeverity, HeartbeatCounters, ObserverStatus, WIRE_VERSION, WireEvent};
+    use tower::ServiceExt;
 
     fn hello_req() -> HelloRequest {
         HelloRequest {
@@ -731,6 +766,82 @@ mod tests {
 
     fn remove_temp_profile(path: &Path) {
         let _ = std::fs::remove_file(path);
+    }
+
+    async fn router_json_response(
+        state: ControllerState,
+        method: Method,
+        uri: &str,
+        body: impl Into<Body>,
+    ) -> (StatusCode, serde_json::Value) {
+        let response = router(state)
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body.into())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), MAX_REQUEST_BODY_BYTES * 2)
+            .await
+            .unwrap();
+        let json = serde_json::from_slice(&body).unwrap_or_else(|error| {
+            panic!(
+                "response body was not JSON: {error}; body={}",
+                String::from_utf8_lossy(&body)
+            )
+        });
+        (status, json)
+    }
+
+    async fn router_status_response(
+        state: ControllerState,
+        method: Method,
+        uri: &str,
+        body: impl Into<Body>,
+    ) -> StatusCode {
+        router(state)
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(body.into())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    fn json_body<T: Serialize>(value: &T) -> String {
+        serde_json::to_string(value).unwrap()
+    }
+
+    fn event_batch_body_with_len(target_len: usize) -> String {
+        let mut batch = event_batch_req();
+        batch.events[0].facts = serde_json::json!({
+            "dst_port": 50798,
+            "protocol": "tcp",
+            "padding": "",
+        });
+        let empty_padding_len = json_body(&batch).len();
+        assert!(
+            empty_padding_len <= target_len,
+            "event batch without padding exceeded target length"
+        );
+        batch.events[0].facts = serde_json::json!({
+            "dst_port": 50798,
+            "protocol": "tcp",
+            "padding": "x".repeat(target_len - empty_padding_len),
+        });
+        let body = json_body(&batch);
+        assert_eq!(body.len(), target_len);
+        body
     }
 
     #[test]
@@ -1304,5 +1415,295 @@ base: staging
             return;
         };
         assert!(response.starts_with("HTTP/1.1 413"));
+    }
+
+    #[tokio::test]
+    async fn hostile_01_wrong_wire_version_on_json_requests_returns_unsupported_version() {
+        let mut hello = hello_req();
+        hello.wire_version = "tapio-wire/v2".into();
+        let (status, body) = router_json_response(
+            ControllerState::default(),
+            Method::POST,
+            "/v1/agents/hello",
+            json_body(&hello),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "UNSUPPORTED_VERSION");
+
+        let mut heartbeat = heartbeat_req();
+        heartbeat.wire_version = "tapio-wire/v2".into();
+        let (status, body) = router_json_response(
+            ControllerState::default(),
+            Method::POST,
+            "/v1/agents/heartbeat",
+            json_body(&heartbeat),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "UNSUPPORTED_VERSION");
+
+        let mut batch = event_batch_req();
+        batch.wire_version = "tapio-wire/v2".into();
+        let (status, body) = router_json_response(
+            ControllerState::default(),
+            Method::POST,
+            "/v1/events",
+            json_body(&batch),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "UNSUPPORTED_VERSION");
+    }
+
+    #[tokio::test]
+    async fn hostile_02_event_batch_over_max_rejects_and_does_not_advance_sequence() {
+        let mut config = ConfigResponse::default_v1();
+        config.batching.max_batch_events = 1;
+        let state = ControllerState::new(config);
+        state.register_agent(hello_req()).unwrap();
+
+        let mut batch = event_batch_req();
+        batch.events.push(batch.events[0].clone());
+        let (status, body) =
+            router_json_response(state.clone(), Method::POST, "/v1/events", json_body(&batch))
+                .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "INVALID_FIELD");
+        let status = state.status();
+        let agent = status_agent(&status, "node/worker-1");
+        assert_eq!(agent.sequence.last_seen, None);
+        assert_eq!(status.totals.accepted_events_total, 0);
+        assert_eq!(status.totals.rejected_events_total, 2);
+        assert_eq!(status.totals.batches_accepted_total, 0);
+        assert_eq!(status.totals.batches_rejected_total, 1);
+    }
+
+    #[test]
+    fn hostile_03_sequence_zero_after_baseline_counts_regression() {
+        let state = ControllerState::default();
+        state.register_agent(hello_req()).unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(1))
+            .unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(0))
+            .unwrap();
+
+        let agent = status_agent(&state.status(), "node/worker-1");
+        assert_eq!(agent.sequence.last_seen, Some(1));
+        assert_eq!(agent.sequence.regressions_total, 1);
+    }
+
+    #[test]
+    fn hostile_04_duplicate_sequence_counts_one_regression_per_duplicate() {
+        let state = ControllerState::default();
+        state.register_agent(hello_req()).unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(1))
+            .unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(1))
+            .unwrap();
+        state
+            .record_event_batch(event_batch_with_sequence(1))
+            .unwrap();
+
+        let agent = status_agent(&state.status(), "node/worker-1");
+        assert_eq!(agent.sequence.last_seen, Some(1));
+        assert_eq!(agent.sequence.regressions_total, 2);
+    }
+
+    #[tokio::test]
+    async fn hostile_05_empty_agent_id_or_node_name_returns_400_and_preserves_registry() {
+        for (field, hello) in [
+            (
+                "agent_id",
+                HelloRequest {
+                    agent_id: String::new(),
+                    ..hello_req()
+                },
+            ),
+            (
+                "node_name",
+                HelloRequest {
+                    node_name: String::new(),
+                    ..hello_req()
+                },
+            ),
+        ] {
+            let state = ControllerState::default();
+            let (status, body) = router_json_response(
+                state.clone(),
+                Method::POST,
+                "/v1/agents/hello",
+                json_body(&hello),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(body["error"]["code"], "MISSING_FIELD");
+            assert_eq!(body["error"]["message"], format!("{field} is required"));
+            assert_eq!(state.agent_count(), 0);
+        }
+
+        for (field, heartbeat) in [
+            (
+                "agent_id",
+                HeartbeatRequest {
+                    agent_id: String::new(),
+                    ..heartbeat_req()
+                },
+            ),
+            (
+                "node_name",
+                HeartbeatRequest {
+                    node_name: String::new(),
+                    ..heartbeat_req()
+                },
+            ),
+        ] {
+            let state = ControllerState::default();
+            let (status, body) = router_json_response(
+                state.clone(),
+                Method::POST,
+                "/v1/agents/heartbeat",
+                json_body(&heartbeat),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(body["error"]["code"], "MISSING_FIELD");
+            assert_eq!(body["error"]["message"], format!("{field} is required"));
+            assert_eq!(state.agent_count(), 0);
+            assert!(state.last_heartbeat("").is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn hostile_06_body_exactly_at_limit_is_accepted_and_one_byte_over_is_413() {
+        let exact_body = event_batch_body_with_len(MAX_REQUEST_BODY_BYTES);
+        let state = ControllerState::default();
+        let (status, body) = router_json_response(
+            state.clone(),
+            Method::POST,
+            "/v1/events",
+            exact_body.clone(),
+        )
+        .await;
+        assert_eq!(exact_body.len(), MAX_REQUEST_BODY_BYTES);
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["accepted"], 1);
+        assert_eq!(state.status().totals.accepted_events_total, 1);
+
+        let over_body = exact_body + " ";
+        let status = router_status_response(
+            ControllerState::default(),
+            Method::POST,
+            "/v1/events",
+            over_body,
+        )
+        .await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn hostile_07_unknown_json_fields_are_ignored_on_requests() {
+        let hello = serde_json::json!({
+            "wire_version": WIRE_VERSION,
+            "agent_id": "node/worker-1",
+            "node_name": "worker-1",
+            "tapio_version": "4.0.0",
+            "kernel_release": "6.8.0",
+            "arch": "x86_64",
+            "future_field": true
+        });
+        let (status, body) = router_json_response(
+            ControllerState::default(),
+            Method::POST,
+            "/v1/agents/hello",
+            hello.to_string(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["accepted"], true);
+
+        let heartbeat = serde_json::json!({
+            "wire_version": WIRE_VERSION,
+            "agent_id": "node/worker-1",
+            "node_name": "worker-1",
+            "config_version": "1",
+            "config_hash": "sha256:abc",
+            "uptime_seconds": 12,
+            "observers": {"network": "running"},
+            "counters": {
+                "events_total": 10,
+                "malformed_events_total": 0,
+                "lost_events_total": 0,
+                "correlation_drops_total": 0,
+                "sink_drops_total": 0,
+                "controller_send_failures_total": 0
+            },
+            "future_field": true
+        });
+        let (status, body) = router_json_response(
+            ControllerState::default(),
+            Method::POST,
+            "/v1/agents/heartbeat",
+            heartbeat.to_string(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["accepted"], true);
+
+        let batch = serde_json::json!({
+            "wire_version": WIRE_VERSION,
+            "agent_id": "node/worker-1",
+            "node_name": "worker-1",
+            "sequence": 1,
+            "sent_at_unix_nanos": 10,
+            "events": [{
+                "type": "kernel.network.connection_refused",
+                "timestamp_unix_nanos": 9,
+                "observer": "network",
+                "severity": "warning",
+                "facts": {"dst_port": 50798, "protocol": "tcp"},
+                "future_event_field": true
+            }],
+            "future_field": true
+        });
+        let (status, body) = router_json_response(
+            ControllerState::default(),
+            Method::POST,
+            "/v1/events",
+            batch.to_string(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["accepted"], 1);
+    }
+
+    #[tokio::test]
+    async fn hostile_08_malformed_json_body_returns_400_error_envelope() {
+        let (status, body) = router_json_response(
+            ControllerState::default(),
+            Method::POST,
+            "/v1/agents/hello",
+            r#"{"wire_version":"tapio-wire/v1","#,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "MALFORMED_JSON");
+    }
+
+    #[test]
+    fn hostile_09_heartbeat_for_unknown_agent_is_accepted_and_stored_but_not_registered() {
+        let state = ControllerState::default();
+        let response = state.record_heartbeat(heartbeat_req()).unwrap();
+
+        assert!(response.accepted);
+        assert!(state.last_heartbeat("node/worker-1").is_some());
+        assert_eq!(state.agent_count(), 0);
+        assert!(state.status().agents.is_empty());
     }
 }
