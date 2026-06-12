@@ -6,6 +6,8 @@ use tapio_common::ebpf::TapioConfig;
 use tapio_wire::ConfigResponse;
 
 #[cfg(target_os = "linux")]
+use crate::heartbeat::{ActiveConfigIdentity, AppliedConfigIdentity};
+#[cfg(target_os = "linux")]
 use crate::observer::ConfigCarriers;
 
 #[derive(Debug, Clone)]
@@ -20,7 +22,11 @@ pub struct ControllerConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub enum PollOutcome {
-    Applied { generation: u32, hash: String },
+    Applied {
+        generation: u32,
+        hash: String,
+        flags: u64,
+    },
     NotModified,
 }
 
@@ -29,6 +35,7 @@ pub async fn poll_loop(
     controller: ControllerConfig,
     carriers: ConfigCarriers,
     pmc_thresholds_tx: tokio::sync::watch::Sender<crate::observer::node_pmc::PmcThresholds>,
+    active_config: ActiveConfigIdentity,
     metrics: crate::metrics::TapioMetrics,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
@@ -48,8 +55,13 @@ pub async fn poll_loop(
             }
             _ = interval.tick() => {
                 match fetch_once(&controller, etag.as_deref(), &carriers, &pmc_thresholds_tx).await {
-                    Ok(PollOutcome::Applied { generation, hash }) => {
+                    Ok(PollOutcome::Applied { generation, hash, flags }) => {
                         etag = Some(format!("\"{hash}\""));
+                        active_config.mark_applied(AppliedConfigIdentity::new(
+                            generation.to_string(),
+                            hash.clone(),
+                            flags,
+                        ));
                         let label = "applied";
                         metrics.config_fetch_total.with_label_values(&[label]).inc();
                         tracing::info!(generation, hash = %hash, "config applied");
@@ -114,6 +126,7 @@ async fn fetch_once(
             Ok(PollOutcome::Applied {
                 generation,
                 hash: config.config_hash,
+                flags: tapio_config.flags,
             })
         }
         status => Err(FetchError::Transport(format!("HTTP {status}"))),

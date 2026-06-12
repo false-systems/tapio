@@ -321,6 +321,21 @@ impl ControllerState {
             .collect()
     }
 
+    pub fn unconverged_agents(&self, target_hash: &str) -> Vec<String> {
+        let inner = self.inner.lock().expect("controller state lock poisoned");
+        inner
+            .agents
+            .keys()
+            .filter(|agent_id| {
+                inner
+                    .last_heartbeats
+                    .get(*agent_id)
+                    .is_none_or(|stored| stored.heartbeat.config_hash != target_hash)
+            })
+            .cloned()
+            .collect()
+    }
+
     pub fn event_totals(&self) -> EventBatchOutcome {
         let inner = self.inner.lock().expect("controller state lock poisoned");
         EventBatchOutcome {
@@ -509,6 +524,7 @@ mod tests {
             agent_id: "node/worker-1".into(),
             node_name: "worker-1".into(),
             config_version: "1".into(),
+            config_hash: "sha256:abc".into(),
             uptime_seconds: 12,
             observers: BTreeMap::from([("network".into(), ObserverStatus::Running)]),
             counters: HeartbeatCounters {
@@ -717,6 +733,43 @@ base: staging
         assert_eq!(
             state.stale_agents(Duration::from_secs(30)),
             vec!["node/worker-1".to_string()]
+        );
+    }
+
+    #[test]
+    fn unconverged_agents_reports_missing_and_mismatched_hashes() {
+        let state = ControllerState::default();
+
+        let mut worker1 = hello_req();
+        worker1.agent_id = "node/worker-1".into();
+        worker1.node_name = "worker-1".into();
+        state.register_agent(worker1).unwrap();
+
+        let mut worker2 = hello_req();
+        worker2.agent_id = "node/worker-2".into();
+        worker2.node_name = "worker-2".into();
+        state.register_agent(worker2).unwrap();
+
+        let mut worker3 = hello_req();
+        worker3.agent_id = "node/worker-3".into();
+        worker3.node_name = "worker-3".into();
+        state.register_agent(worker3).unwrap();
+
+        let mut converged = heartbeat_req();
+        converged.agent_id = "node/worker-1".into();
+        converged.node_name = "worker-1".into();
+        converged.config_hash = "sha256:target".into();
+        state.record_heartbeat(converged).unwrap();
+
+        let mut mismatched = heartbeat_req();
+        mismatched.agent_id = "node/worker-2".into();
+        mismatched.node_name = "worker-2".into();
+        mismatched.config_hash = "sha256:old".into();
+        state.record_heartbeat(mismatched).unwrap();
+
+        assert_eq!(
+            state.unconverged_agents("sha256:target"),
+            vec!["node/worker-2".to_string(), "node/worker-3".to_string()]
         );
     }
 

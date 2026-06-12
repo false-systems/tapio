@@ -74,11 +74,13 @@ pub struct HeartbeatRequest {
     pub agent_id: String,
     pub node_name: String,
     pub config_version: String,
+    #[serde(default)]
+    pub config_hash: String,
     pub uptime_seconds: u64,
     pub observers: BTreeMap<String, ObserverStatus>,
     pub counters: HeartbeatCounters,
     #[serde(default)]
-    pub degraded_reasons: Vec<String>,
+    pub degraded_reasons: Vec<DegradedReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +90,14 @@ pub enum ObserverStatus {
     Disabled,
     Degraded,
     Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DegradedReason {
+    Unconfigured,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -395,6 +405,7 @@ mod tests {
             agent_id: "node/worker-1".into(),
             node_name: "worker-1".into(),
             config_version: "1".into(),
+            config_hash: "sha256:abc123".into(),
             uptime_seconds: 1234,
             observers: BTreeMap::from([
                 ("network".into(), ObserverStatus::Running),
@@ -584,7 +595,61 @@ mod tests {
     fn heartbeat_round_trip_and_validate() {
         let json = serde_json::to_string(&heartbeat()).unwrap();
         let parsed: HeartbeatRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.config_hash, "sha256:abc123");
         parsed.validate().unwrap();
+    }
+
+    #[test]
+    fn heartbeat_without_config_hash_still_deserializes() {
+        let parsed: HeartbeatRequest = serde_json::from_str(
+            r#"{
+              "wire_version":"tapio-wire/v1",
+              "agent_id":"node/worker-1",
+              "node_name":"worker-1",
+              "config_version":"1",
+              "uptime_seconds":1234,
+              "observers":{"network":"running"},
+              "counters":{
+                "events_total":1,
+                "malformed_events_total":0,
+                "lost_events_total":0,
+                "correlation_drops_total":0,
+                "sink_drops_total":0,
+                "controller_send_failures_total":0
+              }
+            }"#,
+        )
+        .unwrap();
+        parsed.validate().unwrap();
+        assert_eq!(parsed.config_hash, "");
+        assert!(parsed.degraded_reasons.is_empty());
+    }
+
+    #[test]
+    fn heartbeat_unknown_degraded_reason_is_forward_compatible() {
+        let parsed: HeartbeatRequest = serde_json::from_str(
+            r#"{
+              "wire_version":"tapio-wire/v1",
+              "agent_id":"node/worker-1",
+              "node_name":"worker-1",
+              "config_version":"1",
+              "config_hash":"sha256:abc123",
+              "uptime_seconds":1234,
+              "observers":{"network":"running"},
+              "counters":{
+                "events_total":1,
+                "malformed_events_total":0,
+                "lost_events_total":0,
+                "correlation_drops_total":0,
+                "sink_drops_total":0,
+                "controller_send_failures_total":0
+              },
+              "degraded_reasons":["lost_events"]
+            }"#,
+        )
+        .unwrap();
+        parsed.validate().unwrap();
+        assert_eq!(parsed.degraded_reasons, vec![DegradedReason::Unknown]);
     }
 
     #[test]
