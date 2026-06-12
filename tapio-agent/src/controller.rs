@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 #[cfg(target_os = "linux")]
@@ -15,6 +18,53 @@ pub struct ControllerConfig {
     pub agent_id: String,
     pub node_name: String,
     pub poll_interval: Duration,
+    pub heartbeat_interval: Duration,
+}
+
+#[derive(Debug)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub struct ControllerState {
+    config_version: RwLock<String>,
+    send_interval_ms: AtomicU64,
+    max_batch_events: AtomicU64,
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+impl ControllerState {
+    pub fn new(config_version: impl Into<String>) -> Arc<Self> {
+        Arc::new(Self {
+            config_version: RwLock::new(config_version.into()),
+            send_interval_ms: AtomicU64::new(1000),
+            max_batch_events: AtomicU64::new(256),
+        })
+    }
+
+    pub fn config_version(&self) -> String {
+        self.config_version
+            .read()
+            .map(|version| version.clone())
+            .unwrap_or_else(|_| "0".into())
+    }
+
+    pub fn set_config_version(&self, version: impl Into<String>) {
+        if let Ok(mut current) = self.config_version.write() {
+            *current = version.into();
+        }
+    }
+
+    pub fn batching(&self) -> (u64, u64) {
+        (
+            self.send_interval_ms.load(Ordering::Relaxed),
+            self.max_batch_events.load(Ordering::Relaxed),
+        )
+    }
+
+    pub fn set_batching(&self, send_interval_ms: u64, max_batch_events: u64) {
+        self.send_interval_ms
+            .store(send_interval_ms.max(1), Ordering::Relaxed);
+        self.max_batch_events
+            .store(max_batch_events.max(1), Ordering::Relaxed);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +80,7 @@ pub async fn poll_loop(
     carriers: ConfigCarriers,
     pmc_thresholds_tx: tokio::sync::watch::Sender<crate::observer::node_pmc::PmcThresholds>,
     metrics: crate::metrics::TapioMetrics,
+    state: Arc<ControllerState>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
     let mut etag: Option<String> = None;
@@ -50,6 +101,7 @@ pub async fn poll_loop(
                 match fetch_once(&controller, etag.as_deref(), &carriers, &pmc_thresholds_tx).await {
                     Ok(PollOutcome::Applied { generation, hash }) => {
                         etag = Some(format!("\"{hash}\""));
+                        state.set_config_version(generation.to_string());
                         let label = "applied";
                         metrics.config_fetch_total.with_label_values(&[label]).inc();
                         tracing::info!(generation, hash = %hash, "config applied");
@@ -205,6 +257,7 @@ mod tests {
             agent_id: "node/worker 1".into(),
             node_name: "worker/1".into(),
             poll_interval: Duration::from_secs(30),
+            heartbeat_interval: Duration::from_secs(30),
         };
         assert_eq!(
             config_url(&controller),
