@@ -19,6 +19,18 @@ const MAX_HEARTBEAT_RESPONSE_BYTES: usize = 16 * 1024;
 const INITIAL_HELLO_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_HELLO_BACKOFF: Duration = Duration::from_secs(60);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeartbeatLoopOutcome {
+    Shutdown,
+    ReRegister,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeartbeatDecision {
+    Continue,
+    ReRegister,
+}
+
 #[cfg(target_os = "linux")]
 pub async fn registration_loop(
     controller: ControllerConfig,
@@ -77,7 +89,7 @@ pub async fn registration_loop(
             backoff = (backoff * 2).min(MAX_HELLO_BACKOFF);
         }
 
-        if heartbeat_loop(
+        match heartbeat_loop(
             controller.clone(),
             state.clone(),
             active_config.clone(),
@@ -87,7 +99,8 @@ pub async fn registration_loop(
         )
         .await
         {
-            return;
+            HeartbeatLoopOutcome::Shutdown => return,
+            HeartbeatLoopOutcome::ReRegister => {}
         }
     }
 }
@@ -100,7 +113,7 @@ async fn heartbeat_loop(
     metrics: crate::metrics::TapioMetrics,
     started_at: Instant,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
-) -> bool {
+) -> HeartbeatLoopOutcome {
     tracing::info!(
         interval_secs = controller.heartbeat_interval.as_secs(),
         "controller heartbeat start"
@@ -111,39 +124,60 @@ async fn heartbeat_loop(
         tokio::select! {
             _ = shutdown.changed() => {
                 tracing::info!("controller heartbeat stop");
-                return true;
+                return HeartbeatLoopOutcome::Shutdown;
             }
             _ = interval.tick() => {
                 let version_before = state.config_version();
-                match heartbeat_once_async(
+                let result = heartbeat_once_async(
                     controller.clone(),
                     metrics.clone(),
                     active_config.clone(),
                     started_at,
-                ).await {
-                    Ok(response) if response.accepted => {
-                        if response.next_config_version != version_before {
-                            tracing::debug!(
-                                applied_config_version = %version_before,
-                                next_config_version = %response.next_config_version,
-                                "controller reports newer config"
-                            );
-                        }
-                    }
-                    Ok(response) => {
-                        metrics.controller_send_failures_total.with_label_values(&["heartbeat"]).inc();
-                        tracing::warn!(
-                            next_config_version = %response.next_config_version,
-                            "controller heartbeat rejected; re-registering"
-                        );
-                        return false;
-                    }
-                    Err(error) => {
-                        metrics.controller_send_failures_total.with_label_values(&["heartbeat"]).inc();
-                        tracing::warn!(error = %error, "controller heartbeat failed");
-                    }
+                ).await;
+                if classify_heartbeat_result(result, &version_before, &metrics)
+                    == HeartbeatDecision::ReRegister
+                {
+                    return HeartbeatLoopOutcome::ReRegister;
                 }
             }
+        }
+    }
+}
+
+fn classify_heartbeat_result(
+    result: Result<HeartbeatResponse, String>,
+    version_before: &str,
+    metrics: &crate::metrics::TapioMetrics,
+) -> HeartbeatDecision {
+    match result {
+        Ok(response) if response.accepted => {
+            if response.next_config_version != version_before {
+                tracing::debug!(
+                    applied_config_version = %version_before,
+                    next_config_version = %response.next_config_version,
+                    "controller reports newer config"
+                );
+            }
+            HeartbeatDecision::Continue
+        }
+        Ok(response) => {
+            metrics
+                .controller_send_failures_total
+                .with_label_values(&["heartbeat"])
+                .inc();
+            tracing::warn!(
+                next_config_version = %response.next_config_version,
+                "controller heartbeat rejected; re-registering"
+            );
+            HeartbeatDecision::ReRegister
+        }
+        Err(error) => {
+            metrics
+                .controller_send_failures_total
+                .with_label_values(&["heartbeat"])
+                .inc();
+            tracing::warn!(error = %error, "controller heartbeat failed");
+            HeartbeatDecision::Continue
         }
     }
 }
@@ -459,6 +493,67 @@ mod tests {
                     vec![tapio_wire::DegradedReason::Unconfigured]
                 );
             },
+        );
+    }
+
+    #[test]
+    fn heartbeat_rejection_signals_re_register() {
+        let metrics = crate::metrics::TapioMetrics::new().expect("metrics");
+        let decision = classify_heartbeat_result(
+            Ok(HeartbeatResponse {
+                wire_version: WIRE_VERSION.into(),
+                accepted: false,
+                next_config_version: "8".into(),
+            }),
+            "7",
+            &metrics,
+        );
+
+        assert_eq!(decision, HeartbeatDecision::ReRegister);
+        assert_eq!(
+            metrics
+                .controller_send_failures_total
+                .with_label_values(&["heartbeat"])
+                .value(),
+            1
+        );
+    }
+
+    #[test]
+    fn heartbeat_transport_error_does_not_signal_re_register() {
+        let metrics = crate::metrics::TapioMetrics::new().expect("metrics");
+        let decision = classify_heartbeat_result(Err("connect: refused".into()), "7", &metrics);
+
+        assert_eq!(decision, HeartbeatDecision::Continue);
+        assert_eq!(
+            metrics
+                .controller_send_failures_total
+                .with_label_values(&["heartbeat"])
+                .value(),
+            1
+        );
+    }
+
+    #[test]
+    fn accepted_heartbeat_continues_without_failure_count() {
+        let metrics = crate::metrics::TapioMetrics::new().expect("metrics");
+        let decision = classify_heartbeat_result(
+            Ok(HeartbeatResponse {
+                wire_version: WIRE_VERSION.into(),
+                accepted: true,
+                next_config_version: "7".into(),
+            }),
+            "7",
+            &metrics,
+        );
+
+        assert_eq!(decision, HeartbeatDecision::Continue);
+        assert_eq!(
+            metrics
+                .controller_send_failures_total
+                .with_label_values(&["heartbeat"])
+                .value(),
+            0
         );
     }
 
