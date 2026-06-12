@@ -5,9 +5,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-/tmp/tapio-smoke-controller}"
 EBPF_ARCH="${EBPF_ARCH:-}"
 PORT_A="${PORT_A:-$((40000 + ($$ % 10000)))}"
-PORT_B="${PORT_B:-$((50000 + ($$ % 10000)))}"
+PORT_B1="${PORT_B1:-$((50000 + ($$ % 10000)))}"
+PORT_B2="${PORT_B2:-$((51000 + ($$ % 10000)))}"
 PORT_C="${PORT_C:-$((30000 + ($$ % 10000)))}"
 PORT_D="${PORT_D:-$((20000 + ($$ % 10000)))}"
+PORT_E="${PORT_E:-$((22000 + ($$ % 10000)))}"
 CONTROLLER_PORT="${CONTROLLER_PORT:-$((21000 + ($$ % 10000)))}"
 METRICS_PORT="${METRICS_PORT:-$((32000 + ($$ % 10000)))}"
 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$OUT_DIR/target}"
@@ -131,16 +133,17 @@ for prog in network_monitor container_monitor storage_monitor node_pmc_monitor; 
     -o "$OUT_DIR/ebpf/${prog}.o"
 done
 
-wait_for_tcp() {
+wait_for_http() {
   local port="$1"
-  local name="$2"
+  local path="$2"
+  local name="$3"
   for _ in $(seq 1 100); do
-    if timeout 1 bash -c ":</dev/tcp/127.0.0.1/${port}" >/dev/null 2>&1; then
+    if curl -fsS "http://127.0.0.1:${port}${path}" >/dev/null 2>&1; then
       return 0
     fi
     sleep 0.1
   done
-  fail "$name did not listen on port $port"
+  fail "$name did not answer on port $port"
 }
 
 start_controller() {
@@ -151,7 +154,7 @@ start_controller() {
     >"$OUT_DIR/log/controller.stdout" \
     2>"$OUT_DIR/log/controller.stderr" &
   controller_pid="$!"
-  wait_for_tcp "$CONTROLLER_PORT" "controller"
+  wait_for_http "$CONTROLLER_PORT" "/v1/status" "controller"
 }
 
 start_agent() {
@@ -172,7 +175,7 @@ start_agent() {
 
   for _ in $(seq 1 100); do
     if grep -q 'network observer running' "$OUT_DIR/log/agent.stderr"; then
-      wait_for_tcp "$METRICS_PORT" "agent metrics"
+      wait_for_http "$METRICS_PORT" "/metrics" "agent metrics"
       return 0
     fi
     if ! kill -0 "$agent_pid" 2>/dev/null; then
@@ -256,10 +259,10 @@ wait_for_accepted_delta() {
 wait_for_trace_event_port() {
   local port="$1"
   for _ in $(seq 1 100); do
-    if grep -q "\"dst_port\":${port}" "$OUT_DIR/log/controller.stderr" \
-      || grep -q "\"dst_port\": ${port}" "$OUT_DIR/log/controller.stderr" \
-      || grep -q "\\\\\"dst_port\\\\\":${port}" "$OUT_DIR/log/controller.stderr" \
-      || grep -q "\\\\\"dst_port\\\\\": ${port}" "$OUT_DIR/log/controller.stderr"; then
+    if grep -q "\"dst_port\":${port}" "$OUT_DIR/log/controller.stdout" \
+      || grep -q "\"dst_port\": ${port}" "$OUT_DIR/log/controller.stdout" \
+      || grep -q "\\\\\"dst_port\\\\\":${port}" "$OUT_DIR/log/controller.stdout" \
+      || grep -q "\\\\\"dst_port\\\\\": ${port}" "$OUT_DIR/log/controller.stdout"; then
       return 0
     fi
     sleep 0.1
@@ -269,7 +272,7 @@ wait_for_trace_event_port() {
 
 wait_for_hello_round_trip() {
   for _ in $(seq 1 100); do
-    if grep -q 'agent registered' "$OUT_DIR/log/controller.stderr" \
+    if grep -q 'agent registered' "$OUT_DIR/log/controller.stdout" \
       && grep -q 'controller hello accepted' "$OUT_DIR/log/agent.stderr" \
       && agent_present; then
       return 0
@@ -281,18 +284,22 @@ wait_for_hello_round_trip() {
 
 wait_for_second_heartbeat() {
   local initial_count
-  initial_count="$(grep -c 'agent heartbeat' "$OUT_DIR/log/controller.stderr" || true)"
+  initial_count="$(grep -c 'agent heartbeat' "$OUT_DIR/log/controller.stdout" || true)"
+  local last_count="$initial_count"
+  local last_age=""
   for _ in $(seq 1 80); do
     local count
-    count="$(grep -c 'agent heartbeat' "$OUT_DIR/log/controller.stderr" || true)"
+    count="$(grep -c 'agent heartbeat' "$OUT_DIR/log/controller.stdout" || true)"
     local age
     age="$(status_json | jq -r --arg agent "$AGENT_ID" '.agents[]? | select(.agent_id == $agent) | .last_heartbeat_age_seconds // empty' | tail -n 1)"
+    last_count="$count"
+    last_age="$age"
     if [[ -n "$age" ]] && (( count >= initial_count + 1 )) && (( age <= 5 )); then
       return 0
     fi
     sleep 0.5
   done
-  fail "second heartbeat was not observed"
+  fail "second heartbeat was not observed; initial_count=$initial_count last_count=$last_count last_age=${last_age:-empty}"
 }
 
 file_count() {
@@ -319,13 +326,25 @@ wait_for_new_registration_after() {
     local current
     current="$(registered_at || true)"
     if [[ -n "$current" && "$current" != "null" ]] && (( current > previous_registered_at )); then
-      if grep -q 'agent registered' "$OUT_DIR/log/controller.stderr"; then
+      if grep -q 'agent registered' "$OUT_DIR/log/controller.stdout"; then
         return 0
       fi
     fi
     sleep 0.5
   done
   fail "agent did not re-register with restarted controller"
+}
+
+wait_for_sequence_gap() {
+  for _ in $(seq 1 100); do
+    local gaps
+    gaps="$(sequence_field gaps_total)"
+    if [[ -n "$gaps" && "$gaps" != "null" ]] && (( gaps > 0 )); then
+      return 0
+    fi
+    sleep 0.5
+  done
+  fail "dropped batches did not surface as sequence gaps"
 }
 
 section "Start controller"
@@ -347,13 +366,27 @@ wait_for_trace_event_port "$PORT_A"
 wait_for_second_heartbeat
 pass_phase "A happy path"
 
-section "Phase B: controller outage"
+section "Phase B1: controller pause, loss surfaces as sequence gap"
+kill -STOP "$controller_pid"
+trigger_connects "$PORT_B1"
+wait_for_file_occurrence "$PORT_B1"
+sleep 20
+kill -CONT "$controller_pid"
+before="$(accepted_total)"
+trigger_connects "$PORT_B2"
+wait_for_file_occurrence "$PORT_B2"
+wait_for_accepted_delta "$before"
+wait_for_sequence_gap
+pass_phase "B1 loss surfaces as sequence gap"
+
+section "Phase B2: controller outage"
 before_files="$(file_count)"
+previous_registered_at="$(registered_at)"
 kill -9 "$controller_pid" 2>/dev/null || true
 wait "$controller_pid" 2>/dev/null || true
 controller_pid=""
-trigger_connects "$PORT_B"
-wait_for_file_occurrence "$PORT_B"
+trigger_connects "$PORT_C"
+wait_for_file_occurrence "$PORT_C"
 after_files="$(file_count)"
 if (( after_files <= before_files )); then
   fail "file sink did not accumulate occurrences while controller was down"
@@ -363,15 +396,14 @@ if ! kill -0 "$agent_pid" 2>/dev/null; then
 fi
 wait_metric_gt_zero 'tapio_controller_send_failures_total'
 wait_metric_gt_zero 'tapio_sink_drops_total' 'sink="controller",reason="send_failed"'
-pass_phase "B controller outage"
+pass_phase "B2 controller outage"
 
 section "Phase C: controller recovery"
-previous_registered_at="$(($(date +%s) - 1))"
 start_controller
 wait_for_new_registration_after "$previous_registered_at"
 before="$(accepted_total)"
-trigger_connects "$PORT_C"
-wait_for_file_occurrence "$PORT_C"
+trigger_connects "$PORT_D"
+wait_for_file_occurrence "$PORT_D"
 wait_for_accepted_delta "$before"
 regressions="$(sequence_field regressions_total)"
 if [[ "$regressions" != "0" ]]; then
@@ -386,8 +418,8 @@ sleep 1
 start_agent
 wait_for_new_registration_after "$previous_registered_at"
 before="$(accepted_total)"
-trigger_connects "$PORT_D"
-wait_for_file_occurrence "$PORT_D"
+trigger_connects "$PORT_E"
+wait_for_file_occurrence "$PORT_E"
 wait_for_accepted_delta "$before"
 regressions="$(sequence_field regressions_total)"
 if [[ "$regressions" != "0" ]]; then
