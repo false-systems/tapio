@@ -1,5 +1,6 @@
 mod config;
 mod controller;
+mod heartbeat;
 mod httpc;
 mod metrics;
 mod observer;
@@ -164,7 +165,7 @@ Options:
   --data-dir <path>        Directory for file sink output [default: .tapio/occurrences]
   --http-endpoint <url>    Endpoint for the http sink [default: http://localhost:8765]
   --controller-endpoint <url> Controller config URL (http:// only)
-  --config-poll-interval <seconds> Config poll interval, minimum 5 [default: 30]
+  --config-poll-interval <seconds> Controller config poll and heartbeat interval, minimum 5 [default: 30]
   -h, --help               Print help
   -V, --version            Print version",
         env!("CARGO_PKG_VERSION")
@@ -388,6 +389,14 @@ async fn main() -> anyhow::Result<()> {
             cfg.tapio_config()
         };
         let carriers = observer::ConfigCarriers::default();
+        let active_config = heartbeat::ActiveConfigIdentity::default();
+        if !controller_mode {
+            active_config.mark_applied(heartbeat::AppliedConfigIdentity::new(
+                "1",
+                "",
+                tapio_config.flags,
+            ));
+        }
         let standalone_thresholds = observer::node_pmc::PmcThresholds {
             stall_pct_warning: cfg.thresholds.stall_pct_warning,
             stall_pct_critical: cfg.thresholds.stall_pct_critical,
@@ -406,21 +415,45 @@ async fn main() -> anyhow::Result<()> {
 
         if let Some(endpoint) = args.controller_endpoint.clone() {
             tracing::info!(endpoint = %endpoint, "controller mode");
+            let controller_agent_id = agent_id();
+            let controller_node_name = node_name();
             let controller = controller::ControllerConfig {
-                endpoint,
-                agent_id: agent_id(),
-                node_name: node_name(),
+                endpoint: endpoint.clone(),
+                agent_id: controller_agent_id.clone(),
+                node_name: controller_node_name.clone(),
                 poll_interval: args.config_poll_interval,
+            };
+            let heartbeat = heartbeat::HeartbeatConfig {
+                endpoint,
+                agent_id: controller_agent_id,
+                node_name: controller_node_name,
+                interval: args.config_poll_interval,
+                controller_mode: true,
+                started_at: std::time::Instant::now(),
             };
             let poll_carriers = carriers.clone();
             let poll_thresholds = pmc_thresholds_tx.clone();
+            let poll_active_config = active_config.clone();
             let poll_metrics = tapio_metrics.clone();
             let poll_shutdown = shutdown_rx.clone();
+            let heartbeat_active_config = active_config.clone();
+            let heartbeat_metrics = tapio_metrics.clone();
+            let heartbeat_shutdown = shutdown_rx.clone();
+            tasks.spawn(async move {
+                heartbeat::heartbeat_loop(
+                    heartbeat,
+                    heartbeat_active_config,
+                    heartbeat_metrics,
+                    heartbeat_shutdown,
+                )
+                .await;
+            });
             tasks.spawn(async move {
                 controller::poll_loop(
                     controller,
                     poll_carriers,
                     poll_thresholds,
+                    poll_active_config,
                     poll_metrics,
                     poll_shutdown,
                 )

@@ -270,11 +270,16 @@ EvidenceProfile YAML
   -> tapio-agent writes tapio_config map carriers
   -> eBPF programs read primitive flags and thresholds
   -> emitted events carry config_generation
+  -> agent heartbeats report the applied config hash
 ```
 
 The kernel side is deliberately dumb: a fixed-layout, version-checked `struct tapio_config` per observer object. All-zeros (the kernel's cold-start map state) is inert — nothing emits until real config lands. On ABI version mismatch, observers stay silent instead of misreading fields.
 
 The operator side is deliberately strict: profiles are versioned YAML documents validated against a closed schema. Unknown fields, unknown observers, and out-of-range values are rejected, not ignored. `compile` is infallible — every failure happens during validation.
+
+The controller convergence signal is the compiled config hash. Agents report
+the hash they have actually applied in heartbeats; an empty hash means a
+controller-mode agent is still unconfigured.
 
 See [docs/agent-kernel-config-abi.md](docs/agent-kernel-config-abi.md).
 
