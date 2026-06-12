@@ -31,8 +31,14 @@ The v0 protocol is `tapio-wire/v1`:
 - `GET /v1/agents/config?agent_id=<agent-id>&node_name=<node-name>`
 - `POST /v1/agents/heartbeat`
 - `POST /v1/events`
+- `GET /v1/status`
 
 Payloads are small, bounded, and versioned. Unknown future JSON fields are ignored by default, while missing required fields and unsupported wire versions fail clearly.
+
+`GET /v1/status` is read-only and reports controller state as facts: registered
+agents, last heartbeat ages, echoed counters, config identity, event/batch
+totals, and event batch sequence gaps/regressions. It does not retain event
+payloads and does not assign health or staleness verdicts.
 
 See [wire-api-standard.md](wire-api-standard.md) for the versioning,
 compatibility, config identity, ETag caching, and error-envelope policy.
