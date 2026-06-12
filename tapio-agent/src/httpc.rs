@@ -8,6 +8,7 @@ pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 const POST_MAX_RESPONSE_BYTES: usize = 8 * 1024;
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Debug)]
 pub struct HttpResponse {
     pub status: u16,
     pub body: Vec<u8>,
@@ -24,20 +25,28 @@ pub fn get(
 }
 
 pub fn post_json(endpoint: &str, body: &[u8]) -> Result<(), String> {
-    let response = request(
-        "POST",
-        endpoint,
-        &[("Content-Type", "application/json".to_string())],
-        body,
-        DEFAULT_TIMEOUT,
-        POST_MAX_RESPONSE_BYTES,
-    )?;
+    let response = post_json_response(endpoint, body, POST_MAX_RESPONSE_BYTES)?;
 
     if (200..300).contains(&response.status) {
         Ok(())
     } else {
         Err(format!("HTTP {}", response.status))
     }
+}
+
+pub fn post_json_response(
+    endpoint: &str,
+    body: &[u8],
+    max_response_bytes: usize,
+) -> Result<HttpResponse, String> {
+    request(
+        "POST",
+        endpoint,
+        &[("Content-Type", "application/json".to_string())],
+        body,
+        DEFAULT_TIMEOUT,
+        max_response_bytes,
+    )
 }
 
 fn request(
@@ -233,5 +242,24 @@ mod tests {
             b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Padding: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nContent-Length: 64\r\n\r\n{\"accepted\":256,\"rejected\":0,\"next_config_version\":\"1\",\"x\":\"y\"}",
             |url| post_json(&url, b"{}").unwrap(),
         );
+    }
+
+    #[test]
+    fn post_json_response_returns_body() {
+        with_server(
+            b"HTTP/1.1 202 Accepted\r\nContent-Length: 2\r\n\r\n{}",
+            |url| {
+                let response = post_json_response(&url, b"{}", DEFAULT_MAX_RESPONSE_BYTES).unwrap();
+                assert_eq!(response.status, 202);
+                assert_eq!(response.body, b"{}");
+            },
+        );
+    }
+
+    #[test]
+    fn post_json_response_rejects_https_endpoint() {
+        let err = post_json_response("https://127.0.0.1:4318", b"{}", DEFAULT_MAX_RESPONSE_BYTES)
+            .unwrap_err();
+        assert!(err.contains("http://"));
     }
 }
