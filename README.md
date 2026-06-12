@@ -144,16 +144,19 @@ That smoke test builds the agent, loads real eBPF programs, triggers a TCP conne
 tapio-agent --sink=stdout
 tapio-agent --sink=file
 tapio-agent --sink=stdout --sink=file
+tapio-agent --controller-endpoint=http://tapio-controller:8080 --sink=controller
 tapio-agent --ebpf-dir /opt/tapio/ebpf
 ```
 
 Important flags:
 
 - `--config <path>`: TOML config file, default `/etc/tapio/tapio.toml`.
-- `--sink <name>`: `stdout`, `file`, `http`, or `otlp` when built with `--features otlp`; repeatable.
+- `--sink <name>`: `stdout`, `file`, `http`, `controller`, or `otlp` when built with `--features otlp`; repeatable.
 - `--ebpf-dir <path>`: directory containing compiled `.o` files.
 - `--data-dir <path>`: file sink output directory, default `.tapio/occurrences`.
 - `--http-endpoint <url>`: HTTP sink endpoint.
+- `--controller-endpoint <url>`: controller base URL for config, hello, heartbeat, and controller event sink traffic.
+- `--heartbeat-interval <seconds>`: controller heartbeat interval, minimum 5 seconds.
 
 The agent runs standalone with `stdout` or `file` sinks. It does not need Kubernetes, a controller, or a network destination.
 
@@ -183,11 +186,13 @@ The CLI also provides `tapio mcp`, a read-only stdio JSON-RPC MCP server for que
 | `stdout` | JSON lines to stdout |
 | `file` | one occurrence JSON file per event |
 | `http` | batched JSON `POST` to an HTTP endpoint |
+| `controller` | bounded batched `tapio-wire/v1` event POSTs to `POST /v1/events` |
 | `otlp` | OTLP/HTTP logs export when built with `--features otlp` |
 
 Sink guarantees:
 
 - Local `stdout` and `file` sinks are the default zero-service path.
+- Controller sink overflow and send failures are counted and never block ring-buffer consumption.
 - HTTP/OTLP export failures are surfaced as sink errors and counters.
 - `otlp` rejects `https://` endpoints before opening a TCP connection or sending auth. Use a local collector, proxy, sidecar, or service mesh for TLS termination.
 
@@ -204,6 +209,9 @@ Key metrics:
 - `tapio_correlation_drops_total`: intentionally dropped ambiguous evidence.
 - `tapio_drain_cap_total`: drain loops that hit the per-tick cap.
 - `tapio_sink_writes_total`: sink write attempts by sink and result.
+- `tapio_sink_drops_total`: sink events dropped by sink and reason.
+- `tapio_controller_send_failures_total`: failed hello, heartbeat, or event sends to the controller.
+- `tapio_config_fetch_total`: controller config poll outcomes.
 
 ## Building eBPF Objects
 
