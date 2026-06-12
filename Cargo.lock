@@ -1059,6 +1059,7 @@ dependencies = [
  "tapio-profile",
  "tapio-wire",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
 ]
