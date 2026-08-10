@@ -82,10 +82,15 @@ lands.
 
 ## Config Layout
 
-The v0 config layout is fixed-width and versioned. Field names should match the
-currently implemented observer knobs when the ABI is implemented.
+The v0 config layout is fixed-width and versioned. Field names match the
+currently implemented observer knobs.
 
-Conceptual C layout:
+The layout below is implemented in `ebpf/headers/config.h` (with
+`_Static_assert` size and offset checks) and mirrored by `TapioConfig` in
+`tapio-common/src/ebpf.rs`. Those two files are authoritative; this listing is
+the explanatory copy.
+
+C layout:
 
 ```c
 #define TAPIO_CONFIG_ABI_VERSION 2
@@ -176,8 +181,10 @@ A mismatched agent/program pair must fail visibly, not misread offsets silently.
 
 ## Generation Stamping
 
-Every emitted event should eventually carry the config generation that judged
-it.
+Every emitted event carries the config generation that judged it. All four
+event structs in `tapio-common/src/ebpf.rs` (`NetworkEvent`, `ContainerEvent`,
+`StorageEvent`, `PmcEvent`) hold `config_generation` at offset `0`, asserted by
+offset tests.
 
 Purpose:
 
@@ -202,7 +209,7 @@ If event structs cannot be changed in the same PR as the config carrier, record
 generation stamping as a required follow-up. Do not half-stamp only some events
 without documenting consistency.
 
-Preferred eventual event field:
+The event field, present in every event struct:
 
 ```c
 __u32 config_generation;
@@ -395,7 +402,10 @@ The agent-to-kernel config ABI does not include:
 
 ## Implementation Checklist
 
-When PR 2 implements this ABI:
+(Completed 2026-06-09 by the shared-config-ABI change, PR #646. Retained as the
+checklist any future ABI revision must re-satisfy.)
+
+Steps for implementing or revising this ABI:
 
 1. Define `TAPIO_CONFIG_ABI_VERSION`.
 2. Define `struct tapio_config` in the shared eBPF/user ABI location.
