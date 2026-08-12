@@ -8,7 +8,7 @@
   <br>
   <img src="https://img.shields.io/badge/rust-2024%20edition-f74c00" alt="Rust">
   <img src="https://img.shields.io/badge/ebpf-kernel%205.8%2B-orange" alt="eBPF">
-  <img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
 </p>
 
 ---
@@ -324,4 +324,4 @@ Tapio owns node-level kernel evidence. Everything else can consume that evidence
 
 ---
 
-Apache 2.0
+MIT — see [LICENSE](LICENSE).
