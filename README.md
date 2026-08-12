@@ -266,6 +266,7 @@ See:
 
 - [docs/architecture.md](docs/architecture.md)
 - [docs/agent-controller.md](docs/agent-controller.md)
+- [Vartio attribution integration proposal](docs/vartio-attribution-integration.md)
 
 ## Runtime Config
 
