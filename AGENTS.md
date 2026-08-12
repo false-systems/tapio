@@ -2,12 +2,13 @@
 
 ## Project Structure & Module Organization
 
-Tapio is a Rust 2024 workspace with five crates:
+Tapio is a Rust 2024 workspace with six crates:
 
 - `tapio-agent/`: Linux agent that loads eBPF objects, reads ring buffers, classifies events, and emits to sinks.
 - `tapio-cli/`: platform-independent CLI for inspecting local event data.
 - `tapio-common/`: shared event structs, sink traits, occurrence builders, and eBPF ABI mirrors.
 - `tapio-controller/`: controller runtime entry points and library code.
+- `tapio-profile/`: Evidence Profile validation and compilation into wire config.
 - `tapio-wire/`: wire/protocol types shared across components.
 
 eBPF programs live in `ebpf/`, shared headers in `ebpf/headers/`, scripts in `scripts/`, and architecture notes in `docs/`.
@@ -15,7 +16,7 @@ eBPF programs live in `ebpf/`, shared headers in `ebpf/headers/`, scripts in `sc
 ## Build, Test, and Development Commands
 
 - `cargo check --workspace`: type-check all crates.
-- `cargo check -p tapio-common -p tapio-cli`: check platform-independent crates on non-Linux hosts.
+- `cargo check -p tapio-common -p tapio-cli -p tapio-profile`: check platform-independent crates on non-Linux hosts.
 - `cargo test --workspace`: run Rust tests.
 - `cargo clippy --workspace --all-targets -- -D warnings`: run CI lint checks.
 - `cargo fmt --all --check`: verify formatting.
@@ -23,6 +24,8 @@ eBPF programs live in `ebpf/`, shared headers in `ebpf/headers/`, scripts in `sc
 - `cargo build --release -p tapio-cli`: build the CLI.
 - `scripts/verify-lean.sh`: run fmt, clippy, tests, release size checks, dependency snapshot, and optional eBPF compile checks.
 - `scripts/smoke-ebpf-network.sh`: Linux/Lima smoke test that loads real eBPF and verifies a network occurrence.
+- `scripts/smoke-agent-controller.sh`: Linux/Lima smoke test for the agent/controller path (hello, heartbeat, event delivery, outage, recovery, restart).
+- `scripts/smoke-ebpf-controller-config.sh`: Linux/Lima smoke test that runs the agent in controller mode and asserts an emitted occurrence carries the controller-served config generation.
 
 ## Coding Style & Naming Conventions
 

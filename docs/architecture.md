@@ -47,7 +47,7 @@ Final target constraints:
 
 ### tapio-controller
 
-`tapio-controller` is one-per-cluster coordination. It receives agent hello, heartbeat, config pull, and event batch requests over `tapio-wire/v1`; tracks agents and stale heartbeats; validates event batches; counts accepted/rejected events; and later may own Kubernetes metadata, TokenReview, cluster config, and downstream routing.
+`tapio-controller` is one-per-cluster coordination. It receives agent hello, heartbeat, config pull, and event batch requests over `tapio-wire/v1`; tracks agents and stale heartbeats; validates event batches; counts accepted/rejected events; serves a read-only status snapshot with per-agent event batch sequence state; and later may own Kubernetes metadata, TokenReview, cluster config, and downstream routing.
 
 The controller may use server and Kubernetes dependencies. `axum`, `kube`, and `k8s-openapi` belong here when needed, not in the agent.
 
@@ -80,12 +80,13 @@ See [agent-kernel-config-abi.md](agent-kernel-config-abi.md) for the shared
 `tapio_config` ABI, observer-local carriers, ABI versioning, generation
 stamping, and update semantics.
 
-The v0 controller protocol has four operations:
+The v0 controller protocol has five operations:
 
 - `POST /v1/agents/hello`
 - `GET /v1/agents/config`
 - `POST /v1/agents/heartbeat`
 - `POST /v1/events`
+- `GET /v1/status`
 
 ## Failure Model
 
@@ -170,6 +171,12 @@ Current audit from this checkout:
 
 ## Agent Dependency Migration Plan
 
+(Step 5 landed on 2026-06-12, PR #654. Step 6 is partly landed: the sykli pipeline runs
+`scripts/check-agent-deps.sh` as a hard-failing task, while the binary budgets
+are hard-failing inside `scripts/verify-lean.sh`, which the pipeline does not
+invoke. The rest remain a contingency order if a forbidden dependency
+reappears.)
+
 This checkout does not currently show direct agent violations for `kube`, `k8s-openapi`, `axum`, `hyper`, `tonic`, or `reqwest`. If those reappear, handle them in this order:
 
 1. `docs: define Tapio runtime architecture and dependency boundaries`
@@ -181,9 +188,14 @@ This checkout does not currently show direct agent violations for `kube`, `k8s-o
 
 Do not add the outbound controller client before the agent dependency boundary is clean.
 
-## Future Agent Outbound Client Design
+## Agent Outbound Client Design
 
-The future client is outbound-only HTTP/1.1 plus JSON, using `tapio-wire/v1`. It must not use gRPC, expose an inbound server, follow redirects, log bearer tokens, or accept `https://` when TLS is unsupported.
+(Landed 2026-06-12, PR #654. This section was written as a forward-looking design; the
+client now exists in `tapio-agent/src/httpc.rs`, `tapio-agent/src/registration.rs`,
+`tapio-agent/src/controller.rs`, and `tapio-agent/src/sink/controller.rs`. The
+requirements below stay in force as the design contract.)
+
+The client is outbound-only HTTP/1.1 plus JSON, using `tapio-wire/v1`. It must not use gRPC, expose an inbound server, follow redirects, log bearer tokens, or accept `https://` when TLS is unsupported.
 
 Required mechanics:
 
@@ -207,7 +219,7 @@ CI should run:
 - existing eBPF object and map budgets
 - Linux/Lima network smoke test for kernel/runtime behavior changes
 
-Hard-failing dependency checks are safe once the baseline is clean. Binary budgets should become hard fail after the measured baseline and discrepancy history are documented.
+Hard-failing dependency checks are safe once the baseline is clean; `scripts/check-agent-deps.sh` already runs as a hard-failing pipeline task. The hard binary budgets (`AGENT_MAX_BYTES`, `CLI_MAX_BYTES`) already fail inside `scripts/verify-lean.sh`; the remaining gap is that the sykli pipeline does not invoke that script.
 
 ## Non-Goals
 

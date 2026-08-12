@@ -243,7 +243,7 @@ Current budget model:
 
 | Binary | Budget |
 | --- | --- |
-| `tapio-agent` | target 1.25 MB, hard 1.5 MB |
+| `tapio-agent` | target 1.32 MB, hard 1.5 MB |
 | `tapio` | hard 900 KB |
 | `tapio-controller` | reported, no hard budget yet |
 
@@ -259,6 +259,7 @@ Controller endpoints:
 - `GET /v1/agents/config`
 - `POST /v1/agents/heartbeat`
 - `POST /v1/events`
+- `GET /v1/status`
 
 The controller is the HTTP server. The agent does not expose an inbound controller API and does not use gRPC on this path.
 
