@@ -142,3 +142,11 @@ The `tapio-agent` binary accepts:
 - **Metric prefix**: `tapio_`
 - **Controller config metric**: `tapio_config_fetch_total{result="applied|not_modified|error|rejected"}` counts controller-mode config poll outcomes.
 - **eBPF-side metrics**: the shared per-CPU `tapio_metrics` map currently exports only `METRIC_LOST_EVENTS` to userspace. Do not add counters to `metrics.h` unless userspace reads and exposes them or the counter is otherwise consumed.
+
+## Languages
+
+Code in this repository is **Rust, or Elixir/Erlang**. Never add Python, Go
+or Node (JavaScript/TypeScript): not for tools, scripts, CI helpers, tests,
+dashboards or glue. A thin shell step in a CI workflow is fine; anything with
+logic is Rust. Existing Python or Node files are debt to be rewritten, not
+precedent to follow.
