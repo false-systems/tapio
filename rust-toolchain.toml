@@ -1,0 +1,8 @@
+# The one place the toolchain is named. Without it every machine ran its own
+# `stable`, and sykli's cache key sees a compiler only through a declared
+# input: a pass recorded under 1.89 was reused under 1.98, where clippy's
+# `drain_collect` fails the workspace (#664). Raising `channel` is how new
+# lints arrive: all at once, deliberately, in one reviewed change.
+[toolchain]
+channel = "1.98"
+components = ["rustfmt", "clippy"]
