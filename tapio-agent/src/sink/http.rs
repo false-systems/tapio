@@ -72,7 +72,7 @@ impl Sink for HttpSink {
 
             if should_flush {
                 // Take the buffer out — lock released when this block ends
-                let batch: Vec<Occurrence> = inner.buffer.drain(..).collect();
+                let batch: Vec<Occurrence> = std::mem::take(&mut inner.buffer);
                 inner.last_flush = now;
                 Some(batch)
             } else {
@@ -96,7 +96,7 @@ impl Sink for HttpSink {
             if inner.buffer.is_empty() {
                 return Ok(());
             }
-            let batch: Vec<Occurrence> = inner.buffer.drain(..).collect();
+            let batch: Vec<Occurrence> = std::mem::take(&mut inner.buffer);
             inner.last_flush = Instant::now();
             batch
         }; // lock released here
