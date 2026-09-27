@@ -6,6 +6,7 @@
       "run": "cargo fmt --check",
       "inputs": [
         "Cargo.toml",
+        "rust-toolchain.toml",
         "tapio-agent/Cargo.toml",
         "tapio-agent/src/config.rs",
         "tapio-agent/src/controller.rs",
@@ -49,6 +50,7 @@
       "inputs": [
         "Cargo.lock",
         "Cargo.toml",
+        "rust-toolchain.toml",
         "tapio-agent/Cargo.toml",
         "tapio-agent/src/config.rs",
         "tapio-agent/src/controller.rs",
@@ -92,6 +94,7 @@
       "inputs": [
         "Cargo.lock",
         "Cargo.toml",
+        "rust-toolchain.toml",
         "scripts/check-agent-deps.sh",
         "scripts/check-dependency-boundaries.sh",
         "tapio-agent/Cargo.toml",
@@ -113,6 +116,7 @@
       "inputs": [
         "Cargo.lock",
         "Cargo.toml",
+        "rust-toolchain.toml",
         "tapio-agent/Cargo.toml",
         "tapio-agent/src/config.rs",
         "tapio-agent/src/controller.rs",
@@ -159,6 +163,7 @@
       "inputs": [
         "Cargo.lock",
         "Cargo.toml",
+        "rust-toolchain.toml",
         "tapio-agent/Cargo.toml",
         "tapio-agent/src/config.rs",
         "tapio-agent/src/controller.rs",
