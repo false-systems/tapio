@@ -24,8 +24,8 @@ cargo fmt --check                              # format check
 cargo build --release -p tapio-agent           # Linux-only agent (~8MB, LTO + strip + opt-level=z + panic=abort)
 cargo build --release -p tapio-cli             # CLI — builds on any platform (no eBPF dependency)
 
-# CI (via sykli — requires cargo +nightly -Zscript)
-sykli                                          # run full pipeline: fmt → clippy → test → build
+# CI (via sykli 0.6 — contract in sykli.json, pinned by sykli.lock)
+sykli run                                      # fmt-check, clippy, agent-deps → test → build (release)
 ```
 
 Pre-commit hook runs `cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings`. Fix both before committing.
