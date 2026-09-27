@@ -46,3 +46,11 @@ PRs should include a behavior summary, tests run, linked issues when relevant, a
 ## Security & Configuration Tips
 
 The agent requires Linux kernel 5.8+ with BTF and capabilities including `CAP_BPF`, `CAP_PERFMON`, and `CAP_NET_ADMIN`. Do not leak kernel padding bytes across the ring-buffer boundary; zero reserved event memory before population.
+
+## Languages
+
+Code in this repository is **Rust, or Elixir/Erlang**. Never add Python, Go
+or Node (JavaScript/TypeScript): not for tools, scripts, CI helpers, tests,
+dashboards or glue. A thin shell step in a CI workflow is fine; anything with
+logic is Rust. Existing Python or Node files are debt to be rewritten, not
+precedent to follow.
