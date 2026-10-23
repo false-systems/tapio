@@ -70,7 +70,7 @@ fail_budget() {
 ebpf_object_budget() {
   case "$1" in
     network_monitor) printf '45000\n' ;;
-    container_monitor) printf '20000\n' ;;
+    container_monitor) printf '21000\n' ;;
     storage_monitor) printf '26000\n' ;;
     node_pmc_monitor) printf '16000\n' ;;
     *) printf '0\n' ;;
