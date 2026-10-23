@@ -65,7 +65,7 @@ clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I ebpf/headers \
   -c ebpf/network_monitor.c -o /opt/tapio/ebpf/network_monitor.o
 ```
 
-Use `-D__TARGET_ARCH_arm64` instead of `-D__TARGET_ARCH_x86` for arm64 nodes. All four `.o` files are required at runtime. The BPF/userspace boundary uses CO-RE (`preserve_access_index` + `bpf_core_read`) for kernel struct field access across versions; tracepoint argument structs rely on stable kernel ABI layouts.
+Use `-D__TARGET_ARCH_arm64` instead of `-D__TARGET_ARCH_x86` for arm64 nodes. All four `.o` files are required at runtime. The BPF/userspace boundary uses CO-RE (`preserve_access_index` + `bpf_core_read`) for kernel struct field access across versions. Tracepoint argument structs are hardcoded only where the layout is stable; where it changed between kernels (`block_rq_*`, `oom/mark_victim`) they are CO-RE too, and fields that older kernels lack are guarded with `bpf_core_field_exists`.
 
 Requires kernel 5.8+ (with BTF) and capabilities: `CAP_BPF`, `CAP_PERFMON`, `CAP_NET_ADMIN`. The agent runs as a privileged DaemonSet.
 

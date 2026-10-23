@@ -202,6 +202,17 @@ struct trace_event_raw_block_rq_completion {
 	__u32 cmd;                // __data_loc char[] cmd
 } __attribute__((preserve_access_index));
 
+// OOM victim tracepoint (oom/mark_victim, container observer)
+// CO-RE because the layout differs between kernels: older kernels carry only pid,
+// newer ones add RSS fields (in kB) after a __data_loc comm.
+struct trace_event_raw_mark_victim {
+	__u64 __unused;           // Common trace fields (skipped)
+	int pid;                  // Victim PID
+	unsigned long anon_rss;   // Anonymous RSS, kB
+	unsigned long file_rss;   // File RSS, kB
+	unsigned long shmem_rss;  // Shared memory RSS, kB
+} __attribute__((preserve_access_index));
+
 #pragma clang diagnostic pop
 
 #endif // __VMLINUX_MINIMAL_H__
