@@ -1,3 +1,7 @@
+use std::fs;
+use std::os::unix::fs::MetadataExt;
+use std::path::Path;
+
 use tapio_common::ebpf::*;
 use tapio_common::events::*;
 use tapio_common::occurrence::{Occurrence, Outcome, Severity};
@@ -50,12 +54,15 @@ pub fn classify(event: &ContainerEvent) -> Option<ClassifiedAnomaly> {
             severity: Severity::Critical,
             outcome: Outcome::Failure,
             error_code: "OOM_KILL",
-            error_message: format!(
-                "OOM kill pid={} (usage={}MB, limit={}MB)",
-                f.pid,
-                f.memory_usage / 1024 / 1024,
-                f.memory_limit / 1024 / 1024,
-            ),
+            error_message: if f.memory_usage == 0 {
+                format!("OOM kill pid={}", f.pid)
+            } else {
+                format!(
+                    "OOM kill pid={} (usage={}MB)",
+                    f.pid,
+                    f.memory_usage / 1024 / 1024
+                )
+            },
         }),
         CONTAINER_EVENT_EXIT => {
             if f.exit_code == 0 && f.signal == 0 {
@@ -88,10 +95,15 @@ pub fn build_occurrence(
 ) -> Occurrence {
     let f = EventFields::from(event);
     let memory_limit = if f.memory_limit == 0 {
-        // BPF tracepoint doesn't expose the cgroup memory limit.
-        // Resolve via /proc/<pid>/cgroup + cgroupfs. Cached by cgroup_id.
-        // Very fast OOM kills may still get 0 if the cgroup is deleted before we read.
-        enrich_memory_limit(f.cgroup_id, f.pid).unwrap_or(0)
+        // The kernel event carries no limit. 0 stays "unknown" unless cgroupfs
+        // still holds the cgroup the kernel stamped on the event.
+        cgroup_memory_limit(
+            Path::new("/proc"),
+            Path::new("/sys/fs/cgroup"),
+            f.pid,
+            f.cgroup_id,
+        )
+        .unwrap_or(0)
     } else {
         f.memory_limit
     };
@@ -117,103 +129,32 @@ pub fn build_occurrence(
     }))
 }
 
-use std::collections::HashMap;
-use std::sync::Mutex;
-
-static CGROUP_LIMIT_CACHE: std::sync::LazyLock<Mutex<HashMap<u64, u64>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Resolve cgroup memory limit. Uses a cache keyed by cgroup_id to avoid
-/// repeated filesystem walks on busy nodes.
-fn enrich_memory_limit(cgroup_id: u64, pid: u32) -> Option<u64> {
+/// `memory.max` of the cgroup v2 that `pid` is in, but only when that cgroup is the
+/// one the kernel stamped on the event: a cgroup directory's inode number is its id.
+/// A reaped or reused pid, or a removed cgroup, gives `None`, never another cgroup's
+/// limit. Not cached: an in-place resize changes `memory.max` under the same id.
+fn cgroup_memory_limit(
+    proc_root: &Path,
+    cgroup_root: &Path,
+    pid: u32,
+    cgroup_id: u64,
+) -> Option<u64> {
     if cgroup_id == 0 {
         return None;
     }
-
-    // Check cache first
-    if let Ok(cache) = CGROUP_LIMIT_CACHE.lock()
-        && let Some(&limit) = cache.get(&cgroup_id)
-    {
-        return Some(limit);
+    let membership = fs::read_to_string(proc_root.join(pid.to_string()).join("cgroup")).ok()?;
+    let path = membership
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))?;
+    let dir = cgroup_root.join(path.trim_start_matches('/'));
+    if fs::metadata(&dir).ok()?.ino() != cgroup_id {
+        return None;
     }
-
-    // Resolve cgroup path via /proc/<pid>/cgroup (fast, no tree walk)
-    let limit = resolve_via_proc(pid)
-        .or_else(|| resolve_via_proc(1)) // fallback: init's cgroup hierarchy
-        .unwrap_or(0);
-
-    // Cache the result (even 0, to avoid re-walking for deleted cgroups)
-    if let Ok(mut cache) = CGROUP_LIMIT_CACHE.lock() {
-        // Evict ~20% of entries when cache exceeds cap, avoiding thundering herd
-        if cache.len() > 10_000 {
-            let evict_count = cache.len() / 5;
-            let keys_to_evict: Vec<u64> = cache.keys().take(evict_count).copied().collect();
-            for k in keys_to_evict {
-                cache.remove(&k);
-            }
-        }
-        cache.insert(cgroup_id, limit);
+    let memory_max = fs::read_to_string(dir.join("memory.max")).ok()?;
+    match memory_max.trim() {
+        "max" => Some(u64::MAX),
+        bytes => bytes.parse().ok(),
     }
-
-    if limit > 0 { Some(limit) } else { None }
-}
-
-/// Read cgroup path from /proc/<pid>/cgroup and resolve memory limit from cgroupfs.
-fn resolve_via_proc(pid: u32) -> Option<u64> {
-    use std::fs;
-
-    let cgroup_file = format!("/proc/{pid}/cgroup");
-    let content = fs::read_to_string(&cgroup_file).ok()?;
-
-    for line in content.lines() {
-        // cgroups v2: "0::/kubepods/burstable/pod-xyz/container-abc"
-        // cgroups v1: "6:memory:/kubepods/burstable/pod-xyz/container-abc"
-        let parts: Vec<&str> = line.splitn(3, ':').collect();
-        if parts.len() < 3 {
-            continue;
-        }
-
-        let (hierarchy, controller, path) = (parts[0], parts[1], parts[2]);
-
-        // cgroups v2 unified
-        if hierarchy == "0" && controller.is_empty() && !path.is_empty() {
-            let mem_max = format!("/sys/fs/cgroup{path}/memory.max");
-            if let Some(limit) = read_limit_file(&mem_max) {
-                return Some(limit);
-            }
-        }
-
-        // cgroups v1 memory controller
-        if controller.contains("memory") && !path.is_empty() {
-            let limit_file = format!("/sys/fs/cgroup/memory{path}/memory.limit_in_bytes");
-            if let Some(limit) = read_limit_file(&limit_file) {
-                return Some(limit);
-            }
-        }
-    }
-
-    None
-}
-
-fn read_limit_file(path: &str) -> Option<u64> {
-    use std::fs;
-
-    let content = fs::read_to_string(path).ok()?;
-    let trimmed = content.trim();
-
-    // cgroups v2: "max" means no limit
-    if trimmed == "max" {
-        return Some(u64::MAX);
-    }
-
-    let val: u64 = trimmed.parse().ok()?;
-
-    // cgroups v1: very large value means no limit
-    if val >= (1_u64 << 62) {
-        return Some(u64::MAX);
-    }
-
-    Some(val)
 }
 
 #[cfg(target_os = "linux")]
@@ -347,6 +288,7 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn make_event(event_type: u32, exit_code: i32, signal: i32) -> ContainerEvent {
         let mut evt = unsafe { std::mem::zeroed::<ContainerEvent>() };
@@ -368,7 +310,122 @@ mod tests {
         let a = classify(&evt).expect("should classify OOM");
         assert_eq!(a.event_type, CONTAINER_OOM_KILL);
         assert!(matches!(a.severity, Severity::Critical));
-        assert!(a.error_message.contains("512MB"));
+        assert_eq!(a.error_message, "OOM kill pid=1234 (usage=512MB)");
+    }
+
+    #[test]
+    fn oom_message_omits_usage_the_kernel_did_not_report() {
+        let mut evt = make_event(CONTAINER_EVENT_OOM, 137, 9);
+        evt.memory_usage = 0;
+        let a = classify(&evt).expect("should classify OOM");
+        assert_eq!(a.error_message, "OOM kill pid=1234");
+    }
+
+    #[test]
+    fn oom_occurrence_reports_unknown_limit_and_cgroup_as_zero() {
+        let mut evt = make_event(CONTAINER_EVENT_OOM, 137, 9);
+        evt.memory_limit = 0;
+        evt.cgroup_id = 0;
+        let a = classify(&evt).expect("should classify OOM");
+        let data = build_occurrence(&evt, &a, 0).data.expect("occurrence data");
+        assert_eq!(data["memory_limit_bytes"], 0);
+        assert_eq!(data["cgroup_id"], 0);
+    }
+
+    struct FakeHost {
+        root: PathBuf,
+    }
+
+    impl FakeHost {
+        fn new(name: &str) -> Self {
+            let root =
+                std::env::temp_dir().join(format!("tapio-cgroup-{}-{name}", std::process::id()));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(root.join("proc")).expect("create proc root");
+            fs::create_dir_all(root.join("cgroup")).expect("create cgroup root");
+            Self { root }
+        }
+
+        fn proc_root(&self) -> PathBuf {
+            self.root.join("proc")
+        }
+
+        fn cgroup_root(&self) -> PathBuf {
+            self.root.join("cgroup")
+        }
+
+        fn cgroup(&self, path: &str, memory_max: &str) -> u64 {
+            let dir = self.cgroup_root().join(path);
+            fs::create_dir_all(&dir).expect("create cgroup dir");
+            fs::write(dir.join("memory.max"), format!("{memory_max}\n")).expect("write memory.max");
+            fs::metadata(&dir).expect("stat cgroup dir").ino()
+        }
+
+        fn process(&self, pid: u32, cgroup_path: &str) {
+            let dir = self.proc_root().join(pid.to_string());
+            fs::create_dir_all(&dir).expect("create proc pid dir");
+            fs::write(dir.join("cgroup"), format!("0::{cgroup_path}\n")).expect("write cgroup");
+        }
+
+        fn limit(&self, pid: u32, cgroup_id: u64) -> Option<u64> {
+            cgroup_memory_limit(&self.proc_root(), &self.cgroup_root(), pid, cgroup_id)
+        }
+    }
+
+    impl Drop for FakeHost {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn memory_limit_comes_from_the_events_own_cgroup() {
+        let host = FakeHost::new("own");
+        let id = host.cgroup("kubepods/pod-a/ctr", "268435456");
+        host.process(1234, "/kubepods/pod-a/ctr");
+        assert_eq!(host.limit(1234, id), Some(268_435_456));
+    }
+
+    #[test]
+    fn unlimited_cgroup_reports_max() {
+        let host = FakeHost::new("unlimited");
+        let id = host.cgroup("system.slice/a.service", "max");
+        host.process(1234, "/system.slice/a.service");
+        assert_eq!(host.limit(1234, id), Some(u64::MAX));
+    }
+
+    #[test]
+    fn memory_limit_is_unknown_once_the_process_is_reaped() {
+        let host = FakeHost::new("reaped");
+        let id = host.cgroup("kubepods/pod-a/ctr", "268435456");
+        host.cgroup("init.scope", "max");
+        host.process(1, "/init.scope");
+        assert_eq!(host.limit(1234, id), None);
+    }
+
+    #[test]
+    fn memory_limit_is_unknown_when_the_pid_now_sits_in_another_cgroup() {
+        let host = FakeHost::new("reused");
+        let id = host.cgroup("kubepods/pod-a/ctr", "268435456");
+        host.cgroup("kubepods/pod-b/ctr", "1073741824");
+        host.process(1234, "/kubepods/pod-b/ctr");
+        assert_eq!(host.limit(1234, id), None);
+    }
+
+    #[test]
+    fn memory_limit_is_unknown_when_the_cgroup_was_removed() {
+        let host = FakeHost::new("removed");
+        let id = host.cgroup("kubepods/pod-a/ctr", "268435456");
+        host.process(1234, "/kubepods/pod-a/ctr (deleted)");
+        assert_eq!(host.limit(1234, id), None);
+    }
+
+    #[test]
+    fn memory_limit_is_unknown_without_a_cgroup_id() {
+        let host = FakeHost::new("no-id");
+        host.cgroup("kubepods/pod-a/ctr", "268435456");
+        host.process(1234, "/kubepods/pod-a/ctr");
+        assert_eq!(host.limit(1234, 0), None);
     }
 
     #[test]

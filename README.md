@@ -100,23 +100,23 @@ Tapio emits occurrence JSON. Fields are factual: timestamp, anomaly type, severi
   "outcome": "failure",
   "error": {
     "code": "OOM_KILL",
-    "message": "OOM kill pid=1234 (usage=512MB, limit=0MB)"
+    "message": "OOM kill pid=1234 (usage=512MB)"
   },
   "data": {
     "pid": 1234,
-    "tid": 1234,
+    "tid": 0,
     "exit_code": 137,
     "signal": 9,
     "memory_usage_bytes": 536870912,
     "memory_limit_bytes": 0,
-    "cgroup_id": 8429,
+    "cgroup_id": 0,
     "config_generation": 1,
     "timestamp_ns": 1743691381042000000
   }
 }
 ```
 
-`memory_limit_bytes` can be `0` for OOM kills because the kernel tracepoint does not expose the cgroup limit. Cluster context belongs in `tapio-controller` or downstream systems, not in the node hot path.
+`memory_usage_bytes` is the victim's RSS as the kernel reported it at the kill; it is `0` on kernels whose `oom/mark_victim` tracepoint carries no RSS fields. `memory_limit_bytes`, `cgroup_id` and `tid` are `0` (unknown) for OOM kills: the tracepoint names neither the victim's cgroup nor its limit. For abnormal exits, `memory_limit_bytes` is read from cgroupfs only while the process's cgroup is still the one the kernel stamped on the event, and is `0` otherwise. Tapio never substitutes another cgroup's limit. Cluster context belongs in `tapio-controller` or downstream systems, not in the node hot path.
 
 `config_generation` records which runtime config judged the event, so fleet config convergence is observable in the event stream itself.
 
