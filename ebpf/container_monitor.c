@@ -48,25 +48,8 @@ struct {
 // We capture memory info HERE because cgroup will be deleted shortly
 // ═══════════════════════════════════════════════════════════
 
-/* Tracepoint argument structs: hardcoded layout is intentional.
- * Tracepoint ABIs are stable across kernel versions (unlike internal structs).
- * CO-RE is used for task_struct field access where offsets vary. */
-
-// Tracepoint context for oom/mark_victim
-// Format: cat /sys/kernel/debug/tracing/events/oom/mark_victim/format
-struct trace_event_raw_mark_victim {
-	__u64 __unused;           // Common tracepoint header
-	int pid;                  // Victim PID
-	unsigned int uid;         // Victim UID
-	unsigned int gid;         // Victim GID
-	unsigned long total_vm;   // Total VM pages
-	unsigned long anon_rss;   // Anonymous RSS pages
-	unsigned long file_rss;   // File RSS pages
-	unsigned long shmem_rss;  // Shared memory RSS pages
-	int oom_score_adj;        // OOM score adjustment
-	long points;              // OOM badness points
-	char comm[16];            // Process name
-};
+// Tracepoint context: struct trace_event_raw_mark_victim, CO-RE (headers/vmlinux_minimal.h)
+// Format: cat /sys/kernel/tracing/events/oom/mark_victim/format
 
 SEC("tracepoint/oom/mark_victim")
 int handle_oom(struct trace_event_raw_mark_victim *ctx) {
@@ -90,7 +73,6 @@ int handle_oom(struct trace_event_raw_mark_victim *ctx) {
 
 	// ctx->pid is the VICTIM's PID (from tracepoint args).
 	// bpf_get_current_pid_tgid() returns the OOM KILLER's context, not the victim's.
-	// We emit the victim PID; userspace enriches via /proc/<pid>/cgroup.
 	evt->pid = ctx->pid;
 	evt->tid = 0;  // victim TID not available from this tracepoint
 
@@ -98,17 +80,19 @@ int handle_oom(struct trace_event_raw_mark_victim *ctx) {
 	evt->exit_code = 137;
 	evt->signal = 9;  // SIGKILL
 
-	// Calculate memory usage from RSS pages (page size = 4096)
-	// anon_rss + file_rss + shmem_rss = total RSS
-	evt->memory_usage = (((__u64)ctx->anon_rss + (__u64)ctx->file_rss +
-	                      (__u64)ctx->shmem_rss) * 4096);
+	// Victim RSS: anon_rss + file_rss + shmem_rss, reported by the kernel in kB.
+	// Kernels whose tracepoint lacks these fields leave memory_usage at 0 (unknown).
+	if (bpf_core_field_exists(ctx->anon_rss)) {
+		evt->memory_usage = ((__u64)ctx->anon_rss + (__u64)ctx->file_rss +
+		                     (__u64)ctx->shmem_rss) * 1024;
+	}
 
-	// Memory limit: not directly available in tracepoint
-	// Will be enriched by userspace from cgroupfs (if still available)
+	// Memory limit: not available in the tracepoint, stays 0 (unknown)
 	evt->memory_limit = 0;
 
 	// cgroup_id from bpf_get_current_cgroup_id() is the OOM KILLER's cgroup,
-	// not the victim's. Set to 0 so userspace knows to enrich via victim PID instead.
+	// not the victim's, and the tracepoint does not name the victim's cgroup.
+	// Set to 0 (unknown); userspace never derives a limit without a cgroup id.
 	evt->cgroup_id = 0;
 
 	bpf_ringbuf_submit(evt, 0);
