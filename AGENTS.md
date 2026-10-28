@@ -54,3 +54,10 @@ or Node (JavaScript/TypeScript): not for tools, scripts, CI helpers, tests,
 dashboards or glue. A thin shell step in a CI workflow is fine; anything with
 logic is Rust. Existing Python or Node files are debt to be rewritten, not
 precedent to follow.
+
+## Lessons
+
+<!-- This repository's accepted knowledge: one line per node, each marked with its id, written here through a pull request when a person accepts one. A line changed here by hand is replaced the next time it is written: change a lesson where it is decided. -->
+
+- <!-- lesson: tapio-ebpf-sizes-and-target-dir --> **fact**: In tapio, the size of an eBPF object depends on the checkout path, so compare object sizes against a budget only from the same path. verify-lean.sh ignores CARGO_TARGET_DIR, so a private target dir does not isolate it. (as of 2026-10-27)
+- <!-- lesson: tapio-kernel-structs-via-co-re --> **lesson**: In tapio's eBPF programs, read kernel struct fields through CO-RE, never at fixed offsets. mark_victim's anon_rss was read at offset 32 instead of 24, and in the wrong unit. OOM events carry cgroup_id 0, so do not key a fallback on it. (as of 2026-10-27)
